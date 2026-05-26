@@ -42,6 +42,12 @@ docker compose up -d --build
 
 Compose 文件使用 host network，不配置 100-300 个 Docker `ports:` 映射。
 
+默认镜像由 GitHub Actions 自动发布到 GHCR：
+
+```text
+ghcr.io/nekroai/mihomo-hive:latest
+```
+
 ## 非目标
 
 首版不实现账号调度、自动换节点、随机负载均衡或平台风控规避策略。

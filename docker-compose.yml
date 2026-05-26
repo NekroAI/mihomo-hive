@@ -1,8 +1,6 @@
 services:
   mihomo-hive:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/nekroai/mihomo-hive:latest
     container_name: mihomo-hive
     restart: unless-stopped
     network_mode: host
@@ -10,10 +8,10 @@ services:
       HIVE_HOST: "127.0.0.1"
       HIVE_PORT: "8787"
       HIVE_DATA_DIR: "/data"
+      HIVE_GENERATED_DIR: "/data/generated"
       HIVE_CONFIG: "/data/hive.config.json"
-      MIHOMO_BIN: "mihomo"
+      MIHOMO_BIN: "/usr/local/bin/mihomo"
     volumes:
       - ./runtime:/data
-      - ./generated:/app/generated
     # Host networking is intentional: Mihomo listens directly on
     # 127.0.0.1:10001-10300 without Docker bridge/NAT port mappings.
