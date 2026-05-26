@@ -11,7 +11,7 @@ import {
 import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
 import type { HiveRepository } from "@mihomo-hive/db";
-import type { RuntimeConfig } from "@mihomo-hive/schemas";
+import type { RuntimeConfig, SubscriptionSource } from "@mihomo-hive/schemas";
 
 export interface RouterContext {
   config: RuntimeConfig;
@@ -26,7 +26,7 @@ export const appRouter = t.router({
     status: t.procedure.query(async ({ ctx }) => readMihomoStatus(ctx.config))
   }),
   subscriptions: t.router({
-    list: t.procedure.query(({ ctx }) => ctx.repo.listSubscriptions()),
+    list: t.procedure.query(({ ctx }) => ctx.repo.listSubscriptions().map(summarizeSubscription)),
     fetch: t.procedure.mutation(async ({ ctx }) => {
       const results = [];
       for (const source of ctx.repo.listSubscriptions().filter((item) => item.enabled)) {
@@ -82,3 +82,23 @@ export const appRouter = t.router({
 });
 
 export type AppRouter = typeof appRouter;
+
+function summarizeSubscription(source: SubscriptionSource) {
+  const { lastContent, ...safeSource } = source;
+  return {
+    ...safeSource,
+    value: source.kind === "url" ? redactUrl(source.value) : source.value,
+    fetched: Boolean(lastContent),
+    ...(lastContent ? { lastContentBytes: lastContent.length } : {})
+  };
+}
+
+function redactUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.search = url.search ? "?..." : "";
+    return url.toString();
+  } catch {
+    return "<redacted>";
+  }
+}

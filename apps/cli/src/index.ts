@@ -18,6 +18,7 @@ import { openSqlite, HiveRepository } from "@mihomo-hive/db";
 import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
 import { defaultRuntimeConfig, parseRuntimeConfig } from "@mihomo-hive/schemas";
+import type { SubscriptionSource } from "@mihomo-hive/schemas";
 
 const program = new Command();
 
@@ -78,7 +79,7 @@ sub
   .description("List subscriptions")
   .action(async () => {
     const { repo } = await openRepo();
-    console.log(JSON.stringify(repo.listSubscriptions(), null, 2));
+    console.log(JSON.stringify(repo.listSubscriptions().map(summarizeSubscription), null, 2));
   });
 
 sub
@@ -214,4 +215,14 @@ function redactUrl(value: string): string {
   } catch {
     return "<redacted>";
   }
+}
+
+function summarizeSubscription(source: SubscriptionSource) {
+  const { lastContent, ...safeSource } = source;
+  return {
+    ...safeSource,
+    value: source.kind === "url" ? redactUrl(source.value) : source.value,
+    fetched: Boolean(lastContent),
+    ...(lastContent ? { lastContentBytes: lastContent.length } : {})
+  };
 }
