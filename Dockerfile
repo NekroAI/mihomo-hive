@@ -27,7 +27,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
   case "${TARGETOS:-linux}-${TARGETARCH:-amd64}" in \
-    linux-amd64) mihomo_asset="mihomo-linux-amd64-v${MIHOMO_VERSION}.gz" ;; \
+    linux-amd64) mihomo_asset="mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz" ;; \
     linux-arm64) mihomo_asset="mihomo-linux-arm64-v${MIHOMO_VERSION}.gz" ;; \
     *) echo "Unsupported target: ${TARGETOS}-${TARGETARCH}" >&2; exit 1 ;; \
   esac; \
