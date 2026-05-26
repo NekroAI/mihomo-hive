@@ -121,9 +121,21 @@ function summarizeError(error: unknown): string {
   if (!(error instanceof Error)) {
     return "unknown_error";
   }
-  const firstLine = error.message.split(/\r?\n/)[0] ?? error.message;
-  if (/timed out|timeout/i.test(firstLine)) {
+  const detail = error as Error & {
+    code?: string | number;
+    killed?: boolean;
+    signal?: string;
+    stderr?: string;
+  };
+  if (detail.killed || detail.signal === "SIGTERM" || /timed out|timeout/i.test(error.message)) {
     return "timeout";
   }
-  return firstLine.replace(/^Command failed:\s*/i, "").slice(0, 160);
+  const stderrLine = detail.stderr?.split(/\r?\n/).find(Boolean);
+  if (stderrLine) {
+    return stderrLine.replace(/^curl:\s*/i, "curl_").slice(0, 160);
+  }
+  if (detail.code !== undefined) {
+    return `exit_${detail.code}`;
+  }
+  return "curl_failed";
 }
