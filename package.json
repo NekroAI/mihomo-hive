@@ -1,0 +1,37 @@
+{
+  "name": "mihomo-hive",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=20.20.0"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "dev:server": "pnpm --filter @mihomo-hive/server dev",
+    "dev:web": "pnpm --filter @mihomo-hive/web dev",
+    "hive": "pnpm --filter @mihomo-hive/cli hive",
+    "test": "pnpm -r test",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.21",
+    "@typescript-eslint/eslint-plugin": "^8.32.1",
+    "@typescript-eslint/parser": "^8.32.1",
+    "eslint": "^9.27.0",
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

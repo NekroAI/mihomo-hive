@@ -1,0 +1,24 @@
+{
+  "name": "@mihomo-hive/db",
+  "version": "0.1.0",
+  "type": "module",
+  "module": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@mihomo-hive/schemas": "workspace:*",
+    "better-sqlite3": "^11.10.0",
+    "drizzle-orm": "^0.43.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

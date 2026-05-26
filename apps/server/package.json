@@ -1,0 +1,29 @@
+{
+  "name": "@mihomo-hive/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run --passWithNoTests --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.2",
+    "@mihomo-hive/core": "workspace:*",
+    "@mihomo-hive/db": "workspace:*",
+    "@mihomo-hive/exporters": "workspace:*",
+    "@mihomo-hive/mihomo": "workspace:*",
+    "@mihomo-hive/schemas": "workspace:*",
+    "@trpc/server": "^11.1.4",
+    "hono": "^4.7.10",
+    "zod": "^3.25.20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

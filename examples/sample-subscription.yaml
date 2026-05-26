@@ -1,0 +1,13 @@
+proxies:
+  - name: JP-1
+    type: ss
+    server: jp.example.com
+    port: 443
+    cipher: aes-128-gcm
+    password: example-password
+  - name: US-1
+    type: trojan
+    server: us.example.com
+    port: 443
+    password: example-password
+    sni: us.example.com

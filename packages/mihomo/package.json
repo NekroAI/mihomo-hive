@@ -1,0 +1,21 @@
+{
+  "name": "@mihomo-hive/mihomo",
+  "version": "0.1.0",
+  "type": "module",
+  "module": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests --config ../../vitest.config.ts"
+  },
+  "dependencies": {
+    "@mihomo-hive/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}
