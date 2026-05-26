@@ -41,7 +41,7 @@ const staticRoot = resolve("apps/web/dist");
 app.use("/*", serveStatic({ root: staticRoot }));
 
 const host = process.env.HIVE_HOST ?? "127.0.0.1";
-const port = Number(process.env.HIVE_PORT ?? 8787);
+const port = Number(process.env.HIVE_PORT ?? 9990);
 
 serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`Mihomo Hive listening on http://${info.address}:${info.port}`);

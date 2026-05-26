@@ -8,9 +8,34 @@
 docker compose up -d
 ```
 
-服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。
+服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。Web UI 默认地址：
 
-## 订阅导入
+```text
+http://127.0.0.1:9990
+```
+
+可以通过 `HIVE_PORT` 修改 Web UI 端口。
+
+## Web UI 流程
+
+控制台左侧是操作流水线，按顺序执行：
+
+1. 添加订阅 URL。
+2. 拉取订阅。
+3. 导入节点。
+4. 设置端口段并分配端口。
+5. 生成 Mihomo 配置。
+6. 启动或 reload Mihomo。
+7. 测试 OpenAI / Claude 连通性。
+8. 写出 Sub2API JSON。
+
+中间表格展示节点、端口、状态和最近测试结果；右侧展示运行配置和 Sub2API 导出预览。
+
+## CLI 自动化
+
+CLI 与 Web UI 使用同一套数据库和核心逻辑，适合脚本化任务和排障。
+
+订阅导入：
 
 ```bash
 hive sub add --name demo --url "https://example.com/sub"
@@ -20,7 +45,7 @@ hive nodes import
 
 `sub list` 只展示订阅摘要，不输出订阅正文。
 
-## 端口分配与配置生成
+端口分配与配置生成：
 
 ```bash
 hive ports assign --range 10001-10300
@@ -30,7 +55,7 @@ hive mihomo start
 
 端口分配基于节点 hash 尽量保持稳定。订阅更新后，同一个节点会优先复用原端口。
 
-## 节点连通性测试
+节点连通性测试：
 
 ```bash
 hive nodes test --targets openai,claude --timeout-ms 15000 --concurrency 8
@@ -49,7 +74,7 @@ hive mihomo render
 hive mihomo reload
 ```
 
-## Sub2API 导出
+Sub2API 导出：
 
 ```bash
 hive export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.json

@@ -1,4 +1,7 @@
 import { initTRPC } from "@trpc/server";
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { z } from "zod";
 import {
   assignStablePorts,
@@ -6,7 +9,10 @@ import {
   findOccupiedPorts,
   parsePortRange,
   parseSubscription,
-  renderMihomoConfig
+  renderMihomoConfig,
+  mapWithConcurrency,
+  resolveProxyTestTargets,
+  testProxyTarget
 } from "@mihomo-hive/core";
 import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
@@ -27,6 +33,23 @@ export const appRouter = t.router({
   }),
   subscriptions: t.router({
     list: t.procedure.query(({ ctx }) => ctx.repo.listSubscriptions().map(summarizeSubscription)),
+    add: t.procedure
+      .input(
+        z.object({
+          name: z.string().min(1),
+          url: z.string().url()
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        summarizeSubscription(
+          ctx.repo.addSubscription({
+            id: randomUUID(),
+            name: input.name,
+            kind: "url",
+            value: input.url
+          })
+        )
+      ),
     fetch: t.procedure.mutation(async ({ ctx }) => {
       const results = [];
       for (const source of ctx.repo.listSubscriptions().filter((item) => item.enabled)) {
@@ -66,10 +89,57 @@ export const appRouter = t.router({
         });
         ctx.repo.saveNodes(nodes);
         return { assigned: nodes.filter((node) => node.assignedPort).length, occupied: occupied.size };
+      }),
+    test: t.procedure
+      .input(
+        z.object({
+          targets: z.array(z.string()).default(["openai", "claude"]),
+          host: z.string().optional(),
+          timeoutMs: z.number().int().positive().default(15_000),
+          concurrency: z.number().int().positive().max(32).default(8)
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const targets = resolveProxyTestTargets(input.targets);
+        const host = input.host ?? ctx.config.listenHost;
+        const candidates = ctx.repo.listNodes().filter((node) => node.assignedPort);
+        const tested = await mapWithConcurrency(candidates, input.concurrency, async (node) => {
+          const results = [];
+          for (const target of targets) {
+            results.push(
+              await testProxyTarget({
+                host,
+                port: Number(node.assignedPort),
+                target,
+                timeoutMs: input.timeoutMs
+              })
+            );
+          }
+          const passed = results.every((result) => result.ok);
+          return {
+            ...node,
+            status: passed ? ("active" as const) : ("failed" as const),
+            lastTestStatus: results
+              .map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`)
+              .join(","),
+            lastTestLatencyMs: Math.max(...results.map((result) => result.latencyMs))
+          };
+        });
+        ctx.repo.saveNodes(tested);
+        return {
+          tested: tested.length,
+          passed: tested.filter((node) => node.status === "active").length,
+          failed: tested.filter((node) => node.status === "failed").length
+        };
       })
   }),
   mihomo: t.router({
-    render: t.procedure.mutation(({ ctx }) => renderMihomoConfig(ctx.repo.listNodes(), ctx.config)),
+    render: t.procedure.mutation(async ({ ctx }) => {
+      const rendered = renderMihomoConfig(ctx.repo.listNodes(), ctx.config);
+      await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
+      await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
+      return { listeners: rendered.egressMap.length };
+    }),
     start: t.procedure.mutation(({ ctx }) => startMihomo(ctx.config)),
     stop: t.procedure.mutation(({ ctx }) => stopMihomo(ctx.config)),
     reload: t.procedure.mutation(({ ctx }) => reloadMihomo(ctx.config))
@@ -77,7 +147,15 @@ export const appRouter = t.router({
   exports: t.router({
     sub2api: t.procedure
       .input(z.object({ host: z.string().optional() }).optional())
-      .query(({ ctx, input }) => exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost }))
+      .query(({ ctx, input }) => exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost })),
+    writeSub2api: t.procedure
+      .input(z.object({ host: z.string().optional(), output: z.string().optional() }).optional())
+      .mutation(async ({ ctx, input }) => {
+        const payload = exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost });
+        const output = input?.output ?? `${ctx.config.generatedDir}/sub2api-proxies.json`;
+        await writeGenerated(output, `${JSON.stringify(payload, null, 2)}\n`);
+        return { output, proxies: payload.proxies.length };
+      })
   })
 });
 
@@ -101,4 +179,9 @@ function redactUrl(value: string): string {
   } catch {
     return "<redacted>";
   }
+}
+
+async function writeGenerated(path: string, content: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, content);
 }
