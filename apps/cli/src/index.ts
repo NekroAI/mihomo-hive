@@ -8,10 +8,13 @@ import {
   enumeratePorts,
   findOccupiedPorts,
   loadRuntimeConfig,
+  mapWithConcurrency,
   parsePortRange,
   parseSubscription,
   renderMihomoConfig,
+  resolveProxyTestTargets,
   resolveConfigPath,
+  testProxyTarget,
   writeRuntimeConfig
 } from "@mihomo-hive/core";
 import { openSqlite, HiveRepository } from "@mihomo-hive/db";
@@ -131,6 +134,52 @@ nodes
     }
   });
 
+nodes
+  .command("test")
+  .description("Test assigned local listener ports and update node status")
+  .option("--targets <targets>", "Comma-separated test targets: ip,openai,claude", "openai,claude")
+  .option("--host <host>", "Listener host to test")
+  .option("--timeout-ms <ms>", "Per-target timeout", parseIntegerOption, 15_000)
+  .option("--concurrency <n>", "Parallel node tests", parseIntegerOption, 8)
+  .action(async (options) => {
+    const { config, repo } = await openRepo();
+    const targets = resolveProxyTestTargets(
+      String(options.targets)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+    const host = options.host ?? config.listenHost;
+    const candidates = repo.listNodes().filter((node) => node.assignedPort);
+    const tested = await mapWithConcurrency(candidates, options.concurrency, async (node) => {
+      const results = [];
+      for (const target of targets) {
+        results.push(
+          await testProxyTarget({
+            host,
+            port: Number(node.assignedPort),
+            target,
+            timeoutMs: options.timeoutMs
+          })
+        );
+      }
+      const passed = results.every((result) => result.ok);
+      const statusText = results
+        .map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`)
+        .join(",");
+      const latencyMs = Math.max(...results.map((result) => result.latencyMs));
+      console.log(`${node.assignedPort}\t${passed ? "pass" : "fail"}\t${statusText}\t${node.name}`);
+      return {
+        ...node,
+        status: passed ? ("active" as const) : ("failed" as const),
+        lastTestStatus: statusText,
+        lastTestLatencyMs: latencyMs
+      };
+    });
+    repo.saveNodes(tested);
+    console.log(`Tested ${tested.length} nodes; passed: ${tested.filter((node) => node.status === "active").length}`);
+  });
+
 const ports = program.command("ports").description("Manage local egress ports");
 
 ports
@@ -225,4 +274,12 @@ function summarizeSubscription(source: SubscriptionSource) {
     fetched: Boolean(lastContent),
     ...(lastContent ? { lastContentBytes: lastContent.length } : {})
   };
+}
+
+function parseIntegerOption(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid positive integer: ${value}`);
+  }
+  return parsed;
 }
