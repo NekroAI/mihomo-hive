@@ -1,5 +1,15 @@
-# ADR 0002：nexus-star 使用 Docker Host Network
+# ADR 0002：容器使用 Host Network 部署模式
 
-首个生产目标使用 Docker `network_mode: host`。
+## 背景
 
-项目预计需要 100-300 个本地代理端口。Host network 可以避免 Docker bridge NAT 和大量 `ports:` 映射，同时默认让 Mihomo 绑定在 `127.0.0.1`。
+Mihomo Hive 会在宿主机上提供多个本地代理入口，并将这些入口交给同机或内网中的上游系统使用。
+
+## 决策
+
+容器部署默认采用 Docker `network_mode: host`。Mihomo 直接监听宿主机本地地址，导出的代理地址也可以保持为稳定的 host 与 port。
+
+## 影响
+
+- 端口状态与宿主机网络状态一致，便于排查。
+- 上游系统可以直接访问导出的本地代理入口。
+- 运行时仍通过挂载目录保存配置、数据库和导出文件。

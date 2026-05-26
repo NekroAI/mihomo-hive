@@ -1,26 +1,38 @@
 # 架构
 
-Mihomo Hive 将订阅节点转换为稳定的本地代理出口。
+Mihomo Hive 将代理订阅转换为稳定、可测试、可导出的本地出口池。
 
 ```text
-subscriptions
-  -> parser/importer
-  -> filter profiles
-  -> port allocator
-  -> generated/mihomo.yaml
-  -> single Mihomo process with many mixed listeners
+订阅源
+  -> 解析与标准化
+  -> 节点过滤
+  -> 稳定端口分配
+  -> Mihomo 配置生成
+  -> 本地 mixed listeners
   -> Sub2API 兼容导出
 ```
 
-首个部署目标是 `nexus-star`，Sub2API 也在同一台主机上运行，使用 `127.0.0.1` 访问导出的代理端口。应用使用 Docker host network，不配置 Docker `ports:` 映射，因为 Mihomo 会直接绑定宿主机 loopback 地址。
-
 ## 运行模型
 
-- 一个 Node.js 服务提供 API，并托管构建后的 UI。
-- 一个 Mihomo 进程由 Node 服务或 CLI 控制。
-- SQLite WAL 存储订阅、节点、端口分配和测试结果。
-- 生成物写入 `generated/`。
+- Node.js 服务提供 HTTP API，并托管构建后的 Web UI。
+- CLI 与服务共用同一套核心模块和数据库模型。
+- SQLite WAL 存储订阅源、节点、端口分配、测试结果和运行状态。
+- Mihomo 负责监听本地端口并把每个入口固定到指定节点。
+- 生成物默认写入 `generated/` 或容器中的 `/data/generated/`。
 
-## 固定出口不变量
+## 固定出口模型
 
-每个 active 节点获得一个稳定本地端口。节点不可用时只更新状态，不自动迁移账号或端口绑定。
+每个 active 节点获得一个稳定本地端口。订阅更新后，系统会基于节点 hash 复用已有端口，从而让上游系统可以长期绑定同一个出口。
+
+节点测试失败时会更新状态；重新生成配置后，导出文件仍保留端口与状态信息，方便外部系统做渐进迁移或人工处理。
+
+## 模块划分
+
+- `packages/schemas`：Zod schema 和共享类型。
+- `packages/core`：订阅解析、过滤、端口分配、配置渲染、节点测试。
+- `packages/db`：SQLite 仓储层。
+- `packages/mihomo`：Mihomo 进程控制。
+- `packages/exporters`：Sub2API 等导出格式。
+- `apps/cli`：命令行工具。
+- `apps/server`：Hono API、tRPC 路由、静态 UI 托管。
+- `apps/web`：React Web UI。

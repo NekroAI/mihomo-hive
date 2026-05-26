@@ -24,6 +24,4 @@ ghcr.io/nekroai/mihomo-hive:latest
 
 ## 运行时约定
 
-容器启动时会通过 `scripts/container-entrypoint.sh` 首次生成 `/data/hive.config.json`。生产部署应挂载 `./runtime:/data`，订阅 URL、数据库、Mihomo 配置和导出文件都留在运行目录，不进入镜像或仓库。
-
-Compose 使用 `network_mode: host`，不要添加 100-300 个 Docker `ports:` 映射。
+容器启动时会通过 `scripts/container-entrypoint.sh` 首次生成 `/data/hive.config.json`。容器镜像不包含运行时数据；订阅 URL、数据库、Mihomo 配置和导出文件应保存在外部挂载的数据目录中。

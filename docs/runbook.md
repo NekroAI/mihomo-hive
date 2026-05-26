@@ -1,39 +1,68 @@
 # 运维手册
 
-## 本地开发
+本文档记录 Mihomo Hive 的常用运行流程。公开部署建议直接使用预构建镜像，并将运行数据挂载到独立目录。
+
+## 启动服务
+
+```bash
+docker compose up -d
+```
+
+服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。
+
+## 订阅导入
+
+```bash
+hive sub add --name demo --url "https://example.com/sub"
+hive sub fetch
+hive nodes import
+```
+
+`sub list` 只展示订阅摘要，不输出订阅正文。
+
+## 端口分配与配置生成
+
+```bash
+hive ports assign --range 10001-10300
+hive mihomo render
+hive mihomo start
+```
+
+端口分配基于节点 hash 尽量保持稳定。订阅更新后，同一个节点会优先复用原端口。
+
+## 节点连通性测试
+
+```bash
+hive nodes test --targets openai,claude --timeout-ms 15000 --concurrency 8
+```
+
+内置测试目标：
+
+- `ip`：访问 `https://api.ipify.org`，期望 HTTP 200。
+- `openai`：访问 `https://api.openai.com/v1/models`，无 token 时期望 HTTP 401。
+- `claude`：访问 `https://api.anthropic.com/v1/messages`，GET 请求期望 HTTP 405。
+
+测试通过的节点保持 `active`，失败节点标记为 `failed`。测试完成后重新渲染并热加载配置：
+
+```bash
+hive mihomo render
+hive mihomo reload
+```
+
+## Sub2API 导出
+
+```bash
+hive export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.json
+```
+
+导出文件会保留已分配端口，并通过 `active` / `inactive` 表示当前状态，便于上游系统继续维护稳定绑定关系。
+
+## 开发模式
 
 ```bash
 pnpm install
 pnpm check
-pnpm --filter @mihomo-hive/cli hive init
+pnpm test
+pnpm build
 pnpm --filter @mihomo-hive/server dev
-```
-
-## nexus-star 部署
-
-```bash
-docker compose up -d --build
-```
-
-Compose 文件使用 `network_mode: host`。不要添加 100-300 个 Docker 端口映射。
-
-Sub2API 与 Mihomo Hive 同机部署时，导出 host 保持 `127.0.0.1` 即可。
-
-使用 GHCR 镜像部署时：
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-## 典型流程
-
-```bash
-hive init
-hive sub add --url "https://example.com/sub"
-hive sub fetch
-hive nodes import
-hive ports assign --range 10001-10300
-hive mihomo render
-hive export sub2api --host 127.0.0.1 --output generated/sub2api-proxies.json
 ```
