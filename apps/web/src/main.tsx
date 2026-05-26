@@ -34,15 +34,28 @@ const trpcClient = trpc.createClient({
 
 function App() {
   const utils = trpc.useUtils();
-  const config = trpc.runtime.config.useQuery();
-  const subscriptions = trpc.subscriptions.list.useQuery();
-  const status = trpc.runtime.status.useQuery(undefined, { refetchInterval: 5000 });
-  const nodes = trpc.nodes.list.useQuery();
-  const exportData = trpc.exports.sub2api.useQuery(undefined, { enabled: Boolean(nodes.data) });
+  const [authStatus, setAuthStatus] = React.useState<AuthStatus | undefined>();
+  const [authPassword, setAuthPassword] = React.useState("");
+  const [authConfirm, setAuthConfirm] = React.useState("");
+  const [authMessage, setAuthMessage] = React.useState("");
+  const authenticated = Boolean(authStatus?.authenticated);
+  const config = trpc.runtime.config.useQuery(undefined, { enabled: authenticated });
+  const subscriptions = trpc.subscriptions.list.useQuery(undefined, { enabled: authenticated });
+  const status = trpc.runtime.status.useQuery(undefined, { enabled: authenticated, refetchInterval: 5000 });
+  const nodes = trpc.nodes.list.useQuery(undefined, { enabled: authenticated });
+  const exportData = trpc.exports.sub2api.useQuery(undefined, { enabled: authenticated && Boolean(nodes.data) });
   const [subscriptionName, setSubscriptionName] = React.useState("");
   const [subscriptionUrl, setSubscriptionUrl] = React.useState("");
   const [portRange, setPortRange] = React.useState("10001-10300");
   const [message, setMessage] = React.useState("就绪");
+
+  const refreshAuth = React.useCallback(async () => {
+    setAuthStatus(await fetchAuthStatus());
+  }, []);
+
+  React.useEffect(() => {
+    void refreshAuth();
+  }, [refreshAuth]);
 
   React.useEffect(() => {
     if (config.data) {
@@ -58,6 +71,41 @@ function App() {
       utils.exports.sub2api.invalidate()
     ]);
   }, [utils]);
+
+  async function submitAuth() {
+    if (!authStatus) {
+      return;
+    }
+    if (!authStatus.configured && authPassword !== authConfirm) {
+      setAuthMessage("两次密码不一致");
+      return;
+    }
+    const endpoint = authStatus.configured ? "/api/auth/login" : "/api/auth/setup";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ password: authPassword })
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      setAuthMessage(body.error ?? "认证失败");
+      return;
+    }
+    setAuthPassword("");
+    setAuthConfirm("");
+    setAuthMessage("");
+    await refreshAuth();
+    await refreshAll();
+  }
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    setMessage("已登出");
+    await refreshAuth();
+    queryClient.clear();
+  }
+
 
   const addSubscription = trpc.subscriptions.add.useMutation({
     onSuccess: async () => {
@@ -150,6 +198,32 @@ function App() {
   const failed = allNodes.filter((node) => node.status === "failed").length;
   const activeExports = exportData.data?.proxies.filter((proxy) => proxy.status === "active").length ?? 0;
 
+
+  if (!authStatus) {
+    return <AuthShell title="Mihomo Hive" subtitle="正在检查访问状态" />;
+  }
+
+  if (!authStatus.authenticated) {
+    return (
+      <AuthShell
+        title={authStatus.configured ? "登录 Mihomo Hive" : "设置访问密码"}
+        subtitle={authStatus.configured ? "输入访问密码继续管理代理池。" : "首次访问需要创建一个访问密码。"}
+      >
+        <div className="space-y-3">
+          <PasswordInput label="密码" value={authPassword} onChange={setAuthPassword} />
+          {!authStatus.configured ? <PasswordInput label="确认密码" value={authConfirm} onChange={setAuthConfirm} /> : null}
+          <Button
+            icon={<ShieldCheck size={16} />}
+            label={authStatus.configured ? "登录" : "设置并进入"}
+            disabled={!authPassword || (!authStatus.configured && !authConfirm)}
+            onClick={submitAuth}
+          />
+          {authMessage ? <div className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700">{authMessage}</div> : null}
+        </div>
+      </AuthShell>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-panel">
@@ -161,6 +235,9 @@ function App() {
           <div className="flex items-center gap-2">
             <StatusPill label={status.data?.running ? "运行中" : "未运行"} tone={status.data?.running ? "ok" : "idle"} />
             <IconLink href="/api/exports/sub2api" label="下载导出" icon={<Download size={16} />} />
+            <button className="h-10 rounded-md border border-border px-3 text-sm font-medium text-slate-700" type="button" onClick={logout}>
+              登出
+            </button>
           </div>
         </div>
       </header>
@@ -300,6 +377,33 @@ function App() {
   );
 }
 
+interface AuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+}
+
+async function fetchAuthStatus(): Promise<AuthStatus> {
+  const response = await fetch("/api/auth/status", { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error("Failed to load auth status");
+  }
+  return (await response.json()) as AuthStatus;
+}
+
+function AuthShell(props: { title: string; subtitle: string; children?: React.ReactNode }) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
+      <section className="w-full max-w-sm rounded-lg border border-border bg-panel p-6 shadow-sm">
+        <div className="mb-5">
+          <h1 className="text-xl font-semibold">{props.title}</h1>
+          <p className="mt-1 text-sm text-slate-600">{props.subtitle}</p>
+        </div>
+        {props.children}
+      </section>
+    </main>
+  );
+}
+
 function Stat(props: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-lg border border-border bg-panel p-4">
@@ -342,6 +446,20 @@ function Input(props: {
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
         placeholder={props.placeholder}
+      />
+    </label>
+  );
+}
+
+function PasswordInput(props: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-slate-600">{props.label}</span>
+      <input
+        className="h-10 w-full rounded-md border border-border bg-white px-3 text-sm outline-none focus:border-accent"
+        value={props.value}
+        onChange={(event) => props.onChange(event.target.value)}
+        type="password"
       />
     </label>
   );

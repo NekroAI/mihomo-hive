@@ -8,13 +8,29 @@
 docker compose up -d
 ```
 
-服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。Web UI 默认地址：
+服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。Web UI 默认监听端口是 `9990`：
 
 ```text
 http://127.0.0.1:9990
 ```
 
-可以通过 `HIVE_PORT` 修改 Web UI 端口。
+`HIVE_HOST` 控制 Web UI/API 监听地址，默认是 `0.0.0.0`；`HIVE_PORT` 控制监听端口。首次访问需要设置访问密码。
+
+## 访问密码
+
+密码哈希保存在 SQLite 数据库中。忘记密码时，可以通过容器内 CLI 重置：
+
+```bash
+docker exec mihomo-hive node apps/cli/dist/index.js auth reset-password --password "new-strong-password"
+```
+
+推荐从标准输入传入密码，避免进入 shell 历史：
+
+```bash
+printf '%s' 'new-strong-password' | docker exec -i mihomo-hive node apps/cli/dist/index.js auth reset-password --password-stdin
+```
+
+重置密码会撤销所有已登录会话。
 
 ## Web UI 流程
 

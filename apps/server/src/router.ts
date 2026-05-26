@@ -1,4 +1,5 @@
 import { initTRPC } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -22,18 +23,25 @@ import type { RuntimeConfig, SubscriptionSource } from "@mihomo-hive/schemas";
 export interface RouterContext {
   config: RuntimeConfig;
   repo: HiveRepository;
+  authenticated: boolean;
 }
 
 const t = initTRPC.context<RouterContext>().create();
+const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.authenticated) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next();
+});
 
 export const appRouter = t.router({
   runtime: t.router({
-    config: t.procedure.query(({ ctx }) => ctx.config),
-    status: t.procedure.query(async ({ ctx }) => readMihomoStatus(ctx.config))
+    config: protectedProcedure.query(({ ctx }) => ctx.config),
+    status: protectedProcedure.query(async ({ ctx }) => readMihomoStatus(ctx.config))
   }),
   subscriptions: t.router({
-    list: t.procedure.query(({ ctx }) => ctx.repo.listSubscriptions().map(summarizeSubscription)),
-    add: t.procedure
+    list: protectedProcedure.query(({ ctx }) => ctx.repo.listSubscriptions().map(summarizeSubscription)),
+    add: protectedProcedure
       .input(
         z.object({
           name: z.string().min(1),
@@ -50,7 +58,7 @@ export const appRouter = t.router({
           })
         )
       ),
-    fetch: t.procedure.mutation(async ({ ctx }) => {
+    fetch: protectedProcedure.mutation(async ({ ctx }) => {
       const results = [];
       for (const source of ctx.repo.listSubscriptions().filter((item) => item.enabled)) {
         const content = await ctx.repo.fetchSubscriptionContent(source);
@@ -61,8 +69,8 @@ export const appRouter = t.router({
     })
   }),
   nodes: t.router({
-    list: t.procedure.query(({ ctx }) => ctx.repo.listNodes()),
-    import: t.procedure.mutation(async ({ ctx }) => {
+    list: protectedProcedure.query(({ ctx }) => ctx.repo.listNodes()),
+    import: protectedProcedure.mutation(async ({ ctx }) => {
       let imported = 0;
       for (const source of ctx.repo.listSubscriptions().filter((item) => item.enabled)) {
         const content = source.lastContent ?? (await ctx.repo.fetchSubscriptionContent(source));
@@ -72,7 +80,7 @@ export const appRouter = t.router({
       }
       return { imported };
     }),
-    assignPorts: t.procedure
+    assignPorts: protectedProcedure
       .input(z.object({ range: z.string().optional(), skipPortCheck: z.boolean().default(false) }))
       .mutation(async ({ ctx, input }) => {
         ctx.repo.setAllUntestedActive();
@@ -90,7 +98,7 @@ export const appRouter = t.router({
         ctx.repo.saveNodes(nodes);
         return { assigned: nodes.filter((node) => node.assignedPort).length, occupied: occupied.size };
       }),
-    test: t.procedure
+    test: protectedProcedure
       .input(
         z.object({
           targets: z.array(z.string()).default(["openai", "claude"]),
@@ -134,21 +142,21 @@ export const appRouter = t.router({
       })
   }),
   mihomo: t.router({
-    render: t.procedure.mutation(async ({ ctx }) => {
+    render: protectedProcedure.mutation(async ({ ctx }) => {
       const rendered = renderMihomoConfig(ctx.repo.listNodes(), ctx.config);
       await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
       await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
       return { listeners: rendered.egressMap.length };
     }),
-    start: t.procedure.mutation(({ ctx }) => startMihomo(ctx.config)),
-    stop: t.procedure.mutation(({ ctx }) => stopMihomo(ctx.config)),
-    reload: t.procedure.mutation(({ ctx }) => reloadMihomo(ctx.config))
+    start: protectedProcedure.mutation(({ ctx }) => startMihomo(ctx.config)),
+    stop: protectedProcedure.mutation(({ ctx }) => stopMihomo(ctx.config)),
+    reload: protectedProcedure.mutation(({ ctx }) => reloadMihomo(ctx.config))
   }),
   exports: t.router({
-    sub2api: t.procedure
+    sub2api: protectedProcedure
       .input(z.object({ host: z.string().optional() }).optional())
       .query(({ ctx, input }) => exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost })),
-    writeSub2api: t.procedure
+    writeSub2api: protectedProcedure
       .input(z.object({ host: z.string().optional(), output: z.string().optional() }).optional())
       .mutation(async ({ ctx, input }) => {
         const payload = exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost });

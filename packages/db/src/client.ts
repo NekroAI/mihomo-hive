@@ -57,5 +57,12 @@ function ensureSchema(sqlite: HiveSqlite): void {
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
   `);
 }

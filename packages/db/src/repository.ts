@@ -2,6 +2,13 @@ import { readFile } from "node:fs/promises";
 import type { ProxyNode, SubscriptionSource } from "@mihomo-hive/schemas";
 import type { HiveSqlite } from "./client.js";
 
+interface PasswordHash {
+  algorithm: "scrypt";
+  salt: string;
+  hash: string;
+  keyLength: number;
+}
+
 interface SubscriptionRow {
   id: string;
   name: string;
@@ -28,6 +35,15 @@ interface NodeRow {
   created_at: string;
   updated_at: string;
 }
+
+interface AuthSessionRow {
+  id: string;
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+}
+
+const authPasswordSettingKey = "auth.password";
 
 export class HiveRepository {
   constructor(
@@ -176,6 +192,65 @@ export class HiveRepository {
 
   setAllUntestedActive(): void {
     this.sqlite.prepare("UPDATE nodes SET status = 'active' WHERE status = 'untested'").run();
+  }
+
+  getPasswordHash(): PasswordHash | undefined {
+    const row = this.sqlite
+      .prepare("SELECT value_json FROM settings WHERE key = ?")
+      .get(authPasswordSettingKey) as { value_json: string } | undefined;
+    return row ? (JSON.parse(row.value_json) as PasswordHash) : undefined;
+  }
+
+  hasPassword(): boolean {
+    return Boolean(this.getPasswordHash());
+  }
+
+  setPasswordHash(hash: PasswordHash): void {
+    this.sqlite
+      .prepare(
+        `
+        INSERT INTO settings (key, value_json)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+      `
+      )
+      .run(authPasswordSettingKey, JSON.stringify(hash));
+  }
+
+  resetPassword(hash: PasswordHash): void {
+    const transaction = this.sqlite.transaction(() => {
+      this.setPasswordHash(hash);
+      this.sqlite.prepare("DELETE FROM auth_sessions").run();
+    });
+    transaction();
+  }
+
+  createSession(input: { id: string; tokenHash: string; expiresAt: string }): void {
+    this.deleteExpiredSessions();
+    const now = new Date().toISOString();
+    this.sqlite
+      .prepare(
+        `
+        INSERT INTO auth_sessions (id, token_hash, created_at, expires_at)
+        VALUES (@id, @tokenHash, @now, @expiresAt)
+      `
+      )
+      .run({ ...input, now });
+  }
+
+  findSessionByTokenHash(tokenHash: string): AuthSessionRow | undefined {
+    this.deleteExpiredSessions();
+    return this.sqlite
+      .prepare("SELECT * FROM auth_sessions WHERE token_hash = ? AND expires_at > ?")
+      .get(tokenHash, new Date().toISOString()) as AuthSessionRow | undefined;
+  }
+
+  deleteSessionByTokenHash(tokenHash: string): void {
+    this.sqlite.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").run(tokenHash);
+  }
+
+  deleteExpiredSessions(): void {
+    this.sqlite.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(new Date().toISOString());
   }
 }
 

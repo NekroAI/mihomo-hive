@@ -43,7 +43,7 @@ services:
     volumes:
       - ./runtime:/data
     environment:
-      HIVE_HOST: 127.0.0.1
+      HIVE_HOST: 0.0.0.0
       HIVE_PORT: 9990
       HIVE_CONFIG: /data/hive.config.json
       HIVE_DATA_DIR: /data
@@ -57,16 +57,17 @@ services:
 docker compose up -d
 ```
 
-打开 Web UI：
+打开 Web UI。首次访问会要求设置访问密码：
 
 ```text
 http://127.0.0.1:9990
 ```
 
-`HIVE_PORT` 可以改成任意可用端口，例如：
+`HIVE_HOST` 控制 Web UI/API 监听地址，默认是 `0.0.0.0`；`HIVE_PORT` 控制监听端口，默认是 `9990`。两者都可以通过环境变量覆盖：
 
 ```yaml
 environment:
+  HIVE_HOST: 127.0.0.1
   HIVE_PORT: 9991
 ```
 
@@ -110,6 +111,18 @@ docker exec mihomo-hive node apps/cli/dist/index.js sub list
 docker exec mihomo-hive node apps/cli/dist/index.js nodes list
 docker exec mihomo-hive node apps/cli/dist/index.js mihomo status
 docker exec mihomo-hive node apps/cli/dist/index.js export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.json
+```
+
+忘记访问密码时，可以在服务器上手动重置。重置会同时撤销所有已登录会话：
+
+```bash
+docker exec mihomo-hive node apps/cli/dist/index.js auth reset-password --password "new-strong-password"
+```
+
+也可以从标准输入传入密码，避免把密码留在 shell 历史里：
+
+```bash
+printf '%s' 'new-strong-password' | docker exec -i mihomo-hive node apps/cli/dist/index.js auth reset-password --password-stdin
 ```
 
 ## 开发

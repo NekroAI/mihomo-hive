@@ -31,3 +31,10 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   valueJson: text("value_json").notNull()
 });
+
+export const authSessions = sqliteTable("auth_sessions", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull()
+});

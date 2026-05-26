@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
@@ -7,6 +7,7 @@ import {
   assignStablePorts,
   enumeratePorts,
   findOccupiedPorts,
+  hashPassword,
   loadRuntimeConfig,
   mapWithConcurrency,
   parsePortRange,
@@ -45,6 +46,28 @@ program
     });
     await writeRuntimeConfig(config, options.config ?? resolveConfigPath());
     console.log(`Created config: ${options.config ?? resolveConfigPath()}`);
+  });
+
+const auth = program.command("auth").description("Manage local access password");
+
+auth
+  .command("status")
+  .description("Show whether an access password is configured")
+  .action(async () => {
+    const { repo } = await openRepo();
+    console.log(JSON.stringify({ configured: repo.hasPassword() }, null, 2));
+  });
+
+auth
+  .command("reset-password")
+  .description("Reset the Web UI/API access password and revoke sessions")
+  .option("--password <password>", "New password")
+  .option("--password-stdin", "Read the new password from stdin")
+  .action(async (options) => {
+    const { repo } = await openRepo();
+    const password = await readPasswordOption(options);
+    repo.resetPassword(await hashPassword(password));
+    console.log("Password reset; all sessions revoked.");
   });
 
 const sub = program.command("sub").description("Manage subscriptions");
@@ -282,4 +305,17 @@ function parseIntegerOption(value: string): number {
     throw new Error(`Invalid positive integer: ${value}`);
   }
   return parsed;
+}
+
+async function readPasswordOption(options: { password?: string; passwordStdin?: boolean }): Promise<string> {
+  if (options.passwordStdin) {
+    return (await readFile("/dev/stdin", "utf8")).trimEnd();
+  }
+  if (options.password) {
+    return options.password;
+  }
+  if (process.env.HIVE_RESET_PASSWORD) {
+    return process.env.HIVE_RESET_PASSWORD;
+  }
+  throw new Error("Provide --password, --password-stdin, or HIVE_RESET_PASSWORD");
 }
