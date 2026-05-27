@@ -54,7 +54,10 @@ export interface NodesRouteProps {
       mutate: (input: { id?: string; name: string; url: string; excludeKeywords: string[] }) => void;
     };
     setLifecycle: PendingMutation & {
-      mutate: (input: { hashes: string[]; lifecycleStatus: "schedulable" | "disabled" }) => void;
+      mutate: (input: {
+        hashes: string[];
+        lifecycleStatus: "schedulable" | "disabled" | "cooling_down" | "retired";
+      }) => void;
     };
     deleteNodes: PendingMutation & { mutate: (input: { hashes: string[]; forceLocal: boolean }) => void };
     testNodes: PendingMutation & {
@@ -154,6 +157,12 @@ export function NodesRoute(props: NodesRouteProps) {
           }
           onDisableSelected={() =>
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
+          }
+          onCoolingDownSelected={() =>
+            m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "cooling_down" })
+          }
+          onRetireSelected={() =>
+            m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "retired" })
           }
           onPreviewDeleteSelected={props.previewSelectedDeletePlan}
           onTest={() => m.testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })}

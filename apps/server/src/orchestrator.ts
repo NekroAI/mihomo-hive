@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   createSub2ApiClient,
+  filterPreviewImportableNodes,
+  filteredExistingNodeHashes,
   reconcile,
   type ProxyHealthSignal,
   type ReconcileSkippedReason,
@@ -114,6 +116,8 @@ export function startReconcileScheduler(input: {
 
       // 把 nodeIntents 写回本地节点（更新 intent_role / backoff / health_score）
       writeBackNodeIntents(repo, result.nodeIntents, localNodes);
+      // 退役计时：长期 evicted 节点 → lifecycleStatus = retired
+      retireOldEvicted(repo, spec, startedAt);
 
       const tickResult: ReconcileSkippedReason = errorMessage
         ? "applied" // 即便错也算 applied（部分），让 errorMessage 解释
@@ -222,11 +226,37 @@ export function startReconcileScheduler(input: {
     if (!stopped) scheduleNext();
   });
 
+  // 订阅自动刷新子循环：按 spec.supply.fetchIntervalMs（默认 6h）独立运行。
+  // 不在启动时立即跑（避免每次重启都拉一遍订阅）；首个延迟 = fetchIntervalMs。
+  let subscriptionTimer: NodeJS.Timeout | undefined;
+  function scheduleSubscriptionRefresh(): void {
+    if (stopped) return;
+    const spec = repo.getOrchestrationSpec();
+    if (!spec.supply.autoFetchSubscriptions) {
+      // 关闭态下也排一次，下次重新读 spec 时如果开了又能接上。
+      subscriptionTimer = setTimeout(scheduleSubscriptionRefresh, 60_000);
+      subscriptionTimer.unref?.();
+      return;
+    }
+    const interval = Math.max(60_000, spec.supply.fetchIntervalMs);
+    subscriptionTimer = setTimeout(async () => {
+      try {
+        await refreshSubscriptions(repo);
+      } catch (err) {
+        console.error("subscription refresh failed:", err);
+      }
+      scheduleSubscriptionRefresh();
+    }, interval);
+    subscriptionTimer.unref?.();
+  }
+  scheduleSubscriptionRefresh();
+
   return {
     triggerNow: () => tick(),
     stop: () => {
       stopped = true;
       if (nextTimer) clearTimeout(nextTimer);
+      if (subscriptionTimer) clearTimeout(subscriptionTimer);
     }
   };
 }
@@ -320,4 +350,71 @@ function msToTimeRange(ms: number): string {
   if (minutes < 60) return `${Math.max(1, minutes)}m`;
   const hours = Math.round(ms / 3_600_000);
   return `${Math.max(1, hours)}h`;
+}
+
+/**
+ * 退役计时（ADR 0003 supply.evictAfterDays）。
+ *
+ * intentRole=evicted 且 last_health_check（或 updatedAt 兜底）已超过 evictAfterDays 天的节点
+ * → lifecycleStatus 设为 retired。Reconcile 不再考虑它们；Mihomo 渲染也排除。
+ */
+function retireOldEvicted(repo: HiveRepository, spec: OrchestrationSpec, now: Date): void {
+  const cutoff = new Date(now.getTime() - spec.supply.evictAfterDays * 24 * 60 * 60 * 1000);
+  const updates: ProxyNode[] = [];
+  for (const node of repo.listNodes()) {
+    if (node.intentRole !== "evicted") continue;
+    if (node.lifecycleStatus === "retired" || node.lifecycleStatus === "deleted") continue;
+    const reference = node.lastHealthCheck ? new Date(node.lastHealthCheck) : new Date(node.updatedAt);
+    if (reference > cutoff) continue;
+    updates.push({ ...node, lifecycleStatus: "retired", schedulable: false });
+  }
+  if (updates.length > 0) {
+    repo.saveNodes(updates);
+    console.log(`retired ${updates.length} evicted node(s) past ${spec.supply.evictAfterDays} days`);
+  }
+}
+
+/**
+ * 订阅自动刷新子循环（ADR 0003 supply policy）。
+ *
+ * 等价于用户手动跑 subscriptions.applyImport，但批量+无人值守：
+ *   1) 遍历所有 enabled 订阅源
+ *   2) fetch + parse + build preview
+ *   3) upsert importable 节点（status=untested、intent=standby，待测试）
+ *   4) 删除被新规则过滤命中的现有节点（deletedByFilter 路径）
+ *
+ * 不抛错；单个订阅失败只跳过它，其他继续。
+ */
+async function refreshSubscriptions(repo: HiveRepository): Promise<void> {
+  const sources = repo.listSubscriptions().filter((source) => source.enabled);
+  for (const source of sources) {
+    try {
+      const content = await repo.fetchSubscriptionContent(source);
+      repo.updateSubscriptionContent(source.id, content);
+      const existingNodes = repo.listNodes();
+      const importable = filterPreviewImportableNodes({
+        source,
+        content,
+        existingNodes,
+        excludeKeywords: source.excludeKeywords
+      }).map((node) => ({
+        ...node,
+        lifecycleStatus: "candidate" as const,
+        schedulable: false
+      }));
+      const deleteHashes = filteredExistingNodeHashes({
+        source,
+        content,
+        existingNodes,
+        excludeKeywords: source.excludeKeywords
+      });
+      if (deleteHashes.length > 0) repo.deleteNodes(deleteHashes);
+      if (importable.length > 0) repo.upsertNodes(importable);
+      console.log(
+        `subscription auto-refresh "${source.name}": imported ${importable.length}, deletedByFilter ${deleteHashes.length}`
+      );
+    } catch (err) {
+      console.warn(`subscription "${source.name}" refresh failed:`, err);
+    }
+  }
 }

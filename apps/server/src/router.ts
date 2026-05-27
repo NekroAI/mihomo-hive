@@ -367,6 +367,8 @@ export const appRouter = t.router({
       .mutation(async ({ ctx, input }) => {
         const targets = resolveProxyTestTargets(input.targets);
         const host = input.host ?? ctx.config.listenHost;
+        const spec = ctx.repo.getOrchestrationSpec();
+        const inPoolGate = spec.supply.inPoolGate;
         const candidates = ctx.repo.listNodes().filter((node) => node.assignedPort && node.lifecycleStatus !== "retired");
         const tested = await mapWithConcurrency(candidates, input.concurrency, async (node) => {
           const results = [];
@@ -374,21 +376,33 @@ export const appRouter = t.router({
             results.push(await testProxyTarget({ host, port: Number(node.assignedPort), target, timeoutMs: input.timeoutMs }));
           }
           const passed = results.every((result) => result.ok);
+          const latency = Math.max(...results.map((result) => result.latencyMs));
+          // inPoolGate (ADR 0003 supply policy)：测通过但延迟/质量不达标 → 不进 schedulable
+          const latencyExceeds = inPoolGate.maxLatencyMs ? latency > inPoolGate.maxLatencyMs : false;
+          const inPool = passed && !latencyExceeds;
           return {
             ...node,
             status: passed ? ("active" as const) : ("failed" as const),
-            lifecycleStatus: passed ? ("schedulable" as const) : ("cooling_down" as const),
-            schedulable: passed,
-            qualityScore: passed ? 100 : 25,
+            lifecycleStatus: inPool
+              ? ("schedulable" as const)
+              : passed
+                ? ("disabled" as const) // 通过测试但被门槛拒
+                : ("cooling_down" as const),
+            schedulable: inPool,
+            qualityScore: passed ? (latencyExceeds ? 60 : 100) : 25,
             lastTestStatus: results.map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`).join(","),
-            lastTestLatencyMs: Math.max(...results.map((result) => result.latencyMs))
+            lastTestLatencyMs: latency
           };
         });
         ctx.repo.saveNodes(tested);
+        const gated = tested.filter(
+          (node) => node.status === "active" && node.lifecycleStatus !== "schedulable"
+        ).length;
         return {
           tested: tested.length,
           passed: tested.filter((node) => node.status === "active").length,
-          failed: tested.filter((node) => node.status === "failed").length
+          failed: tested.filter((node) => node.status === "failed").length,
+          gated
         };
       })
   }),

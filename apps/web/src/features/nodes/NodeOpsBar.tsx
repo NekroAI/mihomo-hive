@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, PauseCircle, PlayCircle, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { Activity, Archive, PauseCircle, PlayCircle, RefreshCw, Rocket, Snowflake, Trash2 } from "lucide-react";
 import type { ProxyNode } from "@mihomo-hive/schemas";
 import { Badge, Button } from "../../components/ui.js";
 
@@ -12,6 +12,8 @@ export interface NodeOpsBarProps {
   testing: boolean;
   onEnableSelected: () => void;
   onDisableSelected: () => void;
+  onCoolingDownSelected: () => void;
+  onRetireSelected: () => void;
   onPreviewDeleteSelected: () => void;
   onTest: () => void;
   onPublish: () => void;
@@ -47,9 +49,29 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<PauseCircle size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onDisableSelected}
-            title="把所选节点的生命周期标记为 disabled，从 Mihomo 配置和 Sub2API 自动化分配中暂时移除（保留本地记录与端口号）。"
+            title="生命周期 → disabled：暂时从 Mihomo 和 Sub2API 自动化中移除；保留本地记录与端口号，可随时启用回来。"
           >
-            暂停调度
+            暂停
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Snowflake size={14} />}
+            disabled={props.busy || !hasSelection}
+            onClick={props.onCoolingDownSelected}
+            title="生命周期 → cooling_down：手动冷却所选节点（系统也会在测试失败/错误率破阈时自动转此）。账号留在原地等待恢复或被驱逐。"
+          >
+            冷却
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Archive size={14} />}
+            disabled={props.busy || !hasSelection}
+            onClick={props.onRetireSelected}
+            title="生命周期 → retired：永久退役，但保留本地记录用于历史查询。不再参与 Mihomo 渲染和 Sub2API 调度。"
+          >
+            退役
           </Button>
           <Button
             size="sm"
@@ -57,9 +79,9 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<Trash2 size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onPreviewDeleteSelected}
-            title="对所选节点：先在 Sub2API 解绑账号、删远端代理，再删除本地记录。整个流程作为一个 OperationJob 可在自动化页查看。"
+            title="完全删除：先在 Sub2API 解绑账号、删远端代理，再删除本地记录。整个流程作为一个 OperationJob 可在自动化页查看。"
           >
-            排空/删除
+            删除
           </Button>
         </div>
         <div className="node-ops-group">
