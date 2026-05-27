@@ -245,7 +245,7 @@ function Dashboard(props: { onLogout: () => void }) {
     onError: (error) => failTask(setTask, pushToast, "订阅删除失败", error.message)
   });
   const assignPorts = trpc.nodes.assignPorts.useMutation({
-    onMutate: () => startTask(setTask, "正在分配端口", `端口段 ${portRange}，会保留已有稳定端口。`),
+    onMutate: () => startTask(setTask, "正在分配端口", `为已启用调度的节点分配端口（${portRange}）。新导入的候选节点不会自动获得端口。`),
     onSuccess: async (result) => {
       await finishTask(setTask, pushToast, "端口分配完成", `已分配 ${result.assigned} 个端口，跳过 ${result.occupied} 个占用端口。`);
       await refreshOperationalData();

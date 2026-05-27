@@ -242,13 +242,23 @@ export const appRouter = t.router({
         if (mihomoStatus.running) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Mihomo 运行中不能重新分配端口，请先停止 Mihomo。" });
         }
-        ctx.repo.setAllUntestedActive();
         const range = input.range ? parsePortRange(input.range) : { start: ctx.config.portRangeStart, end: ctx.config.portRangeEnd };
         const occupied = input.skipPortCheck ? new Set<number>() : await findOccupiedPorts(ctx.config.listenHost, enumeratePorts(range));
         const nodes = assignStablePorts({ nodes: ctx.repo.listNodes(), range, occupiedPorts: occupied, preserveExisting: false });
         ctx.repo.saveNodes(nodes);
         return { assigned: nodes.filter((node) => node.assignedPort).length, occupied: occupied.size };
       }),
+    enableAllCandidates: protectedProcedure.mutation(({ ctx }) => {
+      // 把所有 untested/candidate 节点显式提升为 schedulable；触发后 assignPorts/publish 才会
+      // 把它们纳入端口池。明确动作避免之前 assignPorts 隐式 setAllUntestedActive 让用户无感
+      // 启用所有节点造成的"为什么所有节点都占了端口"的困惑。
+      ctx.repo.setAllUntestedActive();
+      const nodes = ctx.repo.listNodes();
+      return {
+        promoted: nodes.filter((node) => node.lifecycleStatus === "schedulable" && !node.assignedPort).length,
+        total: nodes.length
+      };
+    }),
     test: protectedProcedure
       .input(
         z.object({

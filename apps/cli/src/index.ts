@@ -210,12 +210,15 @@ const ports = program.command("ports").description("Manage local egress ports");
 
 ports
   .command("assign")
-  .description("Assign stable ports to active/untested nodes")
+  .description("Assign stable ports to schedulable nodes (use 'nodes enable-candidates' first to promote new imports)")
   .option("--range <range>", "Port range override")
   .option("--skip-port-check", "Do not probe occupied ports")
+  .option("--include-candidates", "Promote untested candidates before assigning (equivalent to running 'nodes enable-candidates' first)")
   .action(async (options) => {
     const { config, repo } = await openRepo();
-    repo.setAllUntestedActive();
+    if (options.includeCandidates) {
+      repo.setAllUntestedActive();
+    }
     const range = options.range
       ? parsePortRange(options.range)
       : { start: config.portRangeStart, end: config.portRangeEnd };
@@ -228,7 +231,18 @@ ports
       preserveExisting: false
     });
     repo.saveNodes(nodesWithPorts);
-    console.log(`Assigned ports in ${range.start}-${range.end}; occupied skipped: ${occupied.size}`);
+    const assigned = nodesWithPorts.filter((node) => node.assignedPort).length;
+    console.log(`Assigned ${assigned} ports in ${range.start}-${range.end}; occupied skipped: ${occupied.size}`);
+  });
+
+nodes
+  .command("enable-candidates")
+  .description("Promote all untested/candidate nodes to schedulable so they can receive ports")
+  .action(async () => {
+    const { repo } = await openRepo();
+    repo.setAllUntestedActive();
+    const promoted = repo.listNodes().filter((node) => node.lifecycleStatus === "schedulable" && !node.assignedPort).length;
+    console.log(`Promoted ${promoted} candidate(s) to schedulable. Run 'ports assign' to allocate ports.`);
   });
 
 const mihomo = program.command("mihomo").description("Render and control Mihomo");
