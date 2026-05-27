@@ -13,8 +13,17 @@ export interface RenderedMihomo {
 }
 
 export function renderMihomoConfig(nodes: ProxyNode[], config: RuntimeConfig): RenderedMihomo {
+  // 渲染所有"有端口、非 retired/deleted"的节点为 listener。
+  // 这样 candidate 节点也能被测试 / 用户验证可用性，而是否参与 Sub2API 账号调度
+  // 是另外一回事（schedulable + active 才会被推送 / 接收账号）。
   const activeNodes = nodes
-    .filter((node) => node.status === "active" && node.lifecycleStatus === "schedulable" && node.schedulable && node.assignedPort)
+    .filter((node) => {
+      if (!node.assignedPort) return false;
+      const lifecycle = node.lifecycleStatus ?? "candidate";
+      if (lifecycle === "retired" || lifecycle === "deleted") return false;
+      // status === "failed" 的节点不渲染（连测都失败了）；untested / active 都行
+      return node.status !== "failed";
+    })
     .sort((a, b) => Number(a.assignedPort) - Number(b.assignedPort));
 
   const proxies = activeNodes.map((node, index) => ({

@@ -233,6 +233,92 @@ export function InfoTip(props: { text: string }) {
   );
 }
 
+// —— Dropdown：点击触发器展开菜单，点击菜单项后自动关闭；点击外部 / Esc 也关闭 ——
+
+export function Dropdown(props: {
+  trigger: React.ReactNode;
+  align?: "left" | "right";
+  /**
+   * 触发器外层 className（用于 layout 控制），不会影响菜单样式。
+   */
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    function onClickOutside(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    }
+    function onEsc(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onClickOutside);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div className={`dropdown ${props.className ?? ""}`} ref={ref}>
+      <button
+        type="button"
+        className="dropdown-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {props.trigger}
+      </button>
+      {open ? (
+        <div
+          className={`dropdown-menu dropdown-menu-${props.align ?? "right"}`}
+          role="menu"
+          onClick={() => setOpen(false)}
+        >
+          {props.children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function DropdownGroup(props: { label?: string; children: React.ReactNode }) {
+  return (
+    <div className="dropdown-group">
+      {props.label ? <div className="dropdown-group-label">{props.label}</div> : null}
+      {props.children}
+    </div>
+  );
+}
+
+export function DropdownItem(props: {
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  hint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`dropdown-item ${props.danger ? "dropdown-item-danger" : ""}`}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      title={props.hint}
+    >
+      {props.icon ? <span className="dropdown-item-icon">{props.icon}</span> : null}
+      <span className="dropdown-item-label">{props.children}</span>
+    </button>
+  );
+}
+
 export function EmptyState(props: {
   icon?: React.ReactNode;
   title: string;

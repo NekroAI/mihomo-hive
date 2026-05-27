@@ -8,7 +8,7 @@ import {
   type ColumnDef,
   type SortingState
 } from "@tanstack/react-table";
-import { ArrowDownUp, Bot, Check, ChevronsLeft, ChevronsRight, MessageSquare, Search, X } from "lucide-react";
+import { ArrowDownUp, Bot, ChevronsLeft, ChevronsRight, MessageSquare, Search } from "lucide-react";
 import type { ProxyNode } from "@mihomo-hive/schemas";
 import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
 import {
@@ -32,10 +32,6 @@ export function NodeTable(props: {
   selectedHashes: Set<string>;
   onFiltersChange: (filters: NodeFilters) => void;
   onToggleNode: (hash: string, selected: boolean) => void;
-  onSelectFiltered: (exportableOnly: boolean) => void;
-  onSelectSuccessful: () => void;
-  onInvertFiltered: () => void;
-  onClearSelection: () => void;
 }) {
   const [sorting, setSorting] = React.useState<SortingState>([{ id: "assignedPort", desc: false }]);
   const columns = React.useMemo<ColumnDef<ProxyNode>[]>(
@@ -144,9 +140,6 @@ export function NodeTable(props: {
     }
   });
 
-  const selectedFiltered = props.filteredNodes.filter((node) => props.selectedHashes.has(node.hash)).length;
-  const exportableFiltered = props.filteredNodes.filter(canExportNode).length;
-
   return (
     <section className="nodes-workspace">
       <header className="nodes-toolbar">
@@ -192,27 +185,6 @@ export function NodeTable(props: {
           mono
         />
       </header>
-
-      <div className="selection-bar">
-        <div>
-          当前筛选 <strong>{props.filteredNodes.length}</strong> 个，已选 <strong>{selectedFiltered}</strong> 个，可导出{" "}
-          <strong>{exportableFiltered}</strong> 个
-        </div>
-        <div className="selection-actions">
-          <Button size="sm" variant="secondary" onClick={() => props.onSelectFiltered(false)}>
-            选择当前结果
-          </Button>
-          <Button size="sm" variant="secondary" icon={<Check size={15} />} onClick={props.onSelectSuccessful}>
-            选择成功结果
-          </Button>
-          <Button size="sm" variant="secondary" onClick={props.onInvertFiltered}>
-            反选当前结果
-          </Button>
-          <Button size="sm" variant="ghost" icon={<X size={15} />} onClick={props.onClearSelection}>
-            清空选择
-          </Button>
-        </div>
-      </div>
 
       <div className="table-frame">
         {props.filteredNodes.length === 0 ? (

@@ -344,6 +344,58 @@ export const appRouter = t.router({
         ctx.repo.saveNodes(nodes);
         return { assigned: nodes.filter((node) => node.assignedPort).length, occupied: occupied.size };
       }),
+    /**
+     * "分配端口"按钮的后端：给所选节点分端口 + 渲染 + reload Mihomo，**不动 lifecycle**。
+     *
+     * 用途：用户拿到一批新导入的 candidate 节点，想先测试可用性再决定是否启用调度。
+     * 接入后这些节点会被 Mihomo 渲染成 listener（占端口），但 Sub2API 推送 / 编排器
+     * 仍然只看 schedulable，所以不会有账号被自动分到这些 candidate 节点上。
+     */
+    attachToMihomo: protectedProcedure
+      .input(z.object({ hashes: z.array(z.string().min(8)).min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const job = createJob(
+          "nodes.attach",
+          "正在接入 Mihomo",
+          `给 ${input.hashes.length} 个节点分配端口并刷新 Mihomo listener。`,
+          ["分配端口", "渲染并 reload"]
+        );
+        try {
+          updateJobStep(job.id, 0, "running", "正在分配端口。");
+          const range = { start: ctx.config.portRangeStart, end: ctx.config.portRangeEnd };
+          const status = await readMihomoStatus(ctx.config);
+          // Mihomo running 时端口已被自己占着，不要扫描；只让目标节点保留 / 补分
+          const occupied = status.running ? new Set<number>() : await findOccupiedPorts(ctx.config.listenHost, enumeratePorts(range));
+          const assigned = assignStablePorts({
+            nodes: ctx.repo.listNodes(),
+            range,
+            occupiedPorts: occupied,
+            preserveExisting: true,
+            targetHashes: input.hashes
+          });
+          ctx.repo.saveNodes(assigned);
+          const succeededHashes = new Set(input.hashes);
+          const newlyAssigned = assigned.filter((n) => succeededHashes.has(n.hash) && n.assignedPort).length;
+          updateJobStep(job.id, 0, "success", `已分配 ${newlyAssigned} / ${input.hashes.length} 个端口。`);
+
+          updateJobStep(job.id, 1, "running", "正在渲染并 reload Mihomo。");
+          const rendered = renderMihomoConfig(assigned, ctx.config);
+          await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
+          await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
+          const newStatus = status.running ? await reloadMihomo(ctx.config) : await startMihomo(ctx.config);
+          updateJobStep(job.id, 1, "success", newStatus.running ? "Mihomo 已运行。" : "Mihomo 未运行。");
+          finishJob(job.id, "success", `接入完成，共 ${rendered.egressMap.length} 个 listener。`);
+          return {
+            job: operationJobs.get(job.id),
+            assigned: newlyAssigned,
+            listeners: rendered.egressMap.length,
+            status: newStatus
+          };
+        } catch (error) {
+          finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");
+          throw error;
+        }
+      }),
     enableAllCandidates: protectedProcedure.mutation(({ ctx }) => {
       // 把所有 untested/candidate 节点显式提升为 schedulable；触发后 assignPorts/publish 才会
       // 把它们纳入端口池。明确动作避免之前 assignPorts 隐式 setAllUntestedActive 让用户无感
@@ -361,7 +413,9 @@ export const appRouter = t.router({
           targets: z.array(z.string()).default(["openai", "claude"]),
           host: z.string().optional(),
           timeoutMs: z.number().int().positive().default(15_000),
-          concurrency: z.number().int().positive().max(32).default(8)
+          concurrency: z.number().int().positive().max(32).default(8),
+          // 给定时只测这些 hash；否则跑全池（所有已分端口、非 retired）
+          hashes: z.array(z.string().min(8)).optional()
         })
       )
       .mutation(async ({ ctx, input }) => {
@@ -369,7 +423,16 @@ export const appRouter = t.router({
         const host = input.host ?? ctx.config.listenHost;
         const spec = ctx.repo.getOrchestrationSpec();
         const inPoolGate = spec.supply.inPoolGate;
-        const candidates = ctx.repo.listNodes().filter((node) => node.assignedPort && node.lifecycleStatus !== "retired");
+        const hashFilter = input.hashes ? new Set(input.hashes) : undefined;
+        const candidates = ctx.repo
+          .listNodes()
+          .filter((node) => node.assignedPort && node.lifecycleStatus !== "retired")
+          .filter((node) => !hashFilter || hashFilter.has(node.hash));
+        // 区分两种调用模式：
+        //   • hashFilter 给定（用户"测试所选"）：只更新质量信号，**不改 lifecycle**。
+        //     由用户自己点"启用调度"决定纳入；否则测试本身就吃掉了决策权。
+        //   • 未给 hashFilter（"测试全部"或定时任务）：保留原自动 lifecycle 调整行为。
+        const manualMode = Boolean(hashFilter);
         const tested = await mapWithConcurrency(candidates, input.concurrency, async (node) => {
           const results = [];
           for (const target of targets) {
@@ -380,18 +443,24 @@ export const appRouter = t.router({
           // inPoolGate (ADR 0003 supply policy)：测通过但延迟/质量不达标 → 不进 schedulable
           const latencyExceeds = inPoolGate.maxLatencyMs ? latency > inPoolGate.maxLatencyMs : false;
           const inPool = passed && !latencyExceeds;
-          return {
+          const base = {
             ...node,
             status: passed ? ("active" as const) : ("failed" as const),
-            lifecycleStatus: inPool
-              ? ("schedulable" as const)
-              : passed
-                ? ("disabled" as const) // 通过测试但被门槛拒
-                : ("cooling_down" as const),
-            schedulable: inPool,
             qualityScore: passed ? (latencyExceeds ? 60 : 100) : 25,
             lastTestStatus: results.map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`).join(","),
             lastTestLatencyMs: latency
+          };
+          if (manualMode) {
+            return base;
+          }
+          return {
+            ...base,
+            lifecycleStatus: inPool
+              ? ("schedulable" as const)
+              : passed
+                ? ("disabled" as const)
+                : ("cooling_down" as const),
+            schedulable: inPool
           };
         });
         ctx.repo.saveNodes(tested);

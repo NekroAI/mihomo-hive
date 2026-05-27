@@ -6,7 +6,7 @@ import type {
   SubscriptionSource
 } from "@mihomo-hive/schemas";
 import { NodePoolPanel } from "../features/node-pool/NodePoolPanel.js";
-import { NodeOpsBar, summarizePool } from "../features/nodes/NodeOpsBar.js";
+import { NodeToolbar, summarizePool } from "../features/nodes/NodeToolbar.js";
 import { NodeTable } from "../features/nodes/NodeTable.js";
 import { canExportNode, type NodeFilters } from "../features/nodes/node-utils.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
@@ -61,8 +61,9 @@ export interface NodesRouteProps {
     };
     deleteNodes: PendingMutation & { mutate: (input: { hashes: string[]; forceLocal: boolean }) => void };
     testNodes: PendingMutation & {
-      mutate: (input: { targets: string[]; timeoutMs: number; concurrency: number }) => void;
+      mutate: (input: { targets: string[]; timeoutMs: number; concurrency: number; hashes?: string[] }) => void;
     };
+    attachToMihomo: PendingMutation & { mutate: (input: { hashes: string[] }) => void };
     publishRuntime: PendingMutation & { mutate: () => void };
     deleteSubscription: PendingMutation & { mutate: (input: { id: string }) => void };
   };
@@ -71,6 +72,14 @@ export interface NodesRouteProps {
 export function NodesRoute(props: NodesRouteProps) {
   const m = props.mutations;
   const pool = summarizePool(props.allNodes);
+  const selectedNodes = React.useMemo(
+    () => props.allNodes.filter((node) => props.selectedHashes.has(node.hash)),
+    [props.allNodes, props.selectedHashes]
+  );
+  const selectedWithPortCount = selectedNodes.filter((node) => node.assignedPort).length;
+  const selectedUntestedCount = selectedNodes.filter((node) => !node.lastTestStatus).length;
+  const exportableFiltered = props.filteredNodes.filter(canExportNode).length;
+  const filteredCount = props.filteredNodes.length;
   return (
     <section className="workspace-grid node-pool-grid">
       <NodePoolPanel
@@ -145,16 +154,52 @@ export function NodesRoute(props: NodesRouteProps) {
         }
       />
       <div className="nodes-stack">
-        <NodeOpsBar
+        <NodeToolbar
           totalNodes={pool.total}
+          filteredCount={filteredCount}
           schedulableCount={pool.schedulable}
+          exportableCount={exportableFiltered}
           selectedCount={props.selectedHashes.size}
+          selectedWithPortCount={selectedWithPortCount}
+          selectedUntestedCount={selectedUntestedCount}
+          withPortCount={pool.withPort}
           busy={props.busy}
-          publishing={m.publishRuntime.isPending}
+          attaching={m.attachToMihomo.isPending}
           testing={m.testNodes.isPending}
-          onEnableSelected={() =>
-            m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "schedulable" })
+          publishing={m.publishRuntime.isPending}
+          onAttach={() => m.attachToMihomo.mutate({ hashes: props.selectedHashesList })}
+          onTestSelected={() =>
+            m.testNodes.mutate({
+              targets: ["openai", "claude"],
+              timeoutMs: 15_000,
+              concurrency: 8,
+              hashes: props.selectedHashesList
+            })
           }
+          onTestAll={() =>
+            m.testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })
+          }
+          onEnableSelected={() => {
+            const total = selectedNodes.length;
+            const untested = selectedUntestedCount;
+            const description =
+              untested > 0
+                ? `${untested}/${total} 个所选节点还没测试过。启用调度后系统会立即把它们纳入 Sub2API 自动化分配，可能会绑账号上去。建议先点"分配端口"再"测试所选"，确认可用后再启用。`
+                : `${total} 个所选节点都已经测试过，可以放心启用。`;
+            props.requestConfirmation({
+              title: "确认启用调度",
+              description,
+              detail:
+                "启用后这些节点 lifecycle 会变成 schedulable，会出现在 Sub2API 推送列表里，并参与编排器（账号自动绑定 / 漂移 / 故障自愈）。可以在下拉菜单里随时'暂停'回退。",
+              confirmLabel: "启用调度",
+              run: async () =>
+                m.setLifecycle.mutate({
+                  hashes: props.selectedHashesList,
+                  lifecycleStatus: "schedulable"
+                })
+            });
+          }}
+          onPublish={() => m.publishRuntime.mutate()}
           onDisableSelected={() =>
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
           }
@@ -165,59 +210,45 @@ export function NodesRoute(props: NodesRouteProps) {
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "retired" })
           }
           onPreviewDeleteSelected={props.previewSelectedDeletePlan}
-          onTest={() => m.testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })}
-          onPublish={() => m.publishRuntime.mutate()}
+          onSelectFiltered={() =>
+            props.mutateSelection((current) => {
+              for (const node of props.filteredNodes) current.add(node.hash);
+              return current;
+            })
+          }
+          onSelectSuccessful={() =>
+            props.mutateSelection((current) => {
+              for (const node of props.filteredNodes) {
+                if (node.status === "active") current.add(node.hash);
+              }
+              return current;
+            })
+          }
+          onInvertFiltered={() =>
+            props.mutateSelection((current) => {
+              for (const node of props.filteredNodes) {
+                if (current.has(node.hash)) current.delete(node.hash);
+                else current.add(node.hash);
+              }
+              return current;
+            })
+          }
+          onClearSelection={() => props.setSelectedHashesList([])}
         />
         <NodeTable
-        nodes={props.allNodes}
-        filteredNodes={props.filteredNodes}
-        filters={props.filters}
-        sourceNames={props.sourceNames}
-        selectedHashes={props.selectedHashes}
-        onFiltersChange={props.setFilters}
-        onToggleNode={(hash, selected) =>
-          props.mutateSelection((current) => {
-            if (selected) {
-              current.add(hash);
-            } else {
-              current.delete(hash);
-            }
-            return current;
-          })
-        }
-        onSelectFiltered={(exportableOnly) =>
-          props.mutateSelection((current) => {
-            for (const node of props.filteredNodes) {
-              if (!exportableOnly || canExportNode(node)) {
-                current.add(node.hash);
-              }
-            }
-            return current;
-          })
-        }
-        onSelectSuccessful={() =>
-          props.mutateSelection((current) => {
-            for (const node of props.filteredNodes) {
-              if (node.status === "active") {
-                current.add(node.hash);
-              }
-            }
-            return current;
-          })
-        }
-        onInvertFiltered={() =>
-          props.mutateSelection((current) => {
-            for (const node of props.filteredNodes) {
-              if (current.has(node.hash)) {
-                current.delete(node.hash);
-              } else {
-                current.add(node.hash);
-              }
-            }
-            return current;
-          })
-        }
-          onClearSelection={() => props.setSelectedHashesList([])}
+          nodes={props.allNodes}
+          filteredNodes={props.filteredNodes}
+          filters={props.filters}
+          sourceNames={props.sourceNames}
+          selectedHashes={props.selectedHashes}
+          onFiltersChange={props.setFilters}
+          onToggleNode={(hash, selected) =>
+            props.mutateSelection((current) => {
+              if (selected) current.add(hash);
+              else current.delete(hash);
+              return current;
+            })
+          }
         />
       </div>
     </section>

@@ -312,6 +312,20 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "出口池发布失败", error.message)
   });
+  const attachToMihomo = trpc.nodes.attachToMihomo.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在接入 Mihomo", "给所选节点分配端口并刷新 Mihomo listener；不会推送到 Sub2API。"),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "节点已接入 Mihomo",
+        `分配 ${result.assigned} 个端口，当前共 ${result.listeners} 个 listener。可以点'测试所选'验证连通性。`
+      );
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "接入 Mihomo 失败", error.message)
+  });
   const startMihomo = trpc.mihomo.start.useMutation({
     onMutate: () => startTask(setTask, "正在启动 Mihomo", "服务会在后台保持运行。"),
     onSuccess: async (result) => {
@@ -505,6 +519,7 @@ function Dashboard(props: { onLogout: () => void }) {
     testNodes.isPending ||
     renderMihomo.isPending ||
     publishRuntime.isPending ||
+    attachToMihomo.isPending ||
     startMihomo.isPending ||
     reloadMihomo.isPending ||
     stopMihomo.isPending ||
@@ -638,6 +653,7 @@ function Dashboard(props: { onLogout: () => void }) {
             setLifecycle: setNodeLifecycle,
             deleteNodes,
             testNodes,
+            attachToMihomo,
             publishRuntime,
             deleteSubscription
           }}
