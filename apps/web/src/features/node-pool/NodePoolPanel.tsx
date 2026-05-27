@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, DownloadCloud, PauseCircle, PlayCircle, Plus, RefreshCw, Rocket, Save, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, DownloadCloud, Plus, RefreshCw, Save, Search, Trash2, X } from "lucide-react";
 import type { NodeDeletionPlan, ProxyNode, SubscriptionImportPreview, SubscriptionSource } from "@mihomo-hive/schemas";
 import { Badge, Button, EmptyState, Panel, TextInput } from "../../components/ui.js";
 import { formatRegion } from "../nodes/node-utils.js";
@@ -7,7 +7,6 @@ import { formatRegion } from "../nodes/node-utils.js";
 export function NodePoolPanel(props: {
   subscriptions: Array<Omit<SubscriptionSource, "lastContent"> & { fetched: boolean; lastContentBytes?: number }>;
   nodes: ProxyNode[];
-  selectedCount: number;
   busy: boolean;
   importName: string;
   importUrl: string;
@@ -16,7 +15,6 @@ export function NodePoolPanel(props: {
   deletePlan: NodeDeletionPlan | undefined;
   previewing: boolean;
   importing: boolean;
-  publishing: boolean;
   saving: boolean;
   onImportNameChange: (value: string) => void;
   onImportUrlChange: (value: string) => void;
@@ -26,12 +24,7 @@ export function NodePoolPanel(props: {
   onRepreviewWithKeywords: (keywords: string[]) => void;
   onApplyImport: (keywords: string[]) => void;
   onClearPreview: () => void;
-  onEnableSelected: () => void;
-  onDisableSelected: () => void;
-  onPreviewDeleteSelected: () => void;
   onApplyDeleteSelected: (forceLocal: boolean) => void;
-  onTest: () => void;
-  onPublish: () => void;
   onDeleteSubscription: (id: string) => void;
 }) {
   const schedulable = props.nodes.filter((node) => node.lifecycleStatus === "schedulable").length;
@@ -114,31 +107,6 @@ export function NodePoolPanel(props: {
               </div>
             ))
           )}
-        </div>
-      </Panel>
-
-      <Panel title="调度动作">
-        <div className="stack">
-          <p className="muted small">已选择 {props.selectedCount} 个节点。启用后系统会把节点纳入 Mihomo 发布与 Sub2API 分配范围。</p>
-          <div className="button-row wrap">
-            <Button icon={<PlayCircle size={16} />} disabled={props.busy || props.selectedCount === 0} onClick={props.onEnableSelected}>
-              启用调度
-            </Button>
-            <Button variant="secondary" icon={<PauseCircle size={16} />} disabled={props.busy || props.selectedCount === 0} onClick={props.onDisableSelected}>
-              暂停调度
-            </Button>
-          </div>
-          <div className="button-row wrap">
-            <Button variant="secondary" icon={<RefreshCw size={16} />} disabled={props.busy || props.nodes.length === 0} onClick={props.onTest}>
-              测试节点池
-            </Button>
-            <Button icon={<Rocket size={16} />} loading={props.publishing} disabled={props.busy || schedulable === 0} onClick={props.onPublish}>
-              发布出口池
-            </Button>
-          </div>
-          <Button variant="danger" icon={<Trash2 size={16} />} disabled={props.busy || props.selectedCount === 0} onClick={props.onPreviewDeleteSelected}>
-            排空/删除所选
-          </Button>
         </div>
       </Panel>
 

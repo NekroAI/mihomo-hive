@@ -6,6 +6,7 @@ import type {
   SubscriptionSource
 } from "@mihomo-hive/schemas";
 import { NodePoolPanel } from "../features/node-pool/NodePoolPanel.js";
+import { NodeOpsBar, summarizePool } from "../features/nodes/NodeOpsBar.js";
 import { NodeTable } from "../features/nodes/NodeTable.js";
 import { canExportNode, type NodeFilters } from "../features/nodes/node-utils.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
@@ -66,12 +67,12 @@ export interface NodesRouteProps {
 
 export function NodesRoute(props: NodesRouteProps) {
   const m = props.mutations;
+  const pool = summarizePool(props.allNodes);
   return (
     <section className="workspace-grid node-pool-grid">
       <NodePoolPanel
         subscriptions={props.subscriptions}
         nodes={props.allNodes}
-        selectedCount={props.selectedHashes.size}
         busy={props.busy}
         importName={props.subscriptionName}
         importUrl={props.subscriptionUrl}
@@ -80,7 +81,6 @@ export function NodesRoute(props: NodesRouteProps) {
         deletePlan={props.deletePlan}
         previewing={m.previewImport.isPending}
         importing={m.applyImport.isPending}
-        publishing={m.publishRuntime.isPending}
         saving={m.addSubscription.isPending}
         onImportNameChange={props.setSubscriptionName}
         onImportUrlChange={props.setSubscriptionUrl}
@@ -123,13 +123,6 @@ export function NodesRoute(props: NodesRouteProps) {
           });
         }}
         onClearPreview={() => props.setImportPreview(undefined)}
-        onEnableSelected={() =>
-          m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "schedulable" })
-        }
-        onDisableSelected={() =>
-          m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
-        }
-        onPreviewDeleteSelected={props.previewSelectedDeletePlan}
         onApplyDeleteSelected={(forceLocal) => {
           if (forceLocal) {
             m.deleteNodes.mutate({ hashes: props.selectedHashesList, forceLocal: false });
@@ -137,8 +130,6 @@ export function NodesRoute(props: NodesRouteProps) {
             props.setDeletePlan(undefined);
           }
         }}
-        onTest={() => m.testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })}
-        onPublish={() => m.publishRuntime.mutate()}
         onDeleteSubscription={(id) =>
           props.requestConfirmation({
             title: "确认删除订阅",
@@ -150,7 +141,25 @@ export function NodesRoute(props: NodesRouteProps) {
           })
         }
       />
-      <NodeTable
+      <div className="nodes-stack">
+        <NodeOpsBar
+          totalNodes={pool.total}
+          schedulableCount={pool.schedulable}
+          selectedCount={props.selectedHashes.size}
+          busy={props.busy}
+          publishing={m.publishRuntime.isPending}
+          testing={m.testNodes.isPending}
+          onEnableSelected={() =>
+            m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "schedulable" })
+          }
+          onDisableSelected={() =>
+            m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
+          }
+          onPreviewDeleteSelected={props.previewSelectedDeletePlan}
+          onTest={() => m.testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })}
+          onPublish={() => m.publishRuntime.mutate()}
+        />
+        <NodeTable
         nodes={props.allNodes}
         filteredNodes={props.filteredNodes}
         filters={props.filters}
@@ -199,8 +208,9 @@ export function NodesRoute(props: NodesRouteProps) {
             return current;
           })
         }
-        onClearSelection={() => props.setSelectedHashesList([])}
-      />
+          onClearSelection={() => props.setSelectedHashesList([])}
+        />
+      </div>
     </section>
   );
 }

@@ -108,6 +108,60 @@ select {
   gap: 12px;
 }
 
+.nodes-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 10px;
+}
+
+.node-ops-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.node-ops-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.node-ops-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.node-ops-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-ops-group-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+@media (max-width: 960px) {
+  .node-pool-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .sub2api-workspace,
 .runtime-workspace {
   overflow: auto;
