@@ -466,6 +466,28 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => pushToast("danger", "恢复失败", error.message)
   });
+  const previewStrategySwitch = trpc.sub2api.orchestrator.previewStrategySwitch.useMutation({
+    onError: (error) => pushToast("danger", "预览切换失败", error.message)
+  });
+  const applyStrategySwitch = trpc.sub2api.orchestrator.applyStrategySwitch.useMutation({
+    onMutate: () =>
+      startTask(
+        setTask,
+        "切换日工具：哈希策略迁移",
+        "一次性把所有账号按新策略重排，并更新 Spec。完成后切换的下次 reconcile 会接管常态调度。"
+      ),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "哈希策略切换完成",
+        `迁移成功 ${result.success}，失败 ${result.failed}；新策略 ${result.plan.toStrategy} 已写入 Spec。`
+      );
+      await utils.sub2api.spec.get.invalidate();
+      await utils.sub2api.orchestrator.statusSnapshot.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "策略切换失败", error.message)
+  });
 
   const busy =
     addSubscription.isPending ||
@@ -642,7 +664,9 @@ function Dashboard(props: { onLogout: () => void }) {
             pause: pauseOrchestrator,
             resume: resumeOrchestrator,
             saveConnection: saveSub2apiConfig,
-            testConnection: testSub2apiConnection
+            testConnection: testSub2apiConnection,
+            previewStrategySwitch,
+            applyStrategySwitch
           }}
         />
       ) : null}

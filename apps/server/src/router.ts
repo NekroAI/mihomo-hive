@@ -16,6 +16,7 @@ import {
   groupAssignmentChangesByProxy,
   isManagedProxy,
   mapLocalNodesToSub2ApiProxies,
+  planStrategySwitch,
   validateIntakeAgainstSpec,
   mapWithConcurrency,
   parsePortRange,
@@ -881,7 +882,99 @@ export const appRouter = t.router({
       }),
       tickHistory: protectedProcedure
         .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).default({}))
-        .query(({ ctx, input }) => ctx.repo.listRecentReconcileTicks(input.limit))
+        .query(({ ctx, input }) => ctx.repo.listRecentReconcileTicks(input.limit)),
+      // 切换日工具：预览或一次性执行哈希策略切换。
+      previewStrategySwitch: protectedProcedure
+        .input(z.object({ target: z.enum(["stable-hash", "rendezvous-hash"]) }))
+        .mutation(async ({ ctx, input }) => {
+          const connection = ctx.repo.getSub2ApiConnection();
+          if (!connection) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+          const client = createSub2ApiClient(connection);
+          const [proxies, accounts] = await Promise.all([
+            client.listAllProxies(),
+            client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+          ]);
+          const spec = ctx.repo.getOrchestrationSpec();
+          const servingProxyIds = new Set(
+            ctx.repo
+              .listNodes()
+              .filter((n) => n.sub2apiProxyId && (n.intentRole === "serving" || n.lifecycleStatus === "schedulable"))
+              .map((n) => n.sub2apiProxyId!)
+          );
+          return planStrategySwitch({
+            spec,
+            targetStrategy: input.target,
+            proxies,
+            accounts,
+            managedProxyPrefix: connection.managedProxyPrefix,
+            servingProxyIds
+          });
+        }),
+      applyStrategySwitch: protectedProcedure
+        .input(z.object({ target: z.enum(["stable-hash", "rendezvous-hash"]) }))
+        .mutation(async ({ ctx, input }) => {
+          const connection = ctx.repo.getSub2ApiConnection();
+          if (!connection) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+          const client = createSub2ApiClient(connection);
+          const [proxies, accounts] = await Promise.all([
+            client.listAllProxies(),
+            client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+          ]);
+          const spec = ctx.repo.getOrchestrationSpec();
+          const servingProxyIds = new Set(
+            ctx.repo
+              .listNodes()
+              .filter((n) => n.sub2apiProxyId && (n.intentRole === "serving" || n.lifecycleStatus === "schedulable"))
+              .map((n) => n.sub2apiProxyId!)
+          );
+          const plan = planStrategySwitch({
+            spec,
+            targetStrategy: input.target,
+            proxies,
+            accounts,
+            managedProxyPrefix: connection.managedProxyPrefix,
+            servingProxyIds
+          });
+
+          const job = createJob(
+            "sub2api.automation.strategySwitch",
+            `切换哈希策略 ${plan.fromStrategy} → ${plan.toStrategy}`,
+            `一次性大规模迁移：${plan.affectedAccounts} 个账号`,
+            ["执行批量绑定", "保存策略到 Spec"]
+          );
+          try {
+            // 按 toProxyId 分组 bulkUpdate
+            updateJobStep(job.id, 0, "running", `执行 ${plan.affectedAccounts} 个变更`);
+            const groups = new Map<number, number[]>();
+            for (const change of plan.changes) {
+              const list = groups.get(change.toProxyId) ?? [];
+              list.push(change.accountId);
+              groups.set(change.toProxyId, list);
+            }
+            let success = 0;
+            let failed = 0;
+            for (const [toProxyId, accountIds] of groups) {
+              const result = await client.bulkUpdateProxy(accountIds, toProxyId);
+              success += result.success;
+              failed += result.failed;
+            }
+            updateJobStep(job.id, 0, "success", `成功 ${success}，失败 ${failed}`);
+
+            updateJobStep(job.id, 1, "running", "保存新策略到 Spec");
+            ctx.repo.saveOrchestrationSpec({
+              ...spec,
+              stickiness: { ...spec.stickiness, strategy: input.target }
+            });
+            updateJobStep(job.id, 1, "success", "Spec 已更新");
+
+            finishJob(job.id, "success", `${input.target} 上线：迁移 ${success} 个账号`);
+            return { plan, success, failed, operationId: job.id };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "未知错误";
+            finishJob(job.id, "failed", message);
+            throw err;
+          }
+        })
     }),
     reconcile: t.router({
       preview: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).query(async ({ ctx, input }) => {

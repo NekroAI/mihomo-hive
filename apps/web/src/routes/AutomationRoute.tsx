@@ -6,7 +6,8 @@ import type {
 } from "@mihomo-hive/schemas";
 import {
   OrchestrationSpecPanel,
-  type ConnectionDraft
+  type ConnectionDraft,
+  type StrategySwitchPreview
 } from "../features/automation/OrchestrationSpecPanel.js";
 import { OrchestrationStatusPanel } from "../features/automation/OrchestrationStatusPanel.js";
 
@@ -35,6 +36,12 @@ export interface AutomationRouteProps {
       }) => void;
     };
     testConnection: PendingMutation & { mutate: () => void };
+    previewStrategySwitch: PendingMutation & {
+      mutateAsync: (input: { target: "stable-hash" | "rendezvous-hash" }) => Promise<StrategySwitchPreview>;
+    };
+    applyStrategySwitch: PendingMutation & {
+      mutateAsync: (input: { target: "stable-hash" | "rendezvous-hash" }) => Promise<unknown>;
+    };
   };
 }
 
@@ -67,6 +74,17 @@ export function AutomationRoute(props: AutomationRouteProps) {
         onApplyOnce={() => m.applyOnce.mutate()}
         onPause={() => m.pause.mutate()}
         onResume={() => m.resume.mutate()}
+        switchingStrategy={m.applyStrategySwitch.isPending}
+        onPreviewStrategySwitch={async (target) => {
+          try {
+            return await m.previewStrategySwitch.mutateAsync({ target });
+          } catch {
+            return undefined;
+          }
+        }}
+        onApplyStrategySwitch={async (target) => {
+          await m.applyStrategySwitch.mutateAsync({ target });
+        }}
       />
       <OrchestrationStatusPanel snapshot={props.status} configured={configured} />
     </section>

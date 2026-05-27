@@ -842,6 +842,46 @@ select {
   }
 }
 
+.strategy-switch-tool {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-switch-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.strategy-switch-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-switch-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, #d97706 50%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #d97706 8%, var(--panel));
+}
+
+.strategy-switch-changes {
+  list-style: none;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
 .app-header {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;

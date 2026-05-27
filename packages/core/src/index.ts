@@ -9,6 +9,7 @@ export * from "./reconcile.js";
 export * from "./region.js";
 export * from "./sub2api-assignment.js";
 export * from "./sub2api-client.js";
+export * from "./strategy-switch.js";
 export * from "./sub2api-maintenance.js";
 export * from "./subscription.js";
 export * from "./subscription-preview.js";

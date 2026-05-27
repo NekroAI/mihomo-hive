@@ -1,11 +1,24 @@
 import React from "react";
-import { Activity, Pause, Play, Save, Shield, Wand2, Zap } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRightLeft, Pause, Play, Save, Shield, Wand2, Zap } from "lucide-react";
 import type {
   OrchestrationSpec,
   Sub2ApiProtectedProxyRule,
   Sub2ApiProxyRecord,
   Sub2ApiSafeConnectionConfig
 } from "@mihomo-hive/schemas";
+
+export interface StrategySwitchPreview {
+  fromStrategy: "stable-hash" | "rendezvous-hash";
+  toStrategy: "stable-hash" | "rendezvous-hash";
+  affectedAccounts: number;
+  totalConsidered: number;
+  changes: Array<{
+    accountId: number;
+    accountName: string;
+    fromProxyId: number | null;
+    toProxyId: number;
+  }>;
+}
 import {
   Badge,
   Button,
@@ -41,7 +54,13 @@ export function OrchestrationSpecPanel(props: {
   onApplyOnce: () => void;
   onPause: () => void;
   onResume: () => void;
+  // 切换日工具
+  onPreviewStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<StrategySwitchPreview | undefined>;
+  onApplyStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<void>;
+  switchingStrategy?: boolean;
 }) {
+  const [strategyPreview, setStrategyPreview] = React.useState<StrategySwitchPreview | undefined>();
+  const [previewing, setPreviewing] = React.useState(false);
   const [draft, setDraft] = React.useState<OrchestrationSpec>(props.spec);
   const [dirty, setDirty] = React.useState(false);
 
@@ -316,6 +335,30 @@ export function OrchestrationSpecPanel(props: {
             onChange={(v) => patch("reconcileIntervalMs", v * 1000)}
           />
         </div>
+
+        {props.onPreviewStrategySwitch && props.onApplyStrategySwitch ? (
+          <StrategySwitchTool
+            currentStrategy={props.spec.stickiness.strategy}
+            preview={strategyPreview}
+            previewing={previewing}
+            applying={Boolean(props.switchingStrategy)}
+            onPreview={async (target) => {
+              setPreviewing(true);
+              try {
+                const plan = await props.onPreviewStrategySwitch!(target);
+                if (plan) setStrategyPreview(plan);
+              } finally {
+                setPreviewing(false);
+              }
+            }}
+            onConfirm={async () => {
+              if (!strategyPreview) return;
+              await props.onApplyStrategySwitch!(strategyPreview.toStrategy);
+              setStrategyPreview(undefined);
+            }}
+            onCancel={() => setStrategyPreview(undefined)}
+          />
+        ) : null}
       </Panel>
 
       <Panel title="故障自愈">
@@ -412,6 +455,82 @@ export function OrchestrationSpecPanel(props: {
     }));
     setDirty(true);
   }
+}
+
+function StrategySwitchTool(props: {
+  currentStrategy: "stable-hash" | "rendezvous-hash";
+  preview: StrategySwitchPreview | undefined;
+  previewing: boolean;
+  applying: boolean;
+  onPreview: (target: "stable-hash" | "rendezvous-hash") => Promise<void>;
+  onConfirm: () => Promise<void>;
+  onCancel: () => void;
+}) {
+  const other = props.currentStrategy === "stable-hash" ? "rendezvous-hash" : "stable-hash";
+  const otherLabel = other === "rendezvous-hash" ? "Rendezvous Hashing" : "稳定哈希";
+  return (
+    <div className="strategy-switch-tool">
+      <div className="strategy-switch-head">
+        <ArrowRightLeft size={14} className="muted" />
+        <strong>切换日工具</strong>
+        <span className="muted small">
+          当前 <span className="font-mono">{props.currentStrategy}</span>，切到{" "}
+          <span className="font-mono">{other}</span> 会触发一次性大规模迁移。
+        </span>
+      </div>
+      {!props.preview ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<ArrowRightLeft size={14} />}
+          loading={props.previewing}
+          onClick={() => void props.onPreview(other)}
+          title="先预览切换后的影响范围（影响账号数 + 前几个具体变更），再决定是否执行。预览不会修改 Sub2API 数据。"
+        >
+          预览切换到 {otherLabel}
+        </Button>
+      ) : (
+        <div className="strategy-switch-preview">
+          <div className="strategy-switch-summary">
+            <AlertTriangle size={14} />
+            <span>
+              将影响 <strong>{props.preview.affectedAccounts}</strong> / {props.preview.totalConsidered} 个账号，
+              从 <span className="font-mono">{props.preview.fromStrategy}</span> 切到{" "}
+              <span className="font-mono">{props.preview.toStrategy}</span>。
+            </span>
+          </div>
+          {props.preview.changes.length > 0 ? (
+            <details>
+              <summary>前 {Math.min(8, props.preview.changes.length)} 个变更预览</summary>
+              <ul className="strategy-switch-changes">
+                {props.preview.changes.slice(0, 8).map((change) => (
+                  <li key={change.accountId}>
+                    账号 {change.accountName}：代理 #{change.fromProxyId} → #{change.toProxyId}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+          <div className="button-row">
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<ArrowRightLeft size={14} />}
+              loading={props.applying}
+              disabled={props.preview.affectedAccounts === 0}
+              onClick={() => void props.onConfirm()}
+              title="一次性执行所有迁移。建议低峰期；执行期间被迁账号可能短暂出现请求异常。完成后 Spec 也会更新。"
+            >
+              {props.preview.affectedAccounts === 0 ? "无需迁移" : `确认执行 ${props.preview.affectedAccounts} 个迁移`}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={props.onCancel}>
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function NumberInput(props: {
