@@ -2,7 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/* —— 默认浅色主题 + auto 模式下的浅色 fallback —— */
+:root,
+:root[data-theme="light"] {
   --bg: #f6f7f9;
   --panel: #ffffff;
   --panel-subtle: #f9fafb;
@@ -24,6 +26,55 @@
   --info-soft: #eef4ff;
   --shadow: 0 18px 48px rgb(18 24 38 / 10%);
   --radius: 8px;
+}
+
+/* —— 深色主题：auto 模式下系统偏好为深色，或显式 data-theme="dark" —— */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1117;
+    --panel: #181b22;
+    --panel-subtle: #1e222b;
+    --border: #2a2f3a;
+    --border-strong: #3a4150;
+    --text: #e6e9f0;
+    --muted: #8d96a8;
+    --muted-strong: #b6bdcb;
+    --accent: #ff6b6b;
+    --accent-strong: #ff8a8a;
+    --accent-soft: #2c1c1d;
+    --success: #2dca85;
+    --success-soft: #142b22;
+    --danger: #ff5d5d;
+    --danger-soft: #2c1717;
+    --warning: #f0b34a;
+    --warning-soft: #2b2114;
+    --info: #5e9eff;
+    --info-soft: #16213a;
+    --shadow: 0 18px 48px rgb(0 0 0 / 50%);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1117;
+  --panel: #181b22;
+  --panel-subtle: #1e222b;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
+  --text: #e6e9f0;
+  --muted: #8d96a8;
+  --muted-strong: #b6bdcb;
+  --accent: #ff6b6b;
+  --accent-strong: #ff8a8a;
+  --accent-soft: #2c1c1d;
+  --success: #2dca85;
+  --success-soft: #142b22;
+  --danger: #ff5d5d;
+  --danger-soft: #2c1717;
+  --warning: #f0b34a;
+  --warning-soft: #2b2114;
+  --info: #5e9eff;
+  --info-soft: #16213a;
+  --shadow: 0 18px 48px rgb(0 0 0 / 50%);
 }
 
 * {
@@ -202,9 +253,20 @@ select {
   gap: 12px;
   height: 100%;
   min-height: 0;
-  max-width: 1600px;
-  margin: 0 auto;
   width: 100%;
+}
+
+/* 带鱼屏：左 spec 栏可以稍微宽点，右栏 KPI 自然 4-8 列铺开 */
+@media (min-width: 1920px) {
+  .automation-grid {
+    grid-template-columns: 420px minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 2400px) {
+  .automation-grid {
+    grid-template-columns: 460px minmax(0, 1fr);
+  }
 }
 
 .automation-config,
@@ -882,6 +944,65 @@ select {
   font-family: var(--font-mono, monospace);
 }
 
+/* —— Collapsible Panel + InfoTip —— */
+
+.collapsible-panel .collapsible-header {
+  cursor: pointer;
+  user-select: none;
+  display: grid;
+  grid-template-columns: 18px auto auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.collapsible-panel .collapsible-header:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.collapsible-trigger {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.collapsible-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-tip {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: help;
+  border-radius: 50%;
+}
+
+.info-tip:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* —— Reconcile feed: 合并的 no_change 行 —— */
+
+.reconcile-row.reconcile-run {
+  opacity: 0.6;
+}
+
+.reconcile-row.reconcile-run .reconcile-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 .app-header {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
@@ -895,6 +1016,41 @@ select {
 .app-header > .header-metrics {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-switcher {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--panel-subtle);
+}
+
+.theme-switcher button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.theme-switcher button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
+}
+
+.theme-switcher button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 @media (max-width: 1180px) {

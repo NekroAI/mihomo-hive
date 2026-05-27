@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info, Loader2, X } from "lucide-react";
 
 export type Tone = "neutral" | "success" | "danger" | "warning" | "info";
 
@@ -138,6 +138,84 @@ export function Panel(props: { title?: string; actions?: React.ReactNode; childr
       ) : null}
       <div className="panel-body">{props.children}</div>
     </section>
+  );
+}
+
+/**
+ * Panel 的可折叠版本：标题旁有展开/收起箭头，body 在收起时不渲染。
+ * 默认状态由 props.defaultOpen 决定；状态持久化到 localStorage 的 storageKey。
+ */
+export function CollapsiblePanel(props: {
+  title: string;
+  actions?: React.ReactNode;
+  defaultOpen?: boolean;
+  storageKey?: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(() => {
+    if (!props.storageKey) return props.defaultOpen ?? false;
+    try {
+      const stored = window.localStorage.getItem(`mihomo-hive.panel.${props.storageKey}`);
+      if (stored === null) return props.defaultOpen ?? false;
+      return stored === "1";
+    } catch {
+      return props.defaultOpen ?? false;
+    }
+  });
+  React.useEffect(() => {
+    if (!props.storageKey) return;
+    try {
+      window.localStorage.setItem(`mihomo-hive.panel.${props.storageKey}`, open ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [open, props.storageKey]);
+  return (
+    <section className="panel collapsible-panel">
+      <header
+        className="panel-header collapsible-header"
+        onClick={() => setOpen((v) => !v)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((v) => !v);
+          }
+        }}
+      >
+        <span className="collapsible-trigger">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+        <h2>{props.title}</h2>
+        {props.hint ? <InfoTip text={props.hint} /> : null}
+        {props.actions ? (
+          <span className="collapsible-actions" onClick={(e) => e.stopPropagation()}>
+            {props.actions}
+          </span>
+        ) : null}
+      </header>
+      {open ? <div className="panel-body">{props.children}</div> : null}
+    </section>
+  );
+}
+
+/**
+ * Info icon with hover tooltip via native `title` attribute (cheap and a11y-friendly).
+ * Use to hide longish explanations from the常驻 page surface.
+ */
+export function InfoTip(props: { text: string }) {
+  return (
+    <button
+      type="button"
+      className="info-tip"
+      title={props.text}
+      aria-label={props.text}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Info size={13} />
+    </button>
   );
 }
 

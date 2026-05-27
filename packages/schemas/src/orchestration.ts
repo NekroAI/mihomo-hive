@@ -10,9 +10,12 @@ export const nodeIntentRoleSchema = z.enum(["serving", "standby", "quarantined",
 export type NodeIntentRole = z.infer<typeof nodeIntentRoleSchema>;
 
 // 节点供给策略 —— "我有哪些节点能用"
+//
+// fetchIntervalMs = 0 表示关闭自动刷新（与 autoFetchSubscriptions=false 等价语义）。
+// 用户在 UI 上把数字归零比额外切换一个开关更直觉。
 export const supplyPolicySchema = z.object({
   autoFetchSubscriptions: z.boolean().default(true),
-  fetchIntervalMs: z.number().int().min(60_000).default(6 * 60 * 60 * 1000), // 6h
+  fetchIntervalMs: z.number().int().min(0).default(6 * 60 * 60 * 1000), // 0 = 关闭；默认 6h
   inPoolGate: z.object({
     requirePassedTest: z.boolean().default(true),
     maxLatencyMs: z.number().int().positive().optional(),

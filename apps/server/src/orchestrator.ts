@@ -229,13 +229,15 @@ export function startReconcileScheduler(input: {
   });
 
   // 订阅自动刷新子循环：按 spec.supply.fetchIntervalMs（默认 6h）独立运行。
-  // 不在启动时立即跑（避免每次重启都拉一遍订阅）；首个延迟 = fetchIntervalMs。
+  // fetchIntervalMs=0 或 autoFetchSubscriptions=false 都视为关闭；每分钟轻量轮询 spec
+  // 看是否需要恢复，让用户重新打开后能在 1 分钟内自然接上。
   let subscriptionTimer: NodeJS.Timeout | undefined;
   function scheduleSubscriptionRefresh(): void {
     if (stopped) return;
     const spec = repo.getOrchestrationSpec();
-    if (!spec.supply.autoFetchSubscriptions) {
-      // 关闭态下也排一次，下次重新读 spec 时如果开了又能接上。
+    const disabled = !spec.supply.autoFetchSubscriptions || spec.supply.fetchIntervalMs <= 0;
+    if (disabled) {
+      // 关闭态：轻量等待 1min 再查 spec
       subscriptionTimer = setTimeout(scheduleSubscriptionRefresh, 60_000);
       subscriptionTimer.unref?.();
       return;

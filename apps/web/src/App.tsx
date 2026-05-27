@@ -9,6 +9,7 @@ import { AutomationRoute } from "./routes/AutomationRoute.js";
 import { NodesRoute } from "./routes/NodesRoute.js";
 import { useTaskFeedback, type TaskFeedback } from "./hooks/useTaskFeedback.js";
 import { useConfirmAction, type ConfirmAction } from "./hooks/useConfirmAction.js";
+import { useTheme } from "./hooks/useTheme.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
@@ -110,6 +111,7 @@ function Dashboard(props: { onLogout: () => void }) {
   const { task, setTask, toasts, pushToast, dismissToast } = feedback;
   const confirm = useConfirmAction();
   const confirmAction = confirm.current;
+  const theme = useTheme();
   const [downloading, setDownloading] = React.useState(false);
   const [importPreview, setImportPreview] = React.useState<SubscriptionImportPreview | undefined>();
   const [deletePlan, setDeletePlan] = React.useState<NodeDeletionPlan | undefined>();
@@ -597,7 +599,9 @@ function Dashboard(props: { onLogout: () => void }) {
         active={activeCount}
         assigned={assignedCount}
         workspace={workspace}
+        theme={theme.theme}
         onWorkspaceChange={setWorkspace}
+        onThemeChange={theme.setTheme}
         onLogout={props.onLogout}
       />
 

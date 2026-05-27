@@ -1,6 +1,7 @@
 import type React from "react";
-import { Activity, LogOut, Network, Server, ShieldCheck } from "lucide-react";
+import { Activity, LogOut, Monitor, Moon, Network, Server, ShieldCheck, Sun } from "lucide-react";
 import { Badge, Button } from "../../components/ui.js";
+import type { Theme } from "../../hooks/useTheme.js";
 
 export type WorkspaceId = "nodes" | "automation" | "runtime";
 
@@ -22,7 +23,9 @@ export function RuntimeHeader(props: {
   assigned: number;
   listeners?: number;
   workspace: WorkspaceId;
+  theme: Theme;
   onWorkspaceChange: (next: WorkspaceId) => void;
+  onThemeChange: (next: Theme) => void;
   onLogout: () => void;
 }) {
   return (
@@ -53,10 +56,37 @@ export function RuntimeHeader(props: {
         <HeaderMetric icon={<ShieldCheck size={16} />} label="端口" value={String(props.assigned)} />
         {props.listeners !== undefined ? <HeaderMetric icon={<Server size={16} />} label="Listener" value={String(props.listeners)} /> : null}
       </div>
-      <Button variant="secondary" icon={<LogOut size={16} />} onClick={props.onLogout}>
-        退出
-      </Button>
+      <div className="header-actions">
+        <ThemeSwitcher theme={props.theme} onChange={props.onThemeChange} />
+        <Button variant="secondary" icon={<LogOut size={16} />} onClick={props.onLogout}>
+          退出
+        </Button>
+      </div>
     </header>
+  );
+}
+
+function ThemeSwitcher(props: { theme: Theme; onChange: (next: Theme) => void }) {
+  const options: { value: Theme; label: string; icon: React.ReactNode }[] = [
+    { value: "auto", label: "跟随系统", icon: <Monitor size={14} /> },
+    { value: "light", label: "浅色", icon: <Sun size={14} /> },
+    { value: "dark", label: "深色", icon: <Moon size={14} /> }
+  ];
+  return (
+    <div className="theme-switcher" role="group" aria-label="主题">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={props.theme === option.value ? "is-active" : ""}
+          onClick={() => props.onChange(option.value)}
+          title={option.label}
+          aria-label={option.label}
+        >
+          {option.icon}
+        </button>
+      ))}
+    </div>
   );
 }
 

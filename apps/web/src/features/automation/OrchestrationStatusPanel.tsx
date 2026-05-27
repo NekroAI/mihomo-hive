@@ -158,6 +158,36 @@ function NodeMatrix(props: { intents: ReconcileNodeIntent[] }) {
   );
 }
 
+type ReconcileFeedItem =
+  | { kind: "tick"; tick: ReconcileTick }
+  | { kind: "no_change_run"; count: number; latestAt: string; earliestAt: string };
+
+/**
+ * 把连续的 no_change tick 合并成单行"X 次无变更"占位，给真正有动作的 tick 让出空间。
+ * ticks 是按 startedAt 倒序，所以"连续"是数组相邻。
+ */
+function mergeNoChangeRuns(ticks: ReconcileTick[]): ReconcileFeedItem[] {
+  const items: ReconcileFeedItem[] = [];
+  let run: { count: number; latestAt: string; earliestAt: string } | null = null;
+  for (const tick of ticks) {
+    if (tick.skippedReason === "no_change") {
+      if (!run) run = { count: 1, latestAt: tick.startedAt, earliestAt: tick.startedAt };
+      else {
+        run.count += 1;
+        run.earliestAt = tick.startedAt; // 倒序 → 越后越早
+      }
+    } else {
+      if (run) {
+        items.push({ kind: "no_change_run", ...run });
+        run = null;
+      }
+      items.push({ kind: "tick", tick });
+    }
+  }
+  if (run) items.push({ kind: "no_change_run", ...run });
+  return items;
+}
+
 function RecentReconcileCard(props: { ticks: ReconcileTick[] }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   if (props.ticks.length === 0) {
@@ -167,10 +197,28 @@ function RecentReconcileCard(props: { ticks: ReconcileTick[] }) {
       </Panel>
     );
   }
+  const items = mergeNoChangeRuns(props.ticks);
+  const nonNoChange = props.ticks.filter((t) => t.skippedReason !== "no_change").length;
   return (
-    <Panel title={`最近调和 (${props.ticks.length})`}>
+    <Panel title={`最近调和 (${nonNoChange} 有变化 / 共 ${props.ticks.length})`}>
       <div className="reconcile-feed">
-        {props.ticks.map((tick) => {
+        {items.map((item, idx) => {
+          if (item.kind === "no_change_run") {
+            const fromTs = new Date(item.earliestAt).toLocaleTimeString();
+            const toTs = new Date(item.latestAt).toLocaleTimeString();
+            const sameMoment = fromTs === toTs;
+            return (
+              <article key={`run-${idx}`} className="reconcile-row reconcile-no_change reconcile-run">
+                <div className="reconcile-row-head reconcile-run-head">
+                  <ShieldCheck size={14} aria-hidden="true" />
+                  <span className="muted small">
+                    {item.count} 次无变更（{sameMoment ? toTs : `${fromTs} – ${toTs}`}）
+                  </span>
+                </div>
+              </article>
+            );
+          }
+          const tick = item.tick;
           const isOpen = expanded.has(tick.id);
           return (
             <article key={tick.id} className={`reconcile-row reconcile-${tick.skippedReason}`}>

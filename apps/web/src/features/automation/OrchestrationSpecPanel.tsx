@@ -22,7 +22,9 @@ export interface StrategySwitchPreview {
 import {
   Badge,
   Button,
+  CollapsiblePanel,
   EmptyState,
+  InfoTip,
   Panel,
   SelectInput,
   TextInput
@@ -101,11 +103,13 @@ export function OrchestrationSpecPanel(props: {
     <aside className="orchestration-spec-panel">
       <Panel
         title="自动协调"
-        actions={<Badge tone={enabled ? "success" : "warning"}>{enabled ? "运行中" : "已暂停"}</Badge>}
+        actions={
+          <>
+            <InfoTip text="系统按你指定的'应该是什么样'自动调节配置：自动同步代理、自动迁移账号、自动隔离故障节点。火警按下后只观测不执行，便于排查。" />
+            <Badge tone={enabled ? "success" : "warning"}>{enabled ? "运行中" : "已暂停"}</Badge>
+          </>
+        }
       >
-        <p className="muted small">
-          系统按你指定的"应该是什么样"自动调节配置：自动同步代理、自动迁移账号、自动隔离故障节点。火警按下后只观测不执行，便于排查。
-        </p>
         <div className="button-row wrap">
           {enabled ? (
             <Button
@@ -138,8 +142,11 @@ export function OrchestrationSpecPanel(props: {
         </div>
       </Panel>
 
-      <Panel
+      <CollapsiblePanel
         title="Sub2API 连接"
+        storageKey="spec-connection"
+        defaultOpen={!connected}
+        hint="Sub2API baseUrl + 管理员 API Key + 托管代理前缀。低频修改，默认收起。"
         actions={<Badge tone={connected ? "success" : "warning"}>{connected ? "已连接" : "待配置"}</Badge>}
       >
         <div className="sub2api-fields">
@@ -196,12 +203,14 @@ export function OrchestrationSpecPanel(props: {
             测试连接
           </Button>
         </div>
-      </Panel>
+      </CollapsiblePanel>
 
-      <Panel title="入站代理">
-        <p className="muted small">
-          新账号在 Sub2API 端创建时默认挂到这个代理上；系统每个 reconcile 周期会把它上面的账号引流到合适的 Hive 节点。建议选一个手动配置的兜底代理（不能是托管代理或保护代理）。
-        </p>
+      <Panel
+        title="入站代理"
+        actions={
+          <InfoTip text="新账号在 Sub2API 创建时默认挂到这里；系统每个 reconcile 周期把它上面的账号引流到合适的 Hive 节点。建议选手动配置的兜底代理（不能是托管代理或保护代理）。" />
+        }
+      >
         {props.proxies.length === 0 ? (
           <EmptyState title="未拉取 Sub2API 代理" description="保存 + 测试连接后系统会自动拉取代理列表，再来此处选择入站代理。" />
         ) : (
@@ -216,12 +225,16 @@ export function OrchestrationSpecPanel(props: {
         )}
       </Panel>
 
-      <Panel title="节点供给">
+      <CollapsiblePanel
+        title="节点供给"
+        storageKey="spec-supply"
+        hint="订阅自动刷新周期、入池门槛、退役等待。0 = 关闭自动刷新。"
+      >
         <div className="form-grid">
           <NumberInput
-            label="订阅自动刷新周期 (分钟)"
+            label="订阅刷新周期 (分钟, 0=关闭)"
             value={Math.round(draft.supply.fetchIntervalMs / 60_000)}
-            min={5}
+            min={0}
             onChange={(v) => patchNested("supply", (c) => ({ ...c, fetchIntervalMs: v * 60_000 }))}
           />
           <NumberInput
@@ -231,7 +244,7 @@ export function OrchestrationSpecPanel(props: {
             onChange={(v) => patchNested("supply", (c) => ({ ...c, evictAfterDays: v }))}
           />
           <NumberInput
-            label="最大延迟 (ms，0=不限)"
+            label="最大延迟 (ms, 0=不限)"
             value={draft.supply.inPoolGate.maxLatencyMs ?? 0}
             min={0}
             onChange={(v) =>
@@ -242,12 +255,14 @@ export function OrchestrationSpecPanel(props: {
             }
           />
         </div>
-      </Panel>
+      </CollapsiblePanel>
 
-      <Panel title="容量与再平衡">
-        <p className="muted small">
-          系统按"目标 = 总账号数 / 健康节点数"自动算每节点的目标负载。超过 overload 倍触发外迁；低于 underload 倍视为闲置（等填）。
-        </p>
+      <Panel
+        title="容量与再平衡"
+        actions={
+          <InfoTip text="目标 = 总账号数 / 健康节点数（auto 时）。超过 overload 倍触发外迁；低于 underload 倍视为闲置等填。" />
+        }
+      >
         <div className="form-grid">
           <SelectInput
             label="每节点目标账号数"
@@ -294,11 +309,12 @@ export function OrchestrationSpecPanel(props: {
         </div>
       </Panel>
 
-      <Panel title="灰度与稳定性">
-        <p className="muted small">
-          灰度阀给"系统判错"留缓冲：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。
-          稳定哈希策略决定节点集合变化时账号会漂移多少；Rendezvous Hashing 只让原节点已下线的账号漂移（≈ 1/N），稳定哈希则会触发大规模重排。切换策略会引起一次性大漂移，建议低峰期执行。
-        </p>
+      <Panel
+        title="灰度与稳定性"
+        actions={
+          <InfoTip text="灰度阀：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。" />
+        }
+      >
         <div className="form-grid">
           <SelectInput
             label="哈希策略"
@@ -361,11 +377,11 @@ export function OrchestrationSpecPanel(props: {
         ) : null}
       </Panel>
 
-      <Panel title="故障自愈">
-        <p className="muted small">
-          仅依赖 Sub2API 的 upstream-errors 信号。窗口内错误条数超过预算 → 进入退避（账号留在原地）；连续 N 次失败 → 永久驱逐。
-          上游接口只返回错误条目（没有"总请求数"），所以阈值是绝对错误数而不是百分比。
-        </p>
+      <CollapsiblePanel
+        title="故障自愈"
+        storageKey="spec-health"
+        hint="仅依赖 Sub2API upstream-errors 信号；窗口内错误条数超过预算 → 退避（账号留在原地）→ 连续 N 次失败 → 永久驱逐。上游接口只返回错误条目，所以阈值是绝对错误数而不是百分比。"
+      >
         <div className="form-grid">
           <NumberInput
             label="错误预算 (条/窗口)"
@@ -386,12 +402,14 @@ export function OrchestrationSpecPanel(props: {
             onChange={(v) => patchNested("health", (c) => ({ ...c, evictAfterBackoffs: v }))}
           />
         </div>
-      </Panel>
+      </CollapsiblePanel>
 
-      <Panel title="保护代理规则" actions={<Shield size={16} className="muted" />}>
-        <p className="muted small">
-          命中保护规则的代理被双向锁定：① 不会被自动化分配新账号 ② 当前已绑定到保护代理的账号也不会被迁走。用于"由人工维护、不交给系统接管"的代理范围。
-        </p>
+      <CollapsiblePanel
+        title="保护代理规则"
+        storageKey="spec-protected"
+        actions={<Shield size={14} className="muted" />}
+        hint="命中保护规则的代理被双向锁定：① 不会被自动化分配新账号 ② 当前已绑定到保护代理的账号也不会被迁走。用于'由人工维护、不交给系统接管'的代理范围。"
+      >
         <div className="form-grid">
           <TextInput
             label="名称包含"
@@ -419,7 +437,7 @@ export function OrchestrationSpecPanel(props: {
             placeholder="东京"
           />
         </div>
-      </Panel>
+      </CollapsiblePanel>
 
       <div className="spec-save-bar">
         <Button
