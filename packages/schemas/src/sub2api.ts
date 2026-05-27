@@ -242,3 +242,71 @@ export const sub2ApiMaintenanceApplyResultSchema = z.object({
 });
 
 export type Sub2ApiMaintenanceApplyResult = z.infer<typeof sub2ApiMaintenanceApplyResultSchema>;
+
+export const sub2ApiImportProxyDataResultSchema = z.object({
+  proxy_created: z.number().int().nonnegative().default(0),
+  proxy_reused: z.number().int().nonnegative().default(0),
+  proxy_failed: z.number().int().nonnegative().default(0),
+  account_created: z.number().int().nonnegative().default(0),
+  account_failed: z.number().int().nonnegative().default(0)
+});
+
+export type Sub2ApiImportProxyDataResult = z.infer<typeof sub2ApiImportProxyDataResultSchema>;
+
+export const sub2ApiProxyQualityCheckItemSchema = z
+  .object({
+    id: z.string().optional(),
+    name: z.string().optional(),
+    status: z.string().optional(),
+    message: z.string().optional(),
+    latency_ms: z.number().optional().nullable()
+  })
+  .passthrough();
+
+export type Sub2ApiProxyQualityCheckItem = z.infer<typeof sub2ApiProxyQualityCheckItemSchema>;
+
+export const sub2ApiProxyQualityResultSchema = z.object({
+  proxy_id: z.number().int().positive(),
+  score: z.number().int().min(0).max(100).optional(),
+  grade: z.string().optional(),
+  summary: z.string().optional(),
+  exit_ip: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  country_code: z.string().optional().nullable(),
+  base_latency_ms: z.number().optional().nullable(),
+  passed_count: z.number().int().nonnegative().default(0),
+  warn_count: z.number().int().nonnegative().default(0),
+  failed_count: z.number().int().nonnegative().default(0),
+  challenge_count: z.number().int().nonnegative().default(0),
+  checked_at: z.number().optional().nullable(),
+  items: z.array(sub2ApiProxyQualityCheckItemSchema).default([])
+});
+
+export type Sub2ApiProxyQualityResult = z.infer<typeof sub2ApiProxyQualityResultSchema>;
+
+export const sub2ApiUpstreamErrorSchema = z
+  .object({
+    account_id: z.number().int().positive().optional().nullable(),
+    account_name: z.string().optional().nullable(),
+    platform: z.string().optional().nullable(),
+    model: z.string().optional().nullable(),
+    status_code: z.number().int().optional().nullable(),
+    message: z.string().optional().nullable(),
+    phase: z.string().optional().nullable(),
+    type: z.string().optional().nullable(),
+    severity: z.string().optional().nullable(),
+    created_at: z.union([z.string(), z.number()]).optional().nullable(),
+    upstream_endpoint: z.string().optional().nullable(),
+    requested_model: z.string().optional().nullable()
+  })
+  .passthrough();
+
+export type Sub2ApiUpstreamError = z.infer<typeof sub2ApiUpstreamErrorSchema>;
+
+export const sub2ApiUpstreamErrorListOptionsSchema = z.object({
+  timeRange: z.string().default("1h"),
+  view: z.string().default("errors"),
+  phase: z.string().default("upstream")
+});
+
+export type Sub2ApiUpstreamErrorListOptions = z.infer<typeof sub2ApiUpstreamErrorListOptionsSchema>;

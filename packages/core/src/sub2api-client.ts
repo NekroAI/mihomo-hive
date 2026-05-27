@@ -1,10 +1,17 @@
 import {
   sub2ApiAccountRecordSchema,
+  sub2ApiImportProxyDataResultSchema,
+  sub2ApiProxyQualityResultSchema,
   sub2ApiProxyRecordSchema,
+  sub2ApiUpstreamErrorSchema,
   type Sub2ApiAccountFilters,
   type Sub2ApiAccountRecord,
   type Sub2ApiConnectionConfig,
-  type Sub2ApiProxyRecord
+  type Sub2ApiImportProxyDataResult,
+  type Sub2ApiProxyQualityResult,
+  type Sub2ApiProxyRecord,
+  type Sub2ApiUpstreamError,
+  type Sub2ApiUpstreamErrorListOptions
 } from "@mihomo-hive/schemas";
 
 interface Sub2ApiListResponse<T> {
@@ -65,6 +72,67 @@ export class Sub2ApiClient {
       method: "DELETE"
     });
     assertSuccess(response, "删除 Sub2API 代理失败");
+  }
+
+  async importProxyData(payload: {
+    proxies: unknown[];
+    accounts?: unknown[];
+  }): Promise<Sub2ApiImportProxyDataResult> {
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      "/api/v1/admin/proxies/data",
+      {
+        method: "POST",
+        body: JSON.stringify({ data: { proxies: payload.proxies, accounts: payload.accounts ?? [] } })
+      }
+    );
+    assertSuccess(response, "导入 Sub2API 代理数据失败");
+    return sub2ApiImportProxyDataResultSchema.parse(response.data ?? {});
+  }
+
+  async clearAccountProxy(accountIds: number[]): Promise<{
+    success: number;
+    failed: number;
+    successIds: number[];
+    failedIds: number[];
+    results: Array<{ accountId: number; success: boolean; message?: string }>;
+  }> {
+    // proxy_id=0 解除绑定（Sub2API 管理员接口约定）
+    return this.bulkUpdateProxy(accountIds, 0);
+  }
+
+  async qualityCheckProxy(proxyId: number): Promise<Sub2ApiProxyQualityResult> {
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      `/api/v1/admin/proxies/${proxyId}/quality-check`,
+      { method: "POST" }
+    );
+    assertSuccess(response, "代理质量检查失败");
+    return sub2ApiProxyQualityResultSchema.parse(response.data ?? {});
+  }
+
+  async listUpstreamErrors(options: Partial<Sub2ApiUpstreamErrorListOptions> & {
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<{ items: Sub2ApiUpstreamError[]; total: number; pages: number }> {
+    const search = new URLSearchParams({
+      page: String(options.page ?? 1),
+      page_size: String(options.pageSize ?? 100),
+      time_range: options.timeRange ?? "1h",
+      view: options.view ?? "errors",
+      phase: options.phase ?? "upstream",
+      timezone: this.config.timezone
+    });
+    const response = await this.request<Sub2ApiListResponse<unknown>>(`/api/v1/admin/ops/upstream-errors?${search}`);
+    assertSuccess(response, "获取 Sub2API 上游错误日志失败");
+    const data = response.data ?? {};
+    return {
+      items: (data.items ?? []).map((item) => sub2ApiUpstreamErrorSchema.parse(item)),
+      total: data.total ?? 0,
+      pages: data.pages ?? 1
+    };
+  }
+
+  async listAllUpstreamErrors(options: Partial<Sub2ApiUpstreamErrorListOptions> = {}): Promise<Sub2ApiUpstreamError[]> {
+    return this.listAllPages((page) => this.listUpstreamErrors({ ...options, page, pageSize: 200 }));
   }
 
   async bulkUpdateProxy(accountIds: number[], proxyId: number): Promise<{
