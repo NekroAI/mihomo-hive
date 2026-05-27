@@ -1,12 +1,35 @@
 import React from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { Activity, AlertOctagon, CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, RefreshCw, XCircle } from "lucide-react";
 import type { OperationJob, OperationJobStatus } from "@mihomo-hive/schemas";
-import { Badge, Button, EmptyState, Panel } from "../../components/ui.js";
+import { Badge, Button, EmptyState, Panel, SelectInput } from "../../components/ui.js";
+
+export interface UpstreamErrorBucket {
+  proxyId: number;
+  proxyName: string;
+  nodeHash: string | null;
+  errors: number;
+  byStatus: Record<string, number>;
+  bySeverity: Record<string, number>;
+}
+
+export interface UpstreamErrorSummary {
+  timeRange: string;
+  total: number;
+  attributed: number;
+  unattributed: number;
+  byProxy: UpstreamErrorBucket[];
+}
 
 export function TasksPanel(props: {
   jobs: OperationJob[];
   loading: boolean;
   onRefresh: () => void;
+  errorSummary?: UpstreamErrorSummary | undefined;
+  errorSummaryLoading?: boolean | undefined;
+  errorSummaryEnabled?: boolean | undefined;
+  errorTimeRange?: string | undefined;
+  onErrorTimeRangeChange?: ((value: string) => void) | undefined;
+  onErrorSummaryRefresh?: (() => void) | undefined;
 }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
 
@@ -28,6 +51,15 @@ export function TasksPanel(props: {
 
   return (
     <section className="workspace-grid tasks-workspace">
+      {props.errorSummaryEnabled ? (
+        <UpstreamErrorCard
+          summary={props.errorSummary}
+          loading={Boolean(props.errorSummaryLoading)}
+          timeRange={props.errorTimeRange ?? "1h"}
+          onTimeRangeChange={props.onErrorTimeRangeChange ?? (() => {})}
+          onRefresh={props.onErrorSummaryRefresh ?? (() => {})}
+        />
+      ) : null}
       <Panel
         title="任务与审计"
         actions={
@@ -159,6 +191,124 @@ function StatusIcon(props: { status: OperationJobStatus; small?: boolean }) {
     default:
       return <Clock size={size} aria-hidden="true" />;
   }
+}
+
+function UpstreamErrorCard(props: {
+  summary: UpstreamErrorSummary | undefined;
+  loading: boolean;
+  timeRange: string;
+  onTimeRangeChange: (value: string) => void;
+  onRefresh: () => void;
+}) {
+  const buckets = props.summary?.byProxy ?? [];
+  const topBuckets = buckets.slice(0, 10);
+  return (
+    <Panel
+      title="上游错误聚合"
+      actions={
+        <div className="button-row">
+          <SelectInput
+            value={props.timeRange}
+            onChange={props.onTimeRangeChange}
+            options={[
+              { label: "最近 1 小时", value: "1h" },
+              { label: "最近 6 小时", value: "6h" },
+              { label: "最近 24 小时", value: "24h" },
+              { label: "最近 7 天", value: "7d" }
+            ]}
+          />
+          <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.loading} onClick={props.onRefresh}>
+            刷新
+          </Button>
+        </div>
+      }
+    >
+      {!props.summary ? (
+        <EmptyState
+          icon={<Activity size={22} />}
+          title={props.loading ? "正在拉取上游错误..." : "配置 Sub2API 后即可查看上游错误聚合"}
+          description="错误按 account → proxy → 本地节点逐层归因，便于找出最不稳的节点。"
+        />
+      ) : (
+        <>
+          <div className="error-summary-stats">
+            <SmallStat label="总错误" value={props.summary.total} tone="danger" />
+            <SmallStat label="已归因节点" value={props.summary.attributed} tone="warning" />
+            <SmallStat label="无法归因" value={props.summary.unattributed} tone="neutral" />
+            <SmallStat label="受影响代理" value={buckets.length} tone="info" />
+          </div>
+          {buckets.length === 0 ? (
+            <EmptyState
+              icon={<CheckCircle2 size={22} />}
+              title="时间窗口内没有上游错误"
+              description="如果观察到稳定性问题，请放宽时间范围或检查 Sub2API 是否在收集对应阶段。"
+            />
+          ) : (
+            <ol className="error-bucket-list">
+              {topBuckets.map((bucket) => (
+                <li key={bucket.proxyId} className="error-bucket">
+                  <div className="error-bucket-head">
+                    <AlertOctagon size={16} aria-hidden="true" />
+                    <strong>{bucket.proxyName}</strong>
+                    <span className="muted small">#{bucket.proxyId}{bucket.nodeHash ? ` · 本地 ${bucket.nodeHash.slice(0, 8)}` : ""}</span>
+                    <Badge tone="danger">{bucket.errors} 次</Badge>
+                  </div>
+                  <div className="error-bucket-breakdown">
+                    {Object.entries(bucket.byStatus).length > 0 ? (
+                      <div>
+                        <span className="muted small">HTTP</span>
+                        <div className="badge-row">
+                          {Object.entries(bucket.byStatus)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([status, count]) => (
+                              <Badge key={status} tone={statusTone(status)}>{`${status}×${count}`}</Badge>
+                            ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {Object.entries(bucket.bySeverity).length > 0 ? (
+                      <div>
+                        <span className="muted small">Severity</span>
+                        <div className="badge-row">
+                          {Object.entries(bucket.bySeverity)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([severity, count]) => (
+                              <Badge key={severity} tone="warning">{`${severity}×${count}`}</Badge>
+                            ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+              {buckets.length > topBuckets.length ? (
+                <li className="muted small">还有 {buckets.length - topBuckets.length} 个代理未展示。</li>
+              ) : null}
+            </ol>
+          )}
+        </>
+      )}
+    </Panel>
+  );
+}
+
+function SmallStat(props: { label: string; value: number; tone: "danger" | "warning" | "info" | "neutral" }) {
+  return (
+    <div className={`small-stat tone-${props.tone}`}>
+      <span>{props.label}</span>
+      <strong>{props.value}</strong>
+    </div>
+  );
+}
+
+function statusTone(status: string): "danger" | "warning" | "info" | "neutral" {
+  const code = Number(status);
+  if (Number.isFinite(code)) {
+    if (code >= 500) return "danger";
+    if (code === 429 || code === 408) return "warning";
+    if (code >= 400) return "info";
+  }
+  return "neutral";
 }
 
 function formatDuration(ms: number): string {

@@ -102,6 +102,10 @@ function Dashboard(props: { onLogout: () => void }) {
     status: ""
   });
   const [sub2apiOverwrite, setSub2apiOverwrite] = React.useState(false);
+  const [errorSummaryTimeRange, setErrorSummaryTimeRange] = useLocalStorageState<string>(
+    "mihomo-hive.upstream-error-window",
+    "1h"
+  );
   const [workspace, setWorkspace] = useLocalStorageState<"nodes" | "sub2api" | "tasks" | "runtime">(
     "mihomo-hive.workspace",
     "nodes"
@@ -178,6 +182,10 @@ function Dashboard(props: { onLogout: () => void }) {
     enabled: workspace === "tasks" || workspace === "runtime",
     refetchInterval: 3000
   });
+  const upstreamErrorSummary = trpc.sub2api.automation.upstreamErrorSummary.useQuery(
+    { timeRange: errorSummaryTimeRange },
+    { enabled: workspace === "tasks" && Boolean(sub2apiConfig.data?.configured), refetchInterval: 30000 }
+  );
 
   const refreshOperationalData = React.useCallback(async () => {
     await Promise.all([
@@ -569,6 +577,12 @@ function Dashboard(props: { onLogout: () => void }) {
           jobs={jobs.data ?? []}
           loading={jobs.isFetching}
           onRefresh={() => void jobs.refetch()}
+          errorSummaryEnabled={Boolean(sub2apiConfig.data?.configured)}
+          errorSummary={upstreamErrorSummary.data}
+          errorSummaryLoading={upstreamErrorSummary.isFetching}
+          errorTimeRange={errorSummaryTimeRange}
+          onErrorTimeRangeChange={setErrorSummaryTimeRange}
+          onErrorSummaryRefresh={() => void upstreamErrorSummary.refetch()}
         />
       ) : null}
 
