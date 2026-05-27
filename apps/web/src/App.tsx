@@ -12,7 +12,7 @@ import { useConfirmAction, type ConfirmAction } from "./hooks/useConfirmAction.j
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
-import type { NodeDeletionPlan, Sub2ApiAccountFilters, Sub2ApiProtectedProxyRule, SubscriptionImportPreview } from "@mihomo-hive/schemas";
+import { defaultOrchestrationSpec, type NodeDeletionPlan, type OrchestrationSpec, type Sub2ApiAccountFilters, type Sub2ApiProtectedProxyRule, type SubscriptionImportPreview } from "@mihomo-hive/schemas";
 
 export function AppRoot() {
   return (
@@ -176,6 +176,11 @@ function Dashboard(props: { onLogout: () => void }) {
     { timeRange: errorSummaryTimeRange },
     { enabled: workspace === "automation" && Boolean(sub2apiConfig.data?.configured), refetchInterval: 30000 }
   );
+  const orchestrationSpec = trpc.sub2api.spec.get.useQuery();
+  const orchestrationStatus = trpc.sub2api.orchestrator.statusSnapshot.useQuery(undefined, {
+    enabled: workspace === "automation",
+    refetchInterval: 5000
+  });
 
   const refreshOperationalData = React.useCallback(async () => {
     await Promise.all([
@@ -422,6 +427,45 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "质量检查失败", error.message)
   });
+  // ADR 0003: orchestration spec + scheduler
+  const saveOrchestrationSpec = trpc.sub2api.spec.save.useMutation({
+    onMutate: () => startTask(setTask, "正在保存策略", "服务端会重读 live 数据并立即触发一次 reconcile。"),
+    onSuccess: async () => {
+      await finishTask(setTask, pushToast, "策略已保存", "下次 reconcile 立即按新策略生效。");
+      await utils.sub2api.spec.get.invalidate();
+      await utils.sub2api.orchestrator.statusSnapshot.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "策略保存失败", error.message)
+  });
+  const applyOrchestrationOnce = trpc.sub2api.orchestrator.applyOnce.useMutation({
+    onMutate: () => startTask(setTask, "正在立即调和一次", "拉远端 → 计算计划 → 灰度执行。"),
+    onSuccess: async (tick) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "调和完成",
+        `执行 ${tick.appliedTotal}/${tick.plannedTotal} 项；${formatTickSummary(tick.skippedReason)}`
+      );
+      await utils.sub2api.orchestrator.statusSnapshot.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "调和失败", error.message)
+  });
+  const pauseOrchestrator = trpc.sub2api.orchestrator.pause.useMutation({
+    onSuccess: async () => {
+      pushToast("warning", "自动协调已暂停", "Reconcile 仍跑 dry-run 写审计，不再修改 Sub2API。");
+      await utils.sub2api.spec.get.invalidate();
+      await utils.sub2api.orchestrator.statusSnapshot.invalidate();
+    },
+    onError: (error) => pushToast("danger", "暂停失败", error.message)
+  });
+  const resumeOrchestrator = trpc.sub2api.orchestrator.resume.useMutation({
+    onSuccess: async () => {
+      pushToast("success", "自动协调已恢复", "下一次 reconcile 周期立即生效。");
+      await utils.sub2api.spec.get.invalidate();
+      await utils.sub2api.orchestrator.statusSnapshot.invalidate();
+    },
+    onError: (error) => pushToast("danger", "恢复失败", error.message)
+  });
 
   const busy =
     addSubscription.isPending ||
@@ -576,48 +620,29 @@ function Dashboard(props: { onLogout: () => void }) {
 
       {workspace === "automation" ? (
         <AutomationRoute
-          config={sub2apiConfig.data}
-          baseUrl={sub2apiBaseUrl}
-          apiKey={sub2apiApiKey}
-          timezone={sub2apiTimezone}
-          managedPrefix={sub2apiManagedPrefix}
-          filters={sub2apiFilters}
-          protectedRule={sub2apiProtected}
-          overwriteExisting={sub2apiOverwrite}
+          spec={orchestrationSpec.data ?? defaultOrchestrationSpec}
+          status={orchestrationStatus.data}
+          connection={sub2apiConfig.data}
           proxies={sub2apiProxies.data ?? []}
-          proxiesFetching={sub2apiProxies.isFetching}
-          preview={sub2apiPreview.data}
-          previewFetching={sub2apiPreview.isFetching}
-          maintenance={sub2apiMaintenance.data}
-          maintenanceFetching={sub2apiMaintenance.isFetching}
-          jobs={jobs.data ?? []}
-          jobsLoading={jobs.isFetching}
-          errorSummary={upstreamErrorSummary.data}
-          errorSummaryLoading={upstreamErrorSummary.isFetching}
-          errorTimeRange={errorSummaryTimeRange}
-          setBaseUrl={setSub2apiBaseUrl}
-          setApiKey={setSub2apiApiKey}
-          setTimezone={setSub2apiTimezone}
-          setManagedPrefix={setSub2apiManagedPrefix}
-          setFilters={setSub2apiFilters}
-          setOverwriteExisting={setSub2apiOverwrite}
-          onProtectedRuleChange={updateProtectedRule}
-          setErrorTimeRange={setErrorSummaryTimeRange}
-          refetchProxies={() => void sub2apiProxies.refetch()}
-          refetchPreview={() => void sub2apiPreview.refetch()}
-          refetchMaintenance={() => void sub2apiMaintenance.refetch()}
-          refetchJobs={() => void jobs.refetch()}
-          refetchErrorSummary={() => void upstreamErrorSummary.refetch()}
-          requestConfirmation={requestConfirmation}
+          connectionDraft={{
+            baseUrl: sub2apiBaseUrl,
+            apiKey: sub2apiApiKey,
+            timezone: sub2apiTimezone,
+            managedPrefix: sub2apiManagedPrefix
+          }}
+          setConnectionDraft={(draft) => {
+            setSub2apiBaseUrl(draft.baseUrl);
+            setSub2apiApiKey(draft.apiKey);
+            setSub2apiTimezone(draft.timezone);
+            setSub2apiManagedPrefix(draft.managedPrefix);
+          }}
           mutations={{
-            saveConfig: saveSub2apiConfig,
-            testConnection: testSub2apiConnection,
-            sync: syncSub2api,
-            apply: applySub2apiAssignments,
-            drainManaged: drainManagedSub2api,
-            cleanupEmpty: cleanupManagedSub2api,
-            pushManaged: pushManagedSub2api,
-            qualityCheck: qualityCheckManaged
+            saveSpec: saveOrchestrationSpec,
+            applyOnce: applyOrchestrationOnce,
+            pause: pauseOrchestrator,
+            resume: resumeOrchestrator,
+            saveConnection: saveSub2apiConfig,
+            testConnection: testSub2apiConnection
           }}
         />
       ) : null}
@@ -683,4 +708,21 @@ function failTask(
 ) {
   setTask({ state: "error", title, detail, technical: detail });
   pushToast("danger", title, detail);
+}
+
+function formatTickSummary(skipped: string): string {
+  switch (skipped) {
+    case "applied":
+      return "已执行";
+    case "no_change":
+      return "无变更";
+    case "paused":
+      return "已暂停（dry-run）";
+    case "batch_capped":
+      return "灰度受限";
+    case "error":
+      return "执行错误";
+    default:
+      return skipped;
+  }
 }

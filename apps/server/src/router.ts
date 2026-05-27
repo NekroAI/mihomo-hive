@@ -43,6 +43,7 @@ import type {
   OperationJob,
   OperationJobStatus,
   ProxyNode,
+  ReconcileTick,
   RuntimeConfig,
   Sub2ApiAccountRecord,
   Sub2ApiProtectedProxyRule,
@@ -54,7 +55,7 @@ export interface RouterContext {
   config: RuntimeConfig;
   repo: HiveRepository;
   authenticated: boolean;
-  orchestrator?: { triggerNow: () => Promise<unknown> } | undefined;
+  orchestrator?: { triggerNow: () => Promise<ReconcileTick> } | undefined;
 }
 
 const t = initTRPC.context<RouterContext>().create();

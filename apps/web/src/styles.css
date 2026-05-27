@@ -665,6 +665,183 @@ select {
   white-space: nowrap;
 }
 
+/* —— ADR 0003 编排面板 —— */
+
+.orchestration-spec-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.orchestration-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.spec-save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.kpi-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 14px 16px;
+  display: grid;
+  gap: 4px;
+}
+
+.kpi-card.kpi-success {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 60%, var(--border));
+}
+
+.kpi-card.kpi-warning {
+  border-color: color-mix(in srgb, #d97706 60%, var(--border));
+}
+
+.kpi-card.kpi-danger {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 60%, var(--border));
+}
+
+.kpi-title {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.kpi-primary {
+  font-size: 24px;
+  font-weight: 720;
+}
+
+.kpi-secondary {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kpi-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px;
+}
+
+.node-matrix {
+  display: grid;
+  gap: 4px;
+}
+
+.node-matrix-row {
+  display: grid;
+  grid-template-columns: 160px 90px 110px 80px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 13px;
+}
+
+.node-matrix-row.node-matrix-head {
+  border-top: 1px solid var(--border);
+  background: var(--panel-subtle);
+  font-weight: 650;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+
+.reconcile-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reconcile-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+}
+
+.reconcile-row.reconcile-error {
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 50%, var(--border));
+}
+
+.reconcile-row.reconcile-no_change {
+  opacity: 0.7;
+}
+
+.reconcile-row-head {
+  display: grid;
+  grid-template-columns: 14px 14px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.reconcile-row-head:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.reconcile-row-body {
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  background: var(--panel);
+  display: grid;
+  gap: 8px;
+}
+
+.reconcile-change-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+@media (max-width: 1080px) {
+  .node-matrix-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
 .app-header {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;

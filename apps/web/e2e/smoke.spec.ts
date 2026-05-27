@@ -25,12 +25,14 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await expect(page.getByRole("button", { name: "测试节点池" })).toBeVisible();
     await expect(page.getByRole("button", { name: "发布出口池" })).toBeVisible();
 
-    // 切到自动化：连接配置、自动接管状态、任务流 都在同一页
+    // 切到自动化：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
     await nav.getByRole("button", { name: "自动化" }).click();
-    await expect(page.getByRole("heading", { name: "连接配置" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "自动接管状态" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "任务流" })).toBeVisible();
-    await expect(page.getByText("待配置")).toBeVisible();
+    // 左栏顶部：自动协调开关
+    await expect(page.getByRole("heading", { name: "自动协调" })).toBeVisible();
+    // 未配置 Sub2API 时右栏空态
+    await expect(page.getByText("先配置 Sub2API 连接")).toBeVisible();
+    // 暂停/恢复按钮（取决于 spec.enabled 默认 true，应该看到"暂停自动协调"）
+    await expect(page.getByRole("button", { name: /暂停自动协调|恢复自动协调/ })).toBeVisible();
 
     // 切到高级运维：能看到 Mihomo 运行控制 + 导出篮子
     await nav.getByRole("button", { name: "高级运维" }).click();
