@@ -57,6 +57,15 @@ services:
 docker compose up -d
 ```
 
+更新应用：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+数据会保存在 `./runtime` 目录中，更新镜像和重建容器不会清空已有配置、节点和访问密码。
+
 打开 Web UI。首次访问会要求设置访问密码：
 
 ```text
