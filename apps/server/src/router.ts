@@ -458,6 +458,77 @@ export const appRouter = t.router({
         return { preview, reassigned: 0, failedReassign: 0, deletedProxies, failedDeleteProxies };
       })
     }),
+    automation: t.router({
+      syncManagedProxies: protectedProcedure
+        .input(z.object({ selectedHashes: z.array(z.string().min(8)).optional() }).default({}))
+        .mutation(async ({ ctx, input }) => {
+          const connection = ctx.repo.getSub2ApiConnection();
+          if (!connection) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+          }
+          const job = createJob(
+            "sub2api.automation.sync",
+            "正在同步 Hive 节点到 Sub2API",
+            "用 importProxyData 把本地 schedulable + active 节点推到 Sub2API，并回填 proxy_id。",
+            ["整理本地节点", "推送 Sub2API", "回填 proxy_id"]
+          );
+          try {
+            updateJobStep(job.id, 0, "running", "整理待同步节点。");
+            const localNodes = ctx.repo.listNodes();
+            const exportPayload = exportSub2Api(localNodes, {
+              host: ctx.config.exportHost,
+              namePrefix: connection.managedProxyPrefix,
+              ...(input.selectedHashes ? { selectedHashes: input.selectedHashes } : {})
+            });
+            const proxies = exportPayload.proxies.filter((proxy) => proxy.status === "active");
+            updateJobStep(job.id, 0, "success", `准备 ${proxies.length} 个 active 代理。`);
+            if (proxies.length === 0) {
+              finishJob(job.id, "success", "没有可同步的 active 节点。");
+              return {
+                operationId: job.id,
+                summary: { proxy_created: 0, proxy_reused: 0, proxy_failed: 0, account_created: 0, account_failed: 0 },
+                synced: 0,
+                mappedNodes: 0
+              };
+            }
+
+            updateJobStep(job.id, 1, "running", "调用 Sub2API importProxyData。");
+            const client = createSub2ApiClient(connection);
+            const summary = await client.importProxyData({ proxies });
+            updateJobStep(
+              job.id,
+              1,
+              "success",
+              `新增 ${summary.proxy_created}，复用 ${summary.proxy_reused}，失败 ${summary.proxy_failed}。`
+            );
+
+            updateJobStep(job.id, 2, "running", "回填本地节点的 proxy_id 映射。");
+            const liveProxies = await client.listAllProxies();
+            const mappings = mapLocalNodesToSub2ApiProxies({
+              nodes: localNodes,
+              proxies: liveProxies,
+              exportHost: ctx.config.exportHost
+            });
+            ctx.repo.updateSub2ApiProxyMappings(mappings);
+            updateJobStep(job.id, 2, "success", `匹配 ${mappings.length} 个本地节点。`);
+
+            finishJob(
+              job.id,
+              "success",
+              `同步完成：新增 ${summary.proxy_created} / 复用 ${summary.proxy_reused} / 失败 ${summary.proxy_failed}。`
+            );
+            return {
+              operationId: job.id,
+              summary,
+              synced: proxies.length,
+              mappedNodes: mappings.length
+            };
+          } catch (error) {
+            finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");
+            throw error;
+          }
+        })
+    }),
     reconcile: t.router({
       preview: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).query(async ({ ctx, input }) => {
         const client = createConfiguredSub2ApiClient(ctx.repo);
