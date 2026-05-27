@@ -601,9 +601,11 @@ function Dashboard(props: { onLogout: () => void }) {
             previewing={previewImport.isPending}
             importing={applyImportPreview.isPending}
             publishing={publishRuntime.isPending}
+            saving={addSubscription.isPending}
             onImportNameChange={setSubscriptionName}
             onImportUrlChange={setSubscriptionUrl}
             onImportKeywordsChange={setSubscriptionKeywords}
+            onSaveSubscription={() => addSubscription.mutate({ name: subscriptionName, url: subscriptionUrl })}
             onPreviewImport={(source) => {
               if (source) {
                 setSubscriptionName(source.name);
@@ -613,14 +615,26 @@ function Dashboard(props: { onLogout: () => void }) {
                 previewImport.mutate({ name: subscriptionName, url: subscriptionUrl, excludeKeywords: keywordList() });
               }
             }}
-            onApplyImport={() =>
+            onRepreviewWithKeywords={(keywords) => {
+              setSubscriptionKeywords(keywords.join(","));
+              const id = importPreview?.source.id;
+              const name = importPreview?.source.name ?? subscriptionName;
+              const url = importPreview?.source.value ?? subscriptionUrl;
+              if (id) {
+                previewImport.mutate({ id, excludeKeywords: keywords });
+              } else if (name && url) {
+                previewImport.mutate({ name, url, excludeKeywords: keywords });
+              }
+            }}
+            onApplyImport={(keywords) => {
+              setSubscriptionKeywords(keywords.join(","));
               applyImportPreview.mutate({
                 id: importPreview?.source.id,
                 name: importPreview?.source.name ?? subscriptionName,
                 url: importPreview?.source.value ?? subscriptionUrl,
-                excludeKeywords: keywordList()
-              })
-            }
+                excludeKeywords: keywords
+              });
+            }}
             onClearPreview={() => setImportPreview(undefined)}
             onEnableSelected={() => setNodeLifecycle.mutate({ hashes: selectedHashesList, lifecycleStatus: "schedulable" })}
             onDisableSelected={() => setNodeLifecycle.mutate({ hashes: selectedHashesList, lifecycleStatus: "disabled" })}

@@ -477,6 +477,55 @@ select {
   gap: 4px;
 }
 
+.dialog-section {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+  display: grid;
+  gap: 10px;
+}
+
+.dialog-section > header {
+  display: grid;
+  gap: 2px;
+}
+
+.keyword-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.keyword-chip:hover {
+  background: color-mix(in srgb, var(--danger, #dc2626) 18%, var(--panel));
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, var(--border));
+}
+
+.keyword-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+}
+
 .app-header {
   display: grid;
   grid-template-columns: minmax(210px, 1fr) auto auto;

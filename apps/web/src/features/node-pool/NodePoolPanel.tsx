@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, DownloadCloud, PauseCircle, PlayCircle, RefreshCw, Rocket, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, DownloadCloud, PauseCircle, PlayCircle, Plus, RefreshCw, Rocket, Save, Search, Trash2, X } from "lucide-react";
 import type { NodeDeletionPlan, ProxyNode, SubscriptionImportPreview, SubscriptionSource } from "@mihomo-hive/schemas";
 import { Badge, Button, EmptyState, Panel, TextInput } from "../../components/ui.js";
 import { formatRegion } from "../nodes/node-utils.js";
@@ -17,11 +17,14 @@ export function NodePoolPanel(props: {
   previewing: boolean;
   importing: boolean;
   publishing: boolean;
+  saving: boolean;
   onImportNameChange: (value: string) => void;
   onImportUrlChange: (value: string) => void;
   onImportKeywordsChange: (value: string) => void;
+  onSaveSubscription: () => void;
   onPreviewImport: (source?: { id: string; name: string; url: string; excludeKeywords: string[] }) => void;
-  onApplyImport: () => void;
+  onRepreviewWithKeywords: (keywords: string[]) => void;
+  onApplyImport: (keywords: string[]) => void;
   onClearPreview: () => void;
   onEnableSelected: () => void;
   onDisableSelected: () => void;
@@ -35,7 +38,6 @@ export function NodePoolPanel(props: {
   const cooling = props.nodes.filter((node) => node.lifecycleStatus === "cooling_down").length;
   const candidate = props.nodes.filter((node) => node.lifecycleStatus === "candidate").length;
   const disabled = props.nodes.filter((node) => node.lifecycleStatus === "disabled").length;
-  const keywordList = parseKeywords(props.importKeywords);
 
   return (
     <aside className="node-pool-panel">
@@ -55,13 +57,19 @@ export function NodePoolPanel(props: {
         <div className="stack">
           <TextInput label="名称" value={props.importName} onChange={props.onImportNameChange} placeholder="primary" />
           <TextInput label="订阅 URL" value={props.importUrl} onChange={props.onImportUrlChange} placeholder="https://example.com/sub" mono />
-          <TextInput
-            label="排除关键词"
-            value={props.importKeywords}
-            onChange={props.onImportKeywordsChange}
-            placeholder="官网,到期,剩余流量"
-          />
+          <p className="muted small">
+            过滤规则在预览弹窗中调整。"保存订阅源" 只保存配置不发起请求；"拉取并预览" 才会下载订阅内容。
+          </p>
           <div className="button-row">
+            <Button
+              variant="secondary"
+              icon={<Save size={16} />}
+              loading={props.saving}
+              disabled={props.busy || !props.importName || !props.importUrl}
+              onClick={props.onSaveSubscription}
+            >
+              仅保存订阅源
+            </Button>
             <Button
               icon={<Search size={16} />}
               loading={props.previewing}
@@ -70,17 +78,7 @@ export function NodePoolPanel(props: {
             >
               拉取并预览
             </Button>
-            <Button
-              variant="secondary"
-              icon={<DownloadCloud size={16} />}
-              loading={props.importing}
-              disabled={!props.preview || (props.preview.summary.importable === 0 && props.preview.summary.deletedByFilter === 0)}
-              onClick={props.onApplyImport}
-            >
-              重新导入
-            </Button>
           </div>
-          {keywordList.length > 0 ? <p className="muted small">将排除：{keywordList.join("、")}</p> : null}
         </div>
       </Panel>
 
@@ -144,7 +142,17 @@ export function NodePoolPanel(props: {
         </div>
       </Panel>
 
-      {props.preview ? <ImportPreviewDialog preview={props.preview} onClose={props.onClearPreview} onApply={props.onApplyImport} /> : null}
+      {props.preview ? (
+        <ImportPreviewDialog
+          preview={props.preview}
+          initialKeywords={parseKeywords(props.importKeywords)}
+          previewing={props.previewing}
+          importing={props.importing}
+          onClose={props.onClearPreview}
+          onApply={props.onApplyImport}
+          onRepreview={props.onRepreviewWithKeywords}
+        />
+      ) : null}
       {props.deletePlan ? (
         <DeletePlanDialog plan={props.deletePlan} onClose={() => props.onApplyDeleteSelected(false)} onForceLocal={() => props.onApplyDeleteSelected(true)} />
       ) : null}
@@ -152,7 +160,35 @@ export function NodePoolPanel(props: {
   );
 }
 
-function ImportPreviewDialog(props: { preview: SubscriptionImportPreview; onClose: () => void; onApply: () => void }) {
+function ImportPreviewDialog(props: {
+  preview: SubscriptionImportPreview;
+  initialKeywords: string[];
+  previewing: boolean;
+  importing: boolean;
+  onClose: () => void;
+  onApply: (keywords: string[]) => void;
+  onRepreview: (keywords: string[]) => void;
+}) {
+  const [keywords, setKeywords] = React.useState<string[]>(props.initialKeywords);
+  const [draftKeyword, setDraftKeyword] = React.useState("");
+
+  React.useEffect(() => {
+    setKeywords(props.initialKeywords);
+  }, [props.initialKeywords.join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function addKeyword(raw: string) {
+    const cleaned = raw.trim();
+    if (!cleaned || keywords.includes(cleaned)) {
+      return;
+    }
+    setKeywords([...keywords, cleaned]);
+    setDraftKeyword("");
+  }
+
+  function removeKeyword(value: string) {
+    setKeywords(keywords.filter((item) => item !== value));
+  }
+
   return (
     <div className="dialog-backdrop" role="presentation">
       <section className="dialog wide" role="dialog" aria-modal="true">
@@ -161,6 +197,49 @@ function ImportPreviewDialog(props: { preview: SubscriptionImportPreview; onClos
           共解析 {props.preview.summary.total} 个节点，可导入/更新 {props.preview.summary.importable} 个，过滤{" "}
           {props.preview.summary.filtered} 个，其中会从现有节点池删除 {props.preview.summary.deletedByFilter} 个，重复 {props.preview.summary.duplicates} 个。
         </p>
+
+        <section className="dialog-section">
+          <header>
+            <strong>过滤关键词</strong>
+            <span className="muted small">命中关键词的节点不会导入；已存在的同名/同 hash 节点也会被标记从池中删除。</span>
+          </header>
+          <div className="keyword-chips">
+            {keywords.length === 0 ? (
+              <span className="muted small">未配置关键词，将导入所有解析出的节点。</span>
+            ) : (
+              keywords.map((keyword) => (
+                <button key={keyword} type="button" className="keyword-chip" onClick={() => removeKeyword(keyword)}>
+                  <span>{keyword}</span>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ))
+            )}
+          </div>
+          <div className="keyword-input-row">
+            <TextInput
+              value={draftKeyword}
+              onChange={setDraftKeyword}
+              placeholder="输入关键词后按回车或点 +"
+            />
+            <Button
+              variant="secondary"
+              icon={<Plus size={16} />}
+              disabled={!draftKeyword.trim()}
+              onClick={() => addKeyword(draftKeyword)}
+            >
+              添加
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={16} />}
+              loading={props.previewing}
+              onClick={() => props.onRepreview(keywords)}
+            >
+              用当前关键词重新预览
+            </Button>
+          </div>
+        </section>
+
         <div className="preview-table-wrap">
           <table className="preview-table">
             <thead>
@@ -187,7 +266,11 @@ function ImportPreviewDialog(props: { preview: SubscriptionImportPreview; onClos
         </div>
         <footer>
           <Button variant="secondary" onClick={props.onClose}>取消</Button>
-          <Button disabled={props.preview.summary.importable === 0 && props.preview.summary.deletedByFilter === 0} onClick={props.onApply}>
+          <Button
+            loading={props.importing}
+            disabled={props.preview.summary.importable === 0 && props.preview.summary.deletedByFilter === 0}
+            onClick={() => props.onApply(keywords)}
+          >
             重新导入这些节点
           </Button>
         </footer>
