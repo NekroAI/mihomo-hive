@@ -111,6 +111,12 @@ export function NodeTable(props: {
         size: 90
       },
       {
+        accessorKey: "qualityScore",
+        header: "质量",
+        cell: ({ row }) => <QualityCell score={row.original.qualityScore ?? null} />,
+        size: 88
+      },
+      {
         accessorKey: "lastTestStatus",
         header: "测试结果",
         cell: ({ row }) => <TestResult value={row.original.lastTestStatus} />,
@@ -273,6 +279,14 @@ export function NodeTable(props: {
       </footer>
     </section>
   );
+}
+
+function QualityCell(props: { score: number | null | undefined }) {
+  if (props.score === null || props.score === undefined) {
+    return <span className="muted small">-</span>;
+  }
+  const tone: "success" | "warning" | "danger" = props.score >= 80 ? "success" : props.score >= 50 ? "warning" : "danger";
+  return <Badge tone={tone}>{props.score}</Badge>;
 }
 
 function TestResult(props: { value: string | undefined }) {

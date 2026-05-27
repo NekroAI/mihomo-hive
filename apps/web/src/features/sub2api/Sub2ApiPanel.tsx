@@ -300,6 +300,9 @@ export function Sub2ApiPanel(props: {
                     <strong>{proxy.name}</strong>
                     <small>
                       #{proxy.id} {proxy.host}:{proxy.port} {proxy.country ?? ""} {proxy.status}
+                      {typeof proxy.account_count === "number" && proxy.account_count > 0
+                        ? ` · ${proxy.account_count} 账号`
+                        : ""}
                     </small>
                   </span>
                 </label>
