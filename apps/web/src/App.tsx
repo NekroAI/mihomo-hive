@@ -13,7 +13,7 @@ import { useTheme } from "./hooks/useTheme.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
-import { defaultOrchestrationSpec, type NodeDeletionPlan, type OrchestrationSpec, type Sub2ApiAccountFilters, type Sub2ApiProtectedProxyRule, type SubscriptionImportPreview } from "@mihomo-hive/schemas";
+import { defaultOrchestrationSpec, type NodeDeletionPlan, type OrchestrationSpec, type Sub2ApiAccountFilters, type Sub2ApiProtectedProxyRule, type Sub2ApiProxyRecord, type SubscriptionImportPreview } from "@mihomo-hive/schemas";
 
 export function AppRoot() {
   return (
@@ -157,8 +157,17 @@ function Dashboard(props: { onLogout: () => void }) {
     { enabled: selectedHashesList.length > 0 }
   );
   const sub2apiProxies = trpc.sub2api.proxies.list.useQuery(undefined, {
-    enabled: Boolean(sub2apiConfig.data?.configured)
+    enabled: Boolean(sub2apiConfig.data?.configured),
+    // 节点池表显示 account_count 实时变化；编排器 30s 一个 tick，对齐刷新节奏
+    refetchInterval: workspace === "nodes" ? 30_000 : false
   });
+  const sub2apiProxiesById = React.useMemo<Map<number, Sub2ApiProxyRecord>>(() => {
+    const map = new Map<number, Sub2ApiProxyRecord>();
+    if (sub2apiProxies.data) {
+      for (const proxy of sub2apiProxies.data) map.set(proxy.id, proxy);
+    }
+    return map;
+  }, [sub2apiProxies.data]);
   const sub2apiPreview = trpc.sub2api.assign.preview.useQuery(
     {
       filters: sub2apiFilters,
@@ -673,6 +682,8 @@ function Dashboard(props: { onLogout: () => void }) {
           subscriptionKeywords={subscriptionKeywords}
           setSubscriptionKeywords={setSubscriptionKeywords}
           parseKeywords={keywordList}
+          sub2apiProxies={sub2apiProxiesById}
+          sub2apiConnected={Boolean(sub2apiConfig.data?.configured)}
           busy={busy}
           mutateSelection={mutateSelection}
           previewSelectedDeletePlan={previewSelectedDeletePlan}

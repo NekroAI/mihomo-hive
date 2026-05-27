@@ -8,8 +8,8 @@ import {
   type ColumnDef,
   type SortingState
 } from "@tanstack/react-table";
-import { ArrowDownUp, Bot, ChevronsLeft, ChevronsRight, MessageSquare, Search } from "lucide-react";
-import type { ProxyNode } from "@mihomo-hive/schemas";
+import { ArrowDownUp, Bot, ChevronsLeft, ChevronsRight, MessageSquare, Search, Users } from "lucide-react";
+import type { ProxyNode, Sub2ApiProxyRecord } from "@mihomo-hive/schemas";
 import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
 import {
   canExportNode,
@@ -30,6 +30,10 @@ export function NodeTable(props: {
   filters: NodeFilters;
   sourceNames: Map<string, string>;
   selectedHashes: Set<string>;
+  /** key = proxy_id；用于显示 Sub2API 端的状态和账号数；未连接 / 未推送时传 undefined */
+  sub2apiProxies?: Map<number, Sub2ApiProxyRecord>;
+  /** Sub2API 连接是否已配置；用于"未推送"列文案 */
+  sub2apiConnected: boolean;
   onFiltersChange: (filters: NodeFilters) => void;
   onToggleNode: (hash: string, selected: boolean) => void;
 }) {
@@ -117,6 +121,33 @@ export function NodeTable(props: {
         header: "测试结果",
         cell: ({ row }) => <TestResult value={row.original.lastTestStatus} />,
         size: 170
+      },
+      {
+        id: "sub2api",
+        header: "Sub2API",
+        cell: ({ row }) => (
+          <Sub2ApiCell
+            node={row.original}
+            proxy={row.original.sub2apiProxyId ? props.sub2apiProxies?.get(row.original.sub2apiProxyId) : undefined}
+            connected={props.sub2apiConnected}
+          />
+        ),
+        enableSorting: false,
+        size: 156
+      },
+      {
+        id: "accountCount",
+        header: "账号",
+        accessorFn: (node) =>
+          node.sub2apiProxyId ? props.sub2apiProxies?.get(node.sub2apiProxyId)?.account_count ?? 0 : -1,
+        cell: ({ row }) => (
+          <AccountCountCell
+            proxy={row.original.sub2apiProxyId ? props.sub2apiProxies?.get(row.original.sub2apiProxyId) : undefined}
+            hasProxyId={Boolean(row.original.sub2apiProxyId)}
+          />
+        ),
+        sortingFn: "alphanumeric",
+        size: 76
       },
       {
         accessorKey: "sourceId",
@@ -276,5 +307,53 @@ function TestResult(props: { value: string | undefined }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function Sub2ApiCell(props: { node: ProxyNode; proxy: Sub2ApiProxyRecord | undefined; connected: boolean }) {
+  if (!props.connected) {
+    return <span className="muted small">未连接</span>;
+  }
+  if (!props.node.sub2apiProxyId) {
+    return (
+      <span className="muted small" title="尚未推送到 Sub2API。在节点池工具栏选中后点'启用调度'会自动推送。">
+        未推送
+      </span>
+    );
+  }
+  if (!props.proxy) {
+    // 本地记录了 proxy_id 但远端列表里找不到 → 可能被外部删除 / 同步滞后
+    return (
+      <span className="badge badge-warning" title="本地记录了 proxy_id，但 Sub2API 当前列表里找不到对应代理。可能被外部删除，需要重新启用调度。">
+        #{props.node.sub2apiProxyId} 失联
+      </span>
+    );
+  }
+  const tone = props.proxy.status === "active" ? "success" : props.proxy.status === "failed" ? "danger" : "neutral";
+  return (
+    <span
+      className={`sub2api-cell`}
+      title={`Sub2API #${props.proxy.id} ${props.proxy.protocol}://${props.proxy.host}:${props.proxy.port}\n状态: ${props.proxy.status}`}
+    >
+      <Badge tone={tone}>#{props.proxy.id}</Badge>
+      <span className="muted small">{props.proxy.status}</span>
+    </span>
+  );
+}
+
+function AccountCountCell(props: { proxy: Sub2ApiProxyRecord | undefined; hasProxyId: boolean }) {
+  if (!props.hasProxyId) {
+    return <span className="muted small">-</span>;
+  }
+  if (!props.proxy) {
+    return <span className="muted small">?</span>;
+  }
+  const count = props.proxy.account_count ?? 0;
+  const tone = count > 0 ? "info" : "neutral";
+  return (
+    <span className="account-count-cell" title={`当前 Sub2API 端绑定到此代理的账号数：${count}`}>
+      <Users size={12} className="muted" aria-hidden="true" />
+      <Badge tone={tone}>{count}</Badge>
+    </span>
   );
 }

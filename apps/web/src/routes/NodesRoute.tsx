@@ -2,6 +2,7 @@ import React from "react";
 import type {
   NodeDeletionPlan,
   ProxyNode,
+  Sub2ApiProxyRecord,
   SubscriptionImportPreview,
   SubscriptionSource
 } from "@mihomo-hive/schemas";
@@ -41,6 +42,9 @@ export interface NodesRouteProps {
   subscriptionKeywords: string;
   setSubscriptionKeywords: (v: string) => void;
   parseKeywords: () => string[];
+  /** Sub2API 端的代理列表（按 proxy_id 索引），供节点表显示状态 + 承载账号数 */
+  sub2apiProxies: Map<number, Sub2ApiProxyRecord>;
+  sub2apiConnected: boolean;
   busy: boolean;
   mutateSelection: (updater: (current: Set<string>) => Set<string>) => void;
   previewSelectedDeletePlan: () => Promise<void>;
@@ -241,6 +245,8 @@ export function NodesRoute(props: NodesRouteProps) {
           filters={props.filters}
           sourceNames={props.sourceNames}
           selectedHashes={props.selectedHashes}
+          sub2apiProxies={props.sub2apiProxies}
+          sub2apiConnected={props.sub2apiConnected}
           onFiltersChange={props.setFilters}
           onToggleNode={(hash, selected) =>
             props.mutateSelection((current) => {

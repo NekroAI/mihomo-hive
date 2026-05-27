@@ -257,6 +257,21 @@ select {
   white-space: nowrap;
 }
 
+/* Sub2API 状态 cell：badge + status 文本 */
+.sub2api-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.account-count-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 /* 选择按钮组：紧跟统计区，跟主操作区视觉上区分 */
 .node-toolbar-selectors {
   display: inline-flex;
