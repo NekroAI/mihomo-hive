@@ -7,6 +7,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createSessionToken,
   hashPassword,
@@ -120,7 +121,7 @@ app.use("/trpc/*", async (c) =>
   })
 );
 
-const staticRoot = resolve("apps/web/dist");
+const staticRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 app.use("/*", serveStatic({ root: staticRoot }));
 
 const host = process.env.HIVE_HOST ?? "0.0.0.0";

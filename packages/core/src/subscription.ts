@@ -124,6 +124,9 @@ function toProxyNode(raw: RawProxy, sourceId: string): ProxyNode {
     region: inferRegion(originalName),
     raw,
     status: "untested",
+    lifecycleStatus: "candidate",
+    schedulable: false,
+    protected: false,
     createdAt: now,
     updatedAt: now
   };

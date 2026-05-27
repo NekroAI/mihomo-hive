@@ -62,7 +62,7 @@ export function filterNodes(nodes: ProxyNode[], filters: NodeFilters): ProxyNode
 }
 
 export function canExportNode(node: ProxyNode): boolean {
-  return Boolean(node.assignedPort);
+  return Boolean(node.assignedPort) && node.lifecycleStatus !== "retired" && node.lifecycleStatus !== "deleted";
 }
 
 export function exportBlockReason(node: ProxyNode): string {
@@ -84,6 +84,38 @@ export function formatNodeStatus(status: ProxyNode["status"]): string {
       return "停用";
     default:
       return status;
+  }
+}
+
+export function formatLifecycleStatus(status: ProxyNode["lifecycleStatus"]): string {
+  const labels: Record<ProxyNode["lifecycleStatus"], string> = {
+    candidate: "候选",
+    testing: "测试中",
+    schedulable: "可调度",
+    disabled: "已暂停",
+    draining: "排空中",
+    cooling_down: "冷却中",
+    retired: "已退役",
+    deleted: "已删除"
+  };
+  return labels[status] ?? status;
+}
+
+export function lifecycleTone(status: ProxyNode["lifecycleStatus"]): "success" | "danger" | "warning" | "neutral" | "info" {
+  switch (status) {
+    case "schedulable":
+      return "success";
+    case "cooling_down":
+    case "draining":
+      return "warning";
+    case "disabled":
+    case "retired":
+    case "deleted":
+      return "neutral";
+    case "testing":
+      return "info";
+    default:
+      return "warning";
   }
 }
 

@@ -47,6 +47,11 @@ function ensureSchema(sqlite: HiveSqlite): void {
       region TEXT NOT NULL,
       raw_json TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('active', 'inactive', 'untested', 'failed')),
+      lifecycle_status TEXT NOT NULL DEFAULT 'candidate' CHECK (lifecycle_status IN ('candidate', 'testing', 'schedulable', 'disabled', 'draining', 'cooling_down', 'retired', 'deleted')),
+      schedulable INTEGER NOT NULL DEFAULT 0,
+      protected INTEGER NOT NULL DEFAULT 0,
+      sub2api_proxy_id INTEGER,
+      quality_score INTEGER,
       assigned_port INTEGER,
       last_test_status TEXT,
       last_test_latency_ms INTEGER,
@@ -67,6 +72,24 @@ function ensureSchema(sqlite: HiveSqlite): void {
     );
   `);
   addColumnIfMissing(sqlite, "subscriptions", "exclude_keywords", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing(sqlite, "nodes", "lifecycle_status", "TEXT NOT NULL DEFAULT 'candidate'");
+  addColumnIfMissing(sqlite, "nodes", "schedulable", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "protected", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "sub2api_proxy_id", "INTEGER");
+  addColumnIfMissing(sqlite, "nodes", "quality_score", "INTEGER");
+  sqlite.exec(`
+    UPDATE nodes
+    SET lifecycle_status = CASE
+      WHEN status = 'active' THEN 'schedulable'
+      WHEN status = 'inactive' THEN 'disabled'
+      WHEN status = 'failed' THEN 'cooling_down'
+      ELSE lifecycle_status
+    END
+    WHERE lifecycle_status = 'candidate';
+
+    UPDATE nodes
+    SET schedulable = CASE WHEN lifecycle_status = 'schedulable' THEN 1 ELSE schedulable END;
+  `);
 }
 
 function addColumnIfMissing(sqlite: HiveSqlite, table: string, column: string, definition: string): void {

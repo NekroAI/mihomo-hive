@@ -54,7 +54,9 @@ export function assignStablePorts({
   occupiedPorts = new Set(),
   preserveExisting = true
 }: AssignPortsInput): ProxyNode[] {
-  const activeNodes = nodes.filter((node) => node.status === "active" || node.status === "untested" || node.status === "failed");
+  const activeNodes = nodes.filter((node) =>
+    ["schedulable", "cooling_down"].includes(node.lifecycleStatus ?? "candidate")
+  );
   const capacity = range.end - range.start + 1 - occupiedPorts.size;
   if (activeNodes.length > capacity) {
     throw new Error(

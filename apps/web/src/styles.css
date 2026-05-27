@@ -65,11 +65,203 @@ select {
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: 100dvh;
   min-height: 640px;
   overflow: hidden;
   background: var(--bg);
+}
+
+.workspace-nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0 18px 10px;
+}
+
+.workspace-nav button {
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+  color: var(--muted-strong);
+  padding: 0 14px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.workspace-nav button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.workspace-grid {
+  min-height: 0;
+  padding: 12px;
+}
+
+.node-pool-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.sub2api-workspace,
+.runtime-workspace {
+  overflow: auto;
+}
+
+.sub2api-workspace > .panel,
+.runtime-workspace > .export-panel {
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.node-pool-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+
+.metric-grid.compact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+  padding: 10px;
+}
+
+.metric-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metric-card strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+.metric-success strong {
+  color: var(--success);
+}
+
+.metric-warning strong {
+  color: var(--warning);
+}
+
+.metric-info strong {
+  color: var(--info);
+}
+
+.subscription-row-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.subscription-row-card > button:first-child {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subscription-row-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.dialog.wide {
+  width: min(920px, calc(100vw - 32px));
+}
+
+.preview-table-wrap {
+  max-height: 54vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.preview-table th,
+.preview-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.warning-box,
+.success-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-radius: var(--radius);
+  padding: 10px;
+}
+
+.warning-box {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.success-box {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.runtime-ops {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.runtime-ops h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.job-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.job-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+  padding: 10px;
+  font-size: 12px;
+}
+
+.job-item span {
+  color: var(--muted);
 }
 
 .app-header {

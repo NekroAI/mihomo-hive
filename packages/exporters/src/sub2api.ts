@@ -75,7 +75,7 @@ function filterExportableNodes(nodes: ProxyNode[], selectedHashes?: Set<string>)
     if (selectedHashes && !selectedHashes.has(node.hash)) {
       return false;
     }
-    return Boolean(node.assignedPort);
+    return Boolean(node.assignedPort) && node.lifecycleStatus !== "deleted" && node.lifecycleStatus !== "retired";
   });
 }
 

@@ -14,7 +14,7 @@ export interface RenderedMihomo {
 
 export function renderMihomoConfig(nodes: ProxyNode[], config: RuntimeConfig): RenderedMihomo {
   const activeNodes = nodes
-    .filter((node) => node.status === "active" && node.assignedPort)
+    .filter((node) => node.status === "active" && node.lifecycleStatus === "schedulable" && node.schedulable && node.assignedPort)
     .sort((a, b) => Number(a.assignedPort) - Number(b.assignedPort));
 
   const proxies = activeNodes.map((node, index) => ({

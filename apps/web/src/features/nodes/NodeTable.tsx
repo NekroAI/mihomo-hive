@@ -14,8 +14,10 @@ import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../
 import {
   canExportNode,
   exportBlockReason,
+  formatLifecycleStatus,
   formatRegion,
   formatNodeStatus,
+  lifecycleTone,
   parseTestResults,
   type NodeFilters,
   statusTone,
@@ -65,6 +67,12 @@ export function NodeTable(props: {
         header: "节点名称",
         cell: ({ row }) => <span className="node-name" title={row.original.name}>{row.original.name}</span>,
         size: 300
+      },
+      {
+        accessorKey: "lifecycleStatus",
+        header: "调度",
+        cell: ({ row }) => <Badge tone={lifecycleTone(row.original.lifecycleStatus)}>{formatLifecycleStatus(row.original.lifecycleStatus)}</Badge>,
+        size: 92
       },
       {
         accessorKey: "status",

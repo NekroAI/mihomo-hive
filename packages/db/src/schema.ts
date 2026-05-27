@@ -21,6 +21,15 @@ export const nodes = sqliteTable("nodes", {
   region: text("region").notNull(),
   rawJson: text("raw_json").notNull(),
   status: text("status", { enum: ["active", "inactive", "untested", "failed"] }).notNull(),
+  lifecycleStatus: text("lifecycle_status", {
+    enum: ["candidate", "testing", "schedulable", "disabled", "draining", "cooling_down", "retired", "deleted"]
+  })
+    .notNull()
+    .default("candidate"),
+  schedulable: integer("schedulable", { mode: "boolean" }).notNull().default(false),
+  protected: integer("protected", { mode: "boolean" }).notNull().default(false),
+  sub2apiProxyId: integer("sub2api_proxy_id"),
+  qualityScore: integer("quality_score"),
   assignedPort: integer("assigned_port"),
   lastTestStatus: text("last_test_status"),
   lastTestLatencyMs: integer("last_test_latency_ms"),

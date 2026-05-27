@@ -182,3 +182,26 @@ export const sub2ApiAssignmentApplyResultSchema = z.object({
 });
 
 export type Sub2ApiAssignmentApplyResult = z.infer<typeof sub2ApiAssignmentApplyResultSchema>;
+
+export const sub2ApiSyncSummarySchema = z.object({
+  proxies: z.number().int().nonnegative(),
+  accounts: z.number().int().nonnegative(),
+  matchedLocalNodes: z.number().int().nonnegative(),
+  protectedProxies: z.number().int().nonnegative()
+});
+
+export type Sub2ApiSyncSummary = z.infer<typeof sub2ApiSyncSummarySchema>;
+
+export const sub2ApiReconcilePlanSchema = sub2ApiAssignmentPreviewSchema.extend({
+  mode: z.enum(["steady_balance", "drain_nodes", "enable_nodes"]).default("steady_balance"),
+  affectedNodeHashes: z.array(z.string().min(8)).default([]),
+  risks: z.array(z.string()).default([])
+});
+
+export type Sub2ApiReconcilePlan = z.infer<typeof sub2ApiReconcilePlanSchema>;
+
+export const sub2ApiReconcileApplyResultSchema = sub2ApiAssignmentApplyResultSchema.extend({
+  operationId: z.string().min(1)
+});
+
+export type Sub2ApiReconcileApplyResult = z.infer<typeof sub2ApiReconcileApplyResultSchema>;

@@ -85,6 +85,9 @@ function node(input: Partial<ProxyNode> & Pick<ProxyNode, "hash" | "status">): P
     region: input.region ?? "jp",
     raw: input.raw ?? { name: input.name ?? input.hash, type: input.type ?? "ss" },
     status: input.status,
+    lifecycleStatus: input.lifecycleStatus ?? (input.status === "active" ? "schedulable" : input.status === "failed" ? "cooling_down" : "candidate"),
+    schedulable: input.schedulable ?? (input.status === "active"),
+    protected: input.protected ?? false,
     ...(input.assignedPort ? { assignedPort: input.assignedPort } : {}),
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"

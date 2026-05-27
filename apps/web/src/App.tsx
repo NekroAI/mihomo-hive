@@ -1,17 +1,27 @@
 import React from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ConfirmDialog, ToastStack, type ToastMessage } from "./components/ui.js";
+import { Button, ConfirmDialog, ToastStack, type ToastMessage } from "./components/ui.js";
 import { AuthScreen } from "./features/auth/AuthScreen.js";
 import { ExportPanel } from "./features/export/ExportPanel.js";
+import { NodePoolPanel } from "./features/node-pool/NodePoolPanel.js";
 import { NodeTable } from "./features/nodes/NodeTable.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
-import { PipelinePanel, type TaskFeedback } from "./features/pipeline/PipelinePanel.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
 import { Sub2ApiPanel } from "./features/sub2api/Sub2ApiPanel.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
-import type { Sub2ApiAccountFilters, Sub2ApiProtectedProxyRule } from "@mihomo-hive/schemas";
+import type { NodeDeletionPlan, Sub2ApiAccountFilters, Sub2ApiProtectedProxyRule, SubscriptionImportPreview } from "@mihomo-hive/schemas";
+
+type TaskState = "idle" | "pending" | "success" | "error";
+
+interface TaskFeedback {
+  state: TaskState;
+  title: string;
+  detail: string;
+  startedAt?: number;
+  technical?: string;
+}
 
 export function AppRoot() {
   return (
@@ -65,6 +75,7 @@ function Dashboard(props: { onLogout: () => void }) {
 
   const [subscriptionName, setSubscriptionName] = React.useState("");
   const [subscriptionUrl, setSubscriptionUrl] = React.useState("");
+  const [subscriptionKeywords, setSubscriptionKeywords] = React.useState("");
   const [portRange, setPortRange] = React.useState("10001-10300");
   const [exportHost, setExportHost] = React.useState("127.0.0.1");
   const [exportFilename, setExportFilename] = React.useState("sub2api-proxies.json");
@@ -89,6 +100,7 @@ function Dashboard(props: { onLogout: () => void }) {
     status: ""
   });
   const [sub2apiOverwrite, setSub2apiOverwrite] = React.useState(false);
+  const [workspace, setWorkspace] = useLocalStorageState<"nodes" | "sub2api" | "runtime">("mihomo-hive.workspace", "nodes");
   const [filters, setFilters] = useLocalStorageState<NodeFilters>("mihomo-hive.node-filters", defaultNodeFilters);
   const [selectedHashesList, setSelectedHashesList] = useLocalStorageState<string[]>("mihomo-hive.selected-hashes", []);
   const selectedHashes = React.useMemo(() => new Set(selectedHashesList), [selectedHashesList]);
@@ -100,6 +112,8 @@ function Dashboard(props: { onLogout: () => void }) {
   const [toasts, setToasts] = React.useState<ToastMessage[]>([]);
   const [confirmAction, setConfirmAction] = React.useState<ConfirmAction | undefined>();
   const [downloading, setDownloading] = React.useState(false);
+  const [importPreview, setImportPreview] = React.useState<SubscriptionImportPreview | undefined>();
+  const [deletePlan, setDeletePlan] = React.useState<NodeDeletionPlan | undefined>();
 
   React.useEffect(() => {
     if (config.data) {
@@ -151,6 +165,7 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     { enabled: Boolean(sub2apiConfig.data?.configured) }
   );
+  const jobs = trpc.sub2api.jobs.list.useQuery(undefined, { enabled: workspace === "runtime", refetchInterval: 3000 });
 
   const refreshOperationalData = React.useCallback(async () => {
     await Promise.all([
@@ -174,6 +189,23 @@ function Dashboard(props: { onLogout: () => void }) {
       await refreshOperationalData();
     },
     onError: (error) => failTask(setTask, pushToast, "订阅添加失败", error.message)
+  });
+  const previewImport = trpc.subscriptions.previewImport.useMutation({
+    onMutate: () => startTask(setTask, "正在拉取并预览订阅", "系统会先展示将导入、过滤和重复的节点。"),
+    onSuccess: async (result) => {
+      setImportPreview(result);
+      await finishTask(setTask, pushToast, "订阅预览完成", `解析 ${result.summary.total} 个节点，可导入 ${result.summary.importable} 个。`);
+    },
+    onError: (error) => failTask(setTask, pushToast, "订阅预览失败", error.message)
+  });
+  const applyImportPreview = trpc.subscriptions.applyImport.useMutation({
+    onMutate: () => startTask(setTask, "正在导入预览结果", "只会导入预览中标记为导入或更新的节点。"),
+    onSuccess: async (result) => {
+      setImportPreview(undefined);
+      await finishTask(setTask, pushToast, "节点已导入候选池", `导入或更新 ${result.imported} 个节点。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "节点导入失败", error.message)
   });
   const fetchSubscriptions = trpc.subscriptions.fetch.useMutation({
     onMutate: () => startTask(setTask, "正在拉取订阅", "正在请求已启用订阅源，完成后会显示字节数。"),
@@ -214,6 +246,24 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "端口分配失败", error.message)
   });
+  const setNodeLifecycle = trpc.nodes.setLifecycle.useMutation({
+    onMutate: () => startTask(setTask, "正在更新节点调度状态", "系统会调整所选节点的生命周期状态。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "节点调度状态已更新", `更新 ${result.updated} 个节点。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "节点调度状态更新失败", error.message)
+  });
+  const deleteNodes = trpc.nodes.applyDelete.useMutation({
+    onMutate: () => startTask(setTask, "正在删除节点", "删除前会校验 Sub2API 账号依赖。"),
+    onSuccess: async (result) => {
+      setDeletePlan(undefined);
+      mutateSelection(() => new Set());
+      await finishTask(setTask, pushToast, "节点已删除", `删除 ${result.deleted} 个节点。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "节点删除失败", error.message)
+  });
   const testNodes = trpc.nodes.test.useMutation({
     onMutate: () => startTask(setTask, "正在批量测试", "正在使用 OpenAI / Claude 目标检查本地 listener 可用性。"),
     onSuccess: async (result) => {
@@ -235,6 +285,14 @@ function Dashboard(props: { onLogout: () => void }) {
       await refreshOperationalData();
     },
     onError: (error) => failTask(setTask, pushToast, "Mihomo 配置生成失败", error.message)
+  });
+  const publishRuntime = trpc.runtime.publish.useMutation({
+    onMutate: () => startTask(setTask, "正在发布出口池", "系统会生成配置并自动启动或重载 Mihomo。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "出口池发布完成", `发布 ${result.listeners} 个 listener。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "出口池发布失败", error.message)
   });
   const startMihomo = trpc.mihomo.start.useMutation({
     onMutate: () => startTask(setTask, "正在启动 Mihomo", "服务会在后台保持运行。"),
@@ -304,13 +362,18 @@ function Dashboard(props: { onLogout: () => void }) {
 
   const busy =
     addSubscription.isPending ||
+    previewImport.isPending ||
+    applyImportPreview.isPending ||
     fetchSubscriptions.isPending ||
     importNodes.isPending ||
     assignPorts.isPending ||
+    setNodeLifecycle.isPending ||
+    deleteNodes.isPending ||
     updateSubscriptionFilters.isPending ||
     deleteSubscription.isPending ||
     testNodes.isPending ||
     renderMihomo.isPending ||
+    publishRuntime.isPending ||
     startMihomo.isPending ||
     reloadMihomo.isPending ||
     stopMihomo.isPending ||
@@ -338,6 +401,27 @@ function Dashboard(props: { onLogout: () => void }) {
     setSub2apiProtected(rule);
     if (sub2apiConfig.data?.configured) {
       saveProtectedRule.mutate(rule);
+    }
+  }
+
+  function keywordList() {
+    return subscriptionKeywords
+      .split(/[,，\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  async function previewSelectedDeletePlan() {
+    if (selectedHashesList.length === 0) {
+      return;
+    }
+    startTask(setTask, "正在生成删除计划", "系统会检查 Sub2API 中是否仍有账号使用这些代理。");
+    try {
+      const plan = await utils.nodes.previewDelete.fetch({ hashes: selectedHashesList });
+      setDeletePlan(plan);
+      setTask({ state: "success", title: "删除计划已生成", detail: plan.message });
+    } catch (error) {
+      failTask(setTask, pushToast, "删除计划生成失败", error instanceof Error ? error.message : "未知错误");
     }
   }
 
@@ -395,167 +479,133 @@ function Dashboard(props: { onLogout: () => void }) {
         assigned={assignedCount}
         onLogout={props.onLogout}
       />
-      <section className="app-grid">
-        <PipelinePanel
-          subscriptions={subscriptions.data ?? []}
-          subscriptionName={subscriptionName}
-          subscriptionUrl={subscriptionUrl}
-          portRange={portRange}
-          filteredCount={filteredNodes.length}
-          selectedCount={selectedHashes.size}
-          assignedCount={assignedCount}
-          canTest={assignedCount > 0}
-          canRender={activeCount > 0}
-          mihomoRunning={Boolean(runtimeStatus.data?.running)}
-          task={task}
-          busy={busy}
-          onSubscriptionNameChange={setSubscriptionName}
-          onSubscriptionUrlChange={setSubscriptionUrl}
-          onPortRangeChange={setPortRange}
-          onAddSubscription={() => addSubscription.mutate({ name: subscriptionName, url: subscriptionUrl })}
-          onFetch={() => fetchSubscriptions.mutate()}
-          onImport={() => importNodes.mutate()}
-          onUpdateSubscriptionFilters={(id, excludeKeywords) => updateSubscriptionFilters.mutate({ id, excludeKeywords })}
-          onDeleteSubscription={(id) =>
-            requestConfirmation({
-              title: "确认删除订阅",
-              description: "会删除订阅源以及由它导入的节点。",
-              detail: "这个操作不会删除其他订阅导入的节点。",
-              confirmLabel: "删除订阅",
-              dangerous: true,
-              run: async () => deleteSubscription.mutate({ id })
-            })
-          }
-          onAssignPorts={() =>
-            requestConfirmation({
-              title: "确认重新分配端口",
-              description: `将按 ${portRange} 重新生成唯一端口。`,
-              detail: `Mihomo 必须处于停止状态。当前数据库共有 ${allNodes.length} 个节点，已分配 ${assignedCount} 个端口。`,
-              confirmLabel: "重新分配",
-              run: async () => assignPorts.mutate({ range: portRange, skipPortCheck: false })
-            })
-          }
-          onTest={() =>
-            requestConfirmation({
-              title: "确认批量测试",
-              description: "将测试所有已分配端口的节点，并把失败节点标记为失败。",
-              detail: `当前已分配端口 ${assignedCount} 个，测试目标为 OpenAI / Claude。`,
-              confirmLabel: "开始测试",
-              run: async () => testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })
-            })
-          }
-          onRender={() =>
-            requestConfirmation({
-              title: "确认生成 Mihomo 配置",
-              description: "将重新生成 Mihomo 配置文件，只包含可用且已分配端口的节点。",
-              detail: `预计 listener 数量为 ${allNodes.filter(canExportNode).length}。`,
-              confirmLabel: "生成配置",
-              run: async () => renderMihomo.mutate()
-            })
-          }
-          onStart={() => startMihomo.mutate()}
-          onReload={() =>
-            requestConfirmation({
-              title: "确认重载 Mihomo",
-              description: "会向当前 Mihomo 进程发送 reload 信号。",
-              detail: "请确认配置文件已经生成。",
-              confirmLabel: "重载",
-              run: async () => reloadMihomo.mutate()
-            })
-          }
-          onStop={() =>
-            requestConfirmation({
-              title: "确认停止 Mihomo",
-              description: "停止后本机出口 listener 会关闭。",
-              detail: "Sub2API 继续使用这些端口时会连接失败。",
-              confirmLabel: "停止",
-              dangerous: true,
-              run: async () => stopMihomo.mutate()
-            })
-          }
-        />
+      <nav className="workspace-nav" aria-label="工作区">
+        <button className={workspace === "nodes" ? "is-active" : ""} type="button" onClick={() => setWorkspace("nodes")}>
+          节点池
+        </button>
+        <button className={workspace === "sub2api" ? "is-active" : ""} type="button" onClick={() => setWorkspace("sub2api")}>
+          Sub2API 自动化
+        </button>
+        <button className={workspace === "runtime" ? "is-active" : ""} type="button" onClick={() => setWorkspace("runtime")}>
+          运行与导出
+        </button>
+      </nav>
 
-        <NodeTable
-          nodes={allNodes}
-          filteredNodes={filteredNodes}
-          filters={filters}
-          sourceNames={sourceNames}
-          selectedHashes={selectedHashes}
-          onFiltersChange={setFilters}
-          onToggleNode={(hash, selected) =>
-            mutateSelection((current) => {
-              if (selected) {
-                current.add(hash);
+      {workspace === "nodes" ? (
+        <section className="workspace-grid node-pool-grid">
+          <NodePoolPanel
+            subscriptions={subscriptions.data ?? []}
+            nodes={allNodes}
+            selectedCount={selectedHashes.size}
+            busy={busy}
+            importName={subscriptionName}
+            importUrl={subscriptionUrl}
+            importKeywords={subscriptionKeywords}
+            preview={importPreview}
+            deletePlan={deletePlan}
+            previewing={previewImport.isPending}
+            importing={applyImportPreview.isPending}
+            publishing={publishRuntime.isPending}
+            onImportNameChange={setSubscriptionName}
+            onImportUrlChange={setSubscriptionUrl}
+            onImportKeywordsChange={setSubscriptionKeywords}
+            onPreviewImport={(source) => {
+              if (source) {
+                setSubscriptionName(source.name);
+                setSubscriptionKeywords(source.excludeKeywords.join(","));
+                previewImport.mutate({ id: source.id, excludeKeywords: source.excludeKeywords });
               } else {
-                current.delete(hash);
+                previewImport.mutate({ name: subscriptionName, url: subscriptionUrl, excludeKeywords: keywordList() });
               }
-              return current;
-            })
-          }
-          onSelectFiltered={(exportableOnly) =>
-            mutateSelection((current) => {
-              for (const node of filteredNodes) {
-                if (!exportableOnly || canExportNode(node)) {
-                  current.add(node.hash);
-                }
+            }}
+            onApplyImport={() =>
+              applyImportPreview.mutate({
+                id: importPreview?.source.id,
+                name: importPreview?.source.name ?? subscriptionName,
+                url: importPreview?.source.value ?? subscriptionUrl,
+                excludeKeywords: keywordList()
+              })
+            }
+            onClearPreview={() => setImportPreview(undefined)}
+            onEnableSelected={() => setNodeLifecycle.mutate({ hashes: selectedHashesList, lifecycleStatus: "schedulable" })}
+            onDisableSelected={() => setNodeLifecycle.mutate({ hashes: selectedHashesList, lifecycleStatus: "disabled" })}
+            onPreviewDeleteSelected={previewSelectedDeletePlan}
+            onApplyDeleteSelected={(forceLocal) => {
+              if (forceLocal) {
+                deleteNodes.mutate({ hashes: selectedHashesList, forceLocal: false });
+              } else {
+                setDeletePlan(undefined);
               }
-              return current;
-            })
-          }
-          onSelectSuccessful={() =>
-            mutateSelection((current) => {
-              for (const node of filteredNodes) {
-                if (node.status === "active") {
-                  current.add(node.hash);
-                }
-              }
-              return current;
-            })
-          }
-          onInvertFiltered={() =>
-            mutateSelection((current) => {
-              for (const node of filteredNodes) {
-                if (current.has(node.hash)) {
-                  current.delete(node.hash);
+            }}
+            onTest={() => testNodes.mutate({ targets: ["openai", "claude"], timeoutMs: 15_000, concurrency: 8 })}
+            onPublish={() => publishRuntime.mutate()}
+            onDeleteSubscription={(id) =>
+              requestConfirmation({
+                title: "确认删除订阅",
+                description: "会删除订阅源以及由它导入的本地节点。",
+                detail: "如果这些节点已经在 Sub2API 中被账号使用，请先通过节点删除计划排空账号绑定。",
+                confirmLabel: "删除订阅",
+                dangerous: true,
+                run: async () => deleteSubscription.mutate({ id })
+              })
+            }
+          />
+          <NodeTable
+            nodes={allNodes}
+            filteredNodes={filteredNodes}
+            filters={filters}
+            sourceNames={sourceNames}
+            selectedHashes={selectedHashes}
+            onFiltersChange={setFilters}
+            onToggleNode={(hash, selected) =>
+              mutateSelection((current) => {
+                if (selected) {
+                  current.add(hash);
                 } else {
-                  current.add(node.hash);
+                  current.delete(hash);
                 }
-              }
-              return current;
-            })
-          }
-          onClearSelection={() => setSelectedHashesList([])}
-        />
+                return current;
+              })
+            }
+            onSelectFiltered={(exportableOnly) =>
+              mutateSelection((current) => {
+                for (const node of filteredNodes) {
+                  if (!exportableOnly || canExportNode(node)) {
+                    current.add(node.hash);
+                  }
+                }
+                return current;
+              })
+            }
+            onSelectSuccessful={() =>
+              mutateSelection((current) => {
+                for (const node of filteredNodes) {
+                  if (node.status === "active") {
+                    current.add(node.hash);
+                  }
+                }
+                return current;
+              })
+            }
+            onInvertFiltered={() =>
+              mutateSelection((current) => {
+                for (const node of filteredNodes) {
+                  if (current.has(node.hash)) {
+                    current.delete(node.hash);
+                  } else {
+                    current.add(node.hash);
+                  }
+                }
+                return current;
+              })
+            }
+            onClearSelection={() => setSelectedHashesList([])}
+          />
+        </section>
+      ) : null}
 
-        <ExportPanel
-          host={exportHost}
-          filename={exportFilename}
-          selectedCount={selectedHashes.size}
-          preview={exportPreview.data}
-          loading={exportPreview.isFetching}
-          writing={writeExport.isPending}
-          downloading={downloading}
-          failedNodeStatus={failedNodeStatus}
-          onHostChange={setExportHost}
-          onFilenameChange={setExportFilename}
-          onFailedNodeStatusChange={setFailedNodeStatus}
-          onDownload={downloadExport}
-          onWrite={() =>
-            requestConfirmation({
-              title: "确认写入服务器文件",
-              description: `将把 ${exportableSelectedCount} 个可导出节点写入 generated/sub2api-proxies.json。`,
-              detail: "非可用或无端口节点不会进入文件。",
-              confirmLabel: "写入文件",
-              run: async () =>
-                writeExport.mutate({
-                  selectedHashes: selectedHashesList,
-                  host: exportHost,
-                  filename: exportFilename,
-                  failedNodeStatus
-                })
-            })
-          }
-        >
+      {workspace === "sub2api" ? (
+        <section className="workspace-grid sub2api-workspace">
           <Sub2ApiPanel
             config={sub2apiConfig.data}
             baseUrl={sub2apiBaseUrl}
@@ -603,8 +653,68 @@ function Dashboard(props: { onLogout: () => void }) {
               })
             }
           />
-        </ExportPanel>
-      </section>
+        </section>
+      ) : null}
+
+      {workspace === "runtime" ? (
+        <section className="workspace-grid runtime-workspace">
+          <ExportPanel
+            host={exportHost}
+            filename={exportFilename}
+            selectedCount={selectedHashes.size}
+            preview={exportPreview.data}
+            loading={exportPreview.isFetching}
+            writing={writeExport.isPending}
+            downloading={downloading}
+            failedNodeStatus={failedNodeStatus}
+            onHostChange={setExportHost}
+            onFilenameChange={setExportFilename}
+            onFailedNodeStatusChange={setFailedNodeStatus}
+            onDownload={downloadExport}
+            onWrite={() =>
+              requestConfirmation({
+                title: "确认写入服务器文件",
+                description: `将把 ${exportableSelectedCount} 个可导出节点写入 generated/sub2api-proxies.json。`,
+                detail: "导出严格按当前选择集执行；失败节点状态由导出篮子的选项决定。",
+                confirmLabel: "写入文件",
+                run: async () =>
+                  writeExport.mutate({
+                    selectedHashes: selectedHashesList,
+                    host: exportHost,
+                    filename: exportFilename,
+                    failedNodeStatus
+                  })
+              })
+            }
+          >
+            <section className="runtime-ops">
+              <h2>运行状态</h2>
+              <div className="button-row wrap">
+                <Button onClick={() => publishRuntime.mutate()} disabled={busy || activeCount === 0}>
+                  发布出口池
+                </Button>
+                <Button variant="secondary" onClick={() => startMihomo.mutate()} disabled={busy}>
+                  启动
+                </Button>
+                <Button variant="secondary" onClick={() => reloadMihomo.mutate()} disabled={busy}>
+                  重载
+                </Button>
+                <Button variant="danger" onClick={() => stopMihomo.mutate()} disabled={busy || !runtimeStatus.data?.running}>
+                  停止
+                </Button>
+              </div>
+              <div className="job-list">
+                {(jobs.data ?? []).slice(0, 8).map((job) => (
+                  <div key={job.id} className={`job-item job-${job.status}`}>
+                    <strong>{job.title}</strong>
+                    <span>{job.detail}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </ExportPanel>
+        </section>
+      ) : null}
 
       <ConfirmDialog
         open={Boolean(confirmAction)}

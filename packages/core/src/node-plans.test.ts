@@ -1,0 +1,67 @@
+import { describe, expect, it } from "vitest";
+import { buildNodeDeletionPlan, mapLocalNodesToSub2ApiProxies } from "./node-plans.js";
+import type { ProxyNode, Sub2ApiAccountRecord, Sub2ApiProxyRecord } from "@mihomo-hive/schemas";
+
+describe("node deletion plans", () => {
+  it("requires drain when Sub2API accounts still use selected node proxies", () => {
+    const nodes = [node("hash-0001", 10001)];
+    const proxies = [proxy(7, 10001)];
+    const accounts = [account(99, 7)];
+
+    const plan = buildNodeDeletionPlan({ nodes, proxies, accounts, exportHost: "127.0.0.1" });
+
+    expect(plan.canDeleteNow).toBe(false);
+    expect(plan.requiresDrain).toBe(true);
+    expect(plan.blockingAccounts.map((item) => item.id)).toEqual([99]);
+  });
+
+  it("maps local node ports back to Sub2API proxy ids", () => {
+    expect(
+      mapLocalNodesToSub2ApiProxies({
+        nodes: [node("hash-0001", 10001)],
+        proxies: [proxy(7, 10001), proxy(8, 10002)],
+        exportHost: "127.0.0.1"
+      })
+    ).toEqual([{ hash: "hash-0001", proxyId: 7 }]);
+  });
+});
+
+function node(hash: string, assignedPort: number): ProxyNode {
+  return {
+    hash,
+    sourceId: "source",
+    name: hash,
+    originalName: hash,
+    type: "ss",
+    region: "jp",
+    raw: { name: hash, type: "ss" },
+    status: "active",
+    lifecycleStatus: "schedulable",
+    schedulable: true,
+    protected: false,
+    assignedPort,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z"
+  };
+}
+
+function proxy(id: number, port: number): Sub2ApiProxyRecord {
+  return {
+    id,
+    name: `proxy-${id}`,
+    protocol: "socks5",
+    host: "127.0.0.1",
+    port,
+    status: "active"
+  };
+}
+
+function account(id: number, proxyId: number): Sub2ApiAccountRecord {
+  return {
+    id,
+    name: `account-${id}`,
+    platform: "openai",
+    status: "active",
+    proxy_id: proxyId
+  };
+}

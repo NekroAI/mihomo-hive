@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { sub2ApiConnectionConfigSchema, sub2ApiProtectedProxyRuleSchema } from "@mihomo-hive/schemas";
 import type {
+  NodeLifecycleStatus,
   ProxyNode,
   Sub2ApiConnectionConfig,
   Sub2ApiProtectedProxyRule,
@@ -37,6 +38,11 @@ interface NodeRow {
   region: string;
   raw_json: string;
   status: ProxyNode["status"];
+  lifecycle_status: NodeLifecycleStatus;
+  schedulable: 0 | 1;
+  protected: 0 | 1;
+  sub2api_proxy_id: number | null;
+  quality_score: number | null;
   assigned_port: number | null;
   last_test_status: string | null;
   last_test_latency_ms: number | null;
@@ -148,10 +154,12 @@ export class HiveRepository {
     const statement = this.sqlite.prepare(`
       INSERT INTO nodes (
         hash, source_id, name, original_name, type, region, raw_json, status,
+        lifecycle_status, schedulable, protected, sub2api_proxy_id, quality_score,
         assigned_port, last_test_status, last_test_latency_ms, created_at, updated_at
       )
       VALUES (
         @hash, @sourceId, @name, @originalName, @type, @region, @rawJson, @status,
+        @lifecycleStatus, @schedulable, @protected, @sub2apiProxyId, @qualityScore,
         @assignedPort, @lastTestStatus, @lastTestLatencyMs, @createdAt, @updatedAt
       )
       ON CONFLICT(hash) DO UPDATE SET
@@ -161,6 +169,10 @@ export class HiveRepository {
         type = excluded.type,
         region = excluded.region,
         raw_json = excluded.raw_json,
+        lifecycle_status = CASE
+          WHEN nodes.lifecycle_status IN ('deleted', 'retired') THEN nodes.lifecycle_status
+          ELSE excluded.lifecycle_status
+        END,
         updated_at = excluded.updated_at
     `);
 
@@ -175,6 +187,11 @@ export class HiveRepository {
           region: node.region,
           rawJson: JSON.stringify(node.raw),
           status: node.status,
+          lifecycleStatus: node.lifecycleStatus ?? lifecycleFromStatus(node.status),
+          schedulable: node.schedulable ? 1 : 0,
+          protected: node.protected ? 1 : 0,
+          sub2apiProxyId: node.sub2apiProxyId ?? null,
+          qualityScore: node.qualityScore ?? null,
           assignedPort: node.assignedPort ?? null,
           lastTestStatus: node.lastTestStatus ?? null,
           lastTestLatencyMs: node.lastTestLatencyMs ?? null,
@@ -197,6 +214,11 @@ export class HiveRepository {
       UPDATE nodes SET
         name = @name,
         status = @status,
+        lifecycle_status = @lifecycleStatus,
+        schedulable = @schedulable,
+        protected = @protected,
+        sub2api_proxy_id = @sub2apiProxyId,
+        quality_score = @qualityScore,
         assigned_port = @assignedPort,
         last_test_status = @lastTestStatus,
         last_test_latency_ms = @lastTestLatencyMs,
@@ -210,6 +232,11 @@ export class HiveRepository {
           hash: node.hash,
           name: node.name,
           status: node.status,
+          lifecycleStatus: node.lifecycleStatus ?? lifecycleFromStatus(node.status),
+          schedulable: node.schedulable ? 1 : 0,
+          protected: node.protected ? 1 : 0,
+          sub2apiProxyId: node.sub2apiProxyId ?? null,
+          qualityScore: node.qualityScore ?? null,
           assignedPort: node.assignedPort ?? null,
           lastTestStatus: node.lastTestStatus ?? null,
           lastTestLatencyMs: node.lastTestLatencyMs ?? null,
@@ -222,7 +249,61 @@ export class HiveRepository {
   }
 
   setAllUntestedActive(): void {
-    this.sqlite.prepare("UPDATE nodes SET status = 'active' WHERE status = 'untested'").run();
+    this.sqlite
+      .prepare("UPDATE nodes SET status = 'active', lifecycle_status = 'schedulable', schedulable = 1 WHERE status = 'untested'")
+      .run();
+  }
+
+  deleteNodes(hashes: string[]): number {
+    if (hashes.length === 0) {
+      return 0;
+    }
+    const statement = this.sqlite.prepare("DELETE FROM nodes WHERE hash = ?");
+    const transaction = this.sqlite.transaction((items: string[]) => {
+      let deleted = 0;
+      for (const hash of items) {
+        deleted += statement.run(hash).changes;
+      }
+      return deleted;
+    });
+    return transaction(hashes) as number;
+  }
+
+  markNodesLifecycle(hashes: string[], lifecycleStatus: NodeLifecycleStatus): ProxyNode[] {
+    if (hashes.length === 0) {
+      return [];
+    }
+    const status = statusFromLifecycle(lifecycleStatus);
+    const schedulable = lifecycleStatus === "schedulable" ? 1 : 0;
+    const statement = this.sqlite.prepare(`
+      UPDATE nodes SET
+        lifecycle_status = @lifecycleStatus,
+        status = @status,
+        schedulable = @schedulable,
+        assigned_port = CASE WHEN @schedulable = 1 THEN assigned_port ELSE assigned_port END,
+        updated_at = @updatedAt
+      WHERE hash = @hash
+    `);
+    const now = new Date().toISOString();
+    const transaction = this.sqlite.transaction((items: string[]) => {
+      for (const hash of items) {
+        statement.run({ hash, lifecycleStatus, status, schedulable, updatedAt: now });
+      }
+    });
+    transaction(hashes);
+    const wanted = new Set(hashes);
+    return this.listNodes().filter((node) => wanted.has(node.hash));
+  }
+
+  updateSub2ApiProxyMappings(mappings: Array<{ hash: string; proxyId: number }>): void {
+    const statement = this.sqlite.prepare("UPDATE nodes SET sub2api_proxy_id = ?, updated_at = ? WHERE hash = ?");
+    const now = new Date().toISOString();
+    const transaction = this.sqlite.transaction((items: Array<{ hash: string; proxyId: number }>) => {
+      for (const item of items) {
+        statement.run(item.proxyId, now, item.hash);
+      }
+    });
+    transaction(mappings);
   }
 
   getPasswordHash(): PasswordHash | undefined {
@@ -371,10 +452,49 @@ function nodeFromRow(row: NodeRow): ProxyNode {
     region: row.region,
     raw: JSON.parse(row.raw_json) as Record<string, unknown>,
     status: row.status,
+    lifecycleStatus: row.lifecycle_status ?? lifecycleFromStatus(row.status),
+    schedulable: Boolean(row.schedulable),
+    protected: Boolean(row.protected),
+    ...(row.sub2api_proxy_id ? { sub2apiProxyId: row.sub2api_proxy_id } : {}),
+    ...(row.quality_score === null ? {} : { qualityScore: row.quality_score }),
     ...(row.assigned_port ? { assignedPort: row.assigned_port } : {}),
     ...(row.last_test_status ? { lastTestStatus: row.last_test_status } : {}),
     ...(row.last_test_latency_ms ? { lastTestLatencyMs: row.last_test_latency_ms } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function lifecycleFromStatus(status: ProxyNode["status"]): NodeLifecycleStatus {
+  switch (status) {
+    case "active":
+      return "schedulable";
+    case "inactive":
+      return "disabled";
+    case "failed":
+      return "cooling_down";
+    case "untested":
+      return "candidate";
+    default:
+      return "candidate";
+  }
+}
+
+function statusFromLifecycle(lifecycleStatus: NodeLifecycleStatus): ProxyNode["status"] {
+  switch (lifecycleStatus) {
+    case "schedulable":
+      return "active";
+    case "cooling_down":
+      return "failed";
+    case "candidate":
+    case "testing":
+      return "untested";
+    case "disabled":
+    case "draining":
+    case "retired":
+    case "deleted":
+      return "inactive";
+    default:
+      return "inactive";
+  }
 }

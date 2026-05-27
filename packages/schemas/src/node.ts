@@ -3,6 +3,18 @@ import { z } from "zod";
 export const nodeStatusSchema = z.enum(["active", "inactive", "untested", "failed"]);
 export type NodeStatus = z.infer<typeof nodeStatusSchema>;
 
+export const nodeLifecycleStatusSchema = z.enum([
+  "candidate",
+  "testing",
+  "schedulable",
+  "disabled",
+  "draining",
+  "cooling_down",
+  "retired",
+  "deleted"
+]);
+export type NodeLifecycleStatus = z.infer<typeof nodeLifecycleStatusSchema>;
+
 export const subscriptionSourceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -26,6 +38,11 @@ export const proxyNodeSchema = z.object({
   region: z.string().default("unknown"),
   raw: z.record(z.unknown()),
   status: nodeStatusSchema.default("untested"),
+  lifecycleStatus: nodeLifecycleStatusSchema.default("candidate"),
+  schedulable: z.boolean().default(false),
+  protected: z.boolean().default(false),
+  sub2apiProxyId: z.number().int().positive().optional().nullable(),
+  qualityScore: z.number().min(0).max(100).optional().nullable(),
   assignedPort: z.number().int().min(1).max(65535).optional(),
   lastTestStatus: z.string().optional(),
   lastTestLatencyMs: z.number().int().nonnegative().optional(),
@@ -34,6 +51,79 @@ export const proxyNodeSchema = z.object({
 });
 
 export type ProxyNode = z.infer<typeof proxyNodeSchema>;
+
+export const subscriptionImportPreviewItemSchema = z.object({
+  hash: z.string().min(8),
+  name: z.string().min(1),
+  type: z.string().min(1),
+  region: z.string().default("unknown"),
+  action: z.enum(["import", "update", "skip_duplicate", "skip_existing", "skip_filtered"]),
+  reason: z.string().min(1),
+  matchedKeywords: z.array(z.string()).default([]),
+  existingAssignedPort: z.number().int().min(1).max(65535).optional()
+});
+
+export type SubscriptionImportPreviewItem = z.infer<typeof subscriptionImportPreviewItemSchema>;
+
+export const subscriptionImportPreviewSchema = z.object({
+  source: z.object({
+    id: z.string().optional(),
+    name: z.string().min(1),
+    kind: z.enum(["url", "file"]),
+    value: z.string().min(1),
+    fetchedBytes: z.number().int().nonnegative()
+  }),
+  items: z.array(subscriptionImportPreviewItemSchema),
+  summary: z.object({
+    total: z.number().int().nonnegative(),
+    importable: z.number().int().nonnegative(),
+    updates: z.number().int().nonnegative(),
+    duplicates: z.number().int().nonnegative(),
+    existing: z.number().int().nonnegative(),
+    filtered: z.number().int().nonnegative()
+  })
+});
+
+export type SubscriptionImportPreview = z.infer<typeof subscriptionImportPreviewSchema>;
+
+export const nodeDeletionPlanSchema = z.object({
+  nodes: z.array(proxyNodeSchema),
+  blockingAccounts: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      name: z.string().min(1),
+      proxyId: z.number().int().positive(),
+      proxyName: z.string().min(1)
+    })
+  ),
+  canDeleteNow: z.boolean(),
+  requiresDrain: z.boolean(),
+  message: z.string()
+});
+
+export type NodeDeletionPlan = z.infer<typeof nodeDeletionPlanSchema>;
+
+export const operationJobStatusSchema = z.enum(["queued", "running", "success", "failed", "cancelled"]);
+export type OperationJobStatus = z.infer<typeof operationJobStatusSchema>;
+
+export const operationJobSchema = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  status: operationJobStatusSchema,
+  title: z.string().min(1),
+  detail: z.string().default(""),
+  steps: z.array(
+    z.object({
+      name: z.string().min(1),
+      status: operationJobStatusSchema,
+      detail: z.string().default("")
+    })
+  ),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export type OperationJob = z.infer<typeof operationJobSchema>;
 
 export const nodeTestTargetSchema = z.object({
   id: z.string().min(1),

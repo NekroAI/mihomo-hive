@@ -53,6 +53,20 @@ export class Sub2ApiClient {
     return this.listAllPages((page) => this.listAccounts({ page, pageSize: 100, filters }));
   }
 
+  async listProxyAccounts(proxyId: number): Promise<Sub2ApiAccountRecord[]> {
+    const response = await this.request<Sub2ApiListResponse<unknown>>(`/api/v1/admin/proxies/${proxyId}/accounts?page=1&page_size=500`);
+    assertSuccess(response, "获取代理关联账号失败");
+    const data = response.data ?? {};
+    return (data.items ?? []).map((item) => sub2ApiAccountRecordSchema.parse(item));
+  }
+
+  async deleteProxy(proxyId: number): Promise<void> {
+    const response = await this.request<{ code: number; message?: string }>(`/api/v1/admin/proxies/${proxyId}`, {
+      method: "DELETE"
+    });
+    assertSuccess(response, "删除 Sub2API 代理失败");
+  }
+
   async bulkUpdateProxy(accountIds: number[], proxyId: number): Promise<{
     success: number;
     failed: number;
