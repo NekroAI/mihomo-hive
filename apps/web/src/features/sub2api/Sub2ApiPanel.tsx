@@ -1,5 +1,5 @@
 import React from "react";
-import { Link2, RefreshCw, Save, ShieldCheck, Trash2, Unlink, Wand2 } from "lucide-react";
+import { Activity, Link2, RefreshCw, Save, ShieldCheck, Trash2, Unlink, UploadCloud, Wand2 } from "lucide-react";
 import type {
   Sub2ApiAccountFilters,
   Sub2ApiAssignmentPreview,
@@ -26,6 +26,8 @@ export function Sub2ApiPanel(props: {
   testing: boolean;
   applying: boolean;
   syncing: boolean;
+  pushing: boolean;
+  checkingQuality: boolean;
   draining: boolean;
   cleaning: boolean;
   overwriteExisting: boolean;
@@ -43,6 +45,8 @@ export function Sub2ApiPanel(props: {
   onApply: () => void;
   onDrainManaged: () => void;
   onCleanupEmpty: () => void;
+  onPushManaged: () => void;
+  onQualityCheck: () => void;
 }) {
   const configured = Boolean(props.config?.configured);
   const protectedIds = new Set(props.protectedRule.proxyIds);
@@ -110,9 +114,12 @@ export function Sub2ApiPanel(props: {
               测试连接
             </Button>
             <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.syncing} disabled={!configured} onClick={props.onSync}>
-              同步接管
+              回填映射
             </Button>
           </div>
+          <p className="muted small">
+            "回填映射"是下行同步：从 Sub2API 拉取代理与账号，并把匹配上的 Sub2API proxy_id 写回本地节点。不会修改远端数据。
+          </p>
         </section>
 
         <section className="sub2api-section">
@@ -133,6 +140,23 @@ export function Sub2ApiPanel(props: {
           <div className="button-row wrap">
             <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.loading} disabled={!configured} onClick={props.onRefresh}>
               刷新计划
+            </Button>
+            <Button
+              icon={<UploadCloud size={16} />}
+              loading={props.pushing}
+              disabled={!configured}
+              onClick={props.onPushManaged}
+            >
+              推送本地节点
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Activity size={16} />}
+              loading={props.checkingQuality}
+              disabled={!configured || !props.maintenance || props.maintenance.summary.managedProxies === 0}
+              onClick={props.onQualityCheck}
+            >
+              质量检查
             </Button>
             <Button
               variant="secondary"

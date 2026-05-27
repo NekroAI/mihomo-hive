@@ -396,6 +396,34 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "Hive 空代理清理失败", error.message)
   });
+  const pushManagedSub2api = trpc.sub2api.automation.syncManagedProxies.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在推送本地节点到 Sub2API", "通过 importProxyData 把 Hive 节点上行同步并回填 proxy_id。"),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "本地节点已推送 Sub2API",
+        `新增 ${result.summary.proxy_created}，复用 ${result.summary.proxy_reused}，失败 ${result.summary.proxy_failed}；映射 ${result.mappedNodes} 个本地节点。`
+      );
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "上行同步失败", error.message)
+  });
+  const qualityCheckManaged = trpc.sub2api.automation.qualityCheckManaged.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在对 Hive 托管代理执行质量检查", "对每个托管代理调用 quality-check 并回填分数。"),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "质量检查完成",
+        `${result.passed}/${result.total} 通过；更新 ${result.updatedLocalNodes} 个本地节点的 qualityScore。`
+      );
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "质量检查失败", error.message)
+  });
 
   const busy =
     addSubscription.isPending ||
@@ -419,6 +447,8 @@ function Dashboard(props: { onLogout: () => void }) {
     testSub2apiConnection.isPending ||
     applySub2apiAssignments.isPending ||
     syncSub2api.isPending ||
+    pushManagedSub2api.isPending ||
+    qualityCheckManaged.isPending ||
     drainManagedSub2api.isPending ||
     cleanupManagedSub2api.isPending ||
     downloading;
@@ -673,6 +703,8 @@ function Dashboard(props: { onLogout: () => void }) {
             testing={testSub2apiConnection.isPending}
             applying={applySub2apiAssignments.isPending}
             syncing={syncSub2api.isPending}
+            pushing={pushManagedSub2api.isPending}
+            checkingQuality={qualityCheckManaged.isPending}
             draining={drainManagedSub2api.isPending}
             cleaning={cleanupManagedSub2api.isPending}
             overwriteExisting={sub2apiOverwrite}
@@ -730,6 +762,24 @@ function Dashboard(props: { onLogout: () => void }) {
                 confirmLabel: "清理空代理",
                 dangerous: true,
                 run: async () => cleanupManagedSub2api.mutate()
+              })
+            }
+            onPushManaged={() =>
+              requestConfirmation({
+                title: "确认推送本地节点到 Sub2API",
+                description: `把本地 schedulable + active 节点通过 importProxyData 推到 Sub2API。`,
+                detail: `代理名称会自动加上 ${sub2apiManagedPrefix || "MH-"} 前缀；Sub2API 通过 proxy_key 去重，重复推送是幂等的。`,
+                confirmLabel: "推送节点",
+                run: async () => pushManagedSub2api.mutate({})
+              })
+            }
+            onQualityCheck={() =>
+              requestConfirmation({
+                title: "确认质量检查",
+                description: `对所有 ${sub2apiMaintenance.data?.summary.managedProxies ?? 0} 个 Hive 托管代理执行 quality-check。`,
+                detail: "返回的分数会回填到本地节点的 qualityScore；过程中 Sub2API 会真正发出测试请求，可能产生远端流量。",
+                confirmLabel: "开始检查",
+                run: async () => qualityCheckManaged.mutate()
               })
             }
           />
