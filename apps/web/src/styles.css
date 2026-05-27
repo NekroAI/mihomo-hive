@@ -257,12 +257,29 @@ select {
   white-space: nowrap;
 }
 
-/* Sub2API 状态 cell：badge + status 文本 */
+/* Sub2API 状态 cell：图标 + #id；纯图标传达状态，不显示英文枚举字符串 */
 .sub2api-cell {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
+  color: var(--muted-strong);
+}
+
+.sub2api-cell-ok {
+  color: var(--success);
+}
+
+.sub2api-cell-bad {
+  color: var(--danger);
+}
+
+.sub2api-cell-idle {
+  color: var(--muted);
+}
+
+.sub2api-cell-warning {
+  color: var(--warning);
 }
 
 .account-count-cell {

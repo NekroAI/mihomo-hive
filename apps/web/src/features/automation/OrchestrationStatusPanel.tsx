@@ -419,6 +419,12 @@ function summarizeChange(change: ReconcilePlannedChange): string {
     rebalance_fill: "填补（欠载）",
     drift_correction: "漂移校正"
   };
-  const from = change.fromProxyId !== null ? `代理 #${change.fromProxyId}` : "未绑定";
-  return `${kindLabel[change.kind]}：账号 ${change.accountName} ${from} → 代理 #${change.toProxyId}`;
+  const from =
+    change.fromProxyId === null
+      ? "未绑定"
+      : change.fromProxyName
+        ? `${change.fromProxyName}`
+        : `代理 #${change.fromProxyId}`;
+  const to = change.toProxyName ? change.toProxyName : `代理 #${change.toProxyId}`;
+  return `${kindLabel[change.kind]}：账号 ${change.accountName}  ${from} → ${to}`;
 }

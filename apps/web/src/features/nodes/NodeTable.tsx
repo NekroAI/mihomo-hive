@@ -8,7 +8,21 @@ import {
   type ColumnDef,
   type SortingState
 } from "@tanstack/react-table";
-import { ArrowDownUp, Bot, ChevronsLeft, ChevronsRight, MessageSquare, Search, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  Bot,
+  Check,
+  CheckCircle2,
+  CircleDot,
+  ChevronsLeft,
+  ChevronsRight,
+  MessageSquare,
+  MinusCircle,
+  Search,
+  Users,
+  XCircle
+} from "lucide-react";
 import type { ProxyNode, Sub2ApiProxyRecord } from "@mihomo-hive/schemas";
 import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
 import {
@@ -312,31 +326,46 @@ function TestResult(props: { value: string | undefined }) {
 
 function Sub2ApiCell(props: { node: ProxyNode; proxy: Sub2ApiProxyRecord | undefined; connected: boolean }) {
   if (!props.connected) {
-    return <span className="muted small">未连接</span>;
+    return (
+      <span className="sub2api-cell muted" title="Sub2API 连接未配置；在账号编排页配置后此处会显示远端状态。">
+        <MinusCircle size={14} aria-hidden="true" />
+        <span className="small">未连接</span>
+      </span>
+    );
   }
   if (!props.node.sub2apiProxyId) {
     return (
-      <span className="muted small" title="尚未推送到 Sub2API。在节点池工具栏选中后点'启用调度'会自动推送。">
-        未推送
+      <span
+        className="sub2api-cell muted"
+        title="尚未推送到 Sub2API。在节点池工具栏选中后点'启用调度'会自动推送。"
+      >
+        <CircleDot size={14} aria-hidden="true" />
+        <span className="small">未推送</span>
       </span>
     );
   }
   if (!props.proxy) {
-    // 本地记录了 proxy_id 但远端列表里找不到 → 可能被外部删除 / 同步滞后
     return (
-      <span className="badge badge-warning" title="本地记录了 proxy_id，但 Sub2API 当前列表里找不到对应代理。可能被外部删除，需要重新启用调度。">
-        #{props.node.sub2apiProxyId} 失联
+      <span
+        className="sub2api-cell sub2api-cell-warning"
+        title="本地记录了 proxy_id，但 Sub2API 当前列表里找不到对应代理。可能被外部删除，需要重新启用调度。"
+      >
+        <AlertTriangle size={14} aria-hidden="true" />
+        <span className="mono small">#{props.node.sub2apiProxyId}</span>
+        <span className="small">失联</span>
       </span>
     );
   }
-  const tone = props.proxy.status === "active" ? "success" : props.proxy.status === "failed" ? "danger" : "neutral";
+  const status = props.proxy.status;
+  const StatusIcon = status === "active" ? CheckCircle2 : status === "failed" ? XCircle : MinusCircle;
+  const tone = status === "active" ? "sub2api-cell-ok" : status === "failed" ? "sub2api-cell-bad" : "sub2api-cell-idle";
   return (
     <span
-      className={`sub2api-cell`}
-      title={`Sub2API #${props.proxy.id} ${props.proxy.protocol}://${props.proxy.host}:${props.proxy.port}\n状态: ${props.proxy.status}`}
+      className={`sub2api-cell ${tone}`}
+      title={`Sub2API #${props.proxy.id} ${props.proxy.protocol}://${props.proxy.host}:${props.proxy.port}\n状态: ${status}`}
     >
-      <Badge tone={tone}>#{props.proxy.id}</Badge>
-      <span className="muted small">{props.proxy.status}</span>
+      <StatusIcon size={14} aria-hidden="true" />
+      <span className="mono small">#{props.proxy.id}</span>
     </span>
   );
 }

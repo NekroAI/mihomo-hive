@@ -332,6 +332,7 @@ function planChanges(
   // priority 1 — drain intake
   if (world.intakeProxyId !== null) {
     const intakeAccounts = world.accountsByProxyId.get(world.intakeProxyId) ?? [];
+    const intakeProxy = world.proxiesById.get(world.intakeProxyId);
     for (const account of intakeAccounts) {
       const target = pickTargetProxy(account, servingProxies, world.spec.stickiness.strategy);
       if (!target) continue;
@@ -341,6 +342,8 @@ function planChanges(
         accountName: account.name,
         fromProxyId: world.intakeProxyId,
         toProxyId: target.id,
+        fromProxyName: intakeProxy?.name ?? null,
+        toProxyName: target.name,
         reason: "新账号从入站代理引流到 Hive 节点"
       });
     }
@@ -363,12 +366,15 @@ function planChanges(
       const target = pickTargetProxy(account, servingProxies, world.spec.stickiness.strategy);
       if (!target) continue;
       if (target.id === proxyId) continue;
+      const fromProxy = proxyId !== null ? world.proxiesById.get(proxyId) : undefined;
       planned.push({
         kind: proxyId === null ? "bind_missing" : "rebind_dead",
         accountId: account.id,
         accountName: account.name,
         fromProxyId: proxyId,
         toProxyId: target.id,
+        fromProxyName: fromProxy?.name ?? null,
+        toProxyName: target.name,
         reason: proxyId === null ? "账号未绑定，自动分配到健康节点" : "原代理已退避/驱逐/不再服务"
       });
     }
@@ -398,6 +404,8 @@ function planChanges(
         accountName: account.name,
         fromProxyId: overloadNode.proxyId,
         toProxyId: target.id,
+        fromProxyName: overloadNode.proxy.name,
+        toProxyName: target.name,
         reason: `过载外迁：节点承载 ${overloadNode.currentLoad} > 上限 ${Math.ceil(
           overloadNode.targetLoad * world.spec.capacity.overloadRatio
         )}`

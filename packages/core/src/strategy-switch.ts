@@ -59,12 +59,15 @@ export function planStrategySwitch(input: StrategyMigrationInput): StrategyMigra
     const target = pickByStrategy(account, targetPool, input.targetStrategy);
     if (!target) continue;
     if (target.id === account.proxy_id) continue;
+    const fromProxy = input.proxies.find((p) => p.id === account.proxy_id);
     changes.push({
       kind: "drift_correction",
       accountId: account.id,
       accountName: account.name,
       fromProxyId: account.proxy_id,
       toProxyId: target.id,
+      fromProxyName: fromProxy?.name ?? null,
+      toProxyName: target.name,
       reason: `策略切换 ${input.spec.stickiness.strategy} → ${input.targetStrategy}：HRW 目标变化`
     });
   }

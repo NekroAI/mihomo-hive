@@ -122,6 +122,10 @@ export const reconcilePlannedChangeSchema = z.object({
   accountName: z.string().min(1),
   fromProxyId: z.number().int().positive().nullable(),
   toProxyId: z.number().int().positive(),
+  // 代理名快照：reconcile 写入时锁定，避免后续代理被改名 / 删除后无法回溯。
+  // 旧 ticks（schema 变更前写入）没有这两个字段；UI 端 fallback 到 #id。
+  fromProxyName: z.string().nullable().default(null),
+  toProxyName: z.string().default(""),
   reason: z.string().min(1)
 });
 

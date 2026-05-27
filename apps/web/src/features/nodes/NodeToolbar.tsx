@@ -74,7 +74,7 @@ export function NodeToolbar(props: NodeToolbarProps) {
         <div className="node-toolbar-selectors">
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
             icon={<CheckSquare size={14} />}
             onClick={props.onSelectFiltered}
             title={`选中当前筛选的 ${props.filteredCount} 个节点`}
@@ -83,7 +83,7 @@ export function NodeToolbar(props: NodeToolbarProps) {
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
             icon={<Replace size={14} />}
             onClick={props.onInvertFiltered}
             title="反转当前筛选结果的勾选状态"
@@ -92,7 +92,16 @@ export function NodeToolbar(props: NodeToolbarProps) {
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="secondary"
+            icon={<Check size={14} />}
+            onClick={props.onSelectSuccessful}
+            title="只选中筛选结果中 status=active 的节点"
+          >
+            选择可用
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             icon={<XSquare size={14} />}
             disabled={!hasSelection}
             onClick={props.onClearSelection}
@@ -180,11 +189,6 @@ export function NodeToolbar(props: NodeToolbarProps) {
             </span>
           }
         >
-          <DropdownGroup label="筛选">
-            <DropdownItem icon={<Check size={14} />} onClick={props.onSelectSuccessful}>
-              选择成功结果（status=active）
-            </DropdownItem>
-          </DropdownGroup>
           <DropdownGroup label="生命周期（所选）">
             <DropdownItem
               icon={<PauseCircle size={14} />}
