@@ -65,54 +65,79 @@ select {
 
 .app-shell {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100dvh;
   min-height: 640px;
   overflow: hidden;
   background: var(--bg);
 }
 
-.workspace-nav {
+.header-tabs {
   display: flex;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  padding: 0 18px 10px;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
-.workspace-nav button {
-  height: 34px;
+.header-tabs button {
+  height: 32px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel-subtle);
   color: var(--muted-strong);
-  padding: 0 14px;
+  padding: 0 12px;
   cursor: pointer;
   font-weight: 650;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
-.workspace-nav button.is-active {
+.header-tabs button:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.header-tabs button.is-active {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
 .workspace-grid {
+  height: 100%;
   min-height: 0;
   padding: 12px;
+  overflow: hidden;
 }
 
 .node-pool-grid {
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
   gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.node-pool-panel {
+  min-height: 0;
+  overflow: auto;
 }
 
 .nodes-stack {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   gap: 10px;
+  overflow: hidden;
+}
+
+.nodes-stack .nodes-workspace {
+  flex: 1;
+  min-height: 0;
+}
+
+.node-ops-bar {
+  flex-shrink: 0;
 }
 
 .node-ops-bar {
@@ -635,12 +660,32 @@ select {
 
 .app-header {
   display: grid;
-  grid-template-columns: minmax(210px, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
-  padding: 12px 18px;
+  padding: 10px 18px;
+}
+
+.app-header > .header-metrics {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1180px) {
+  .app-header {
+    grid-template-columns: auto 1fr auto;
+    row-gap: 8px;
+  }
+  .app-header > .header-tabs {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  .app-header > .header-metrics {
+    order: 2;
+    justify-content: flex-end;
+  }
 }
 
 .brand {

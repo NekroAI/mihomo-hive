@@ -530,19 +530,10 @@ function Dashboard(props: { onLogout: () => void }) {
         nodes={allNodes.length}
         active={activeCount}
         assigned={assignedCount}
+        workspace={workspace}
+        onWorkspaceChange={setWorkspace}
         onLogout={props.onLogout}
       />
-      <nav className="workspace-nav" aria-label="工作区">
-        <button className={workspace === "nodes" ? "is-active" : ""} type="button" onClick={() => setWorkspace("nodes")}>
-          节点池
-        </button>
-        <button className={workspace === "automation" ? "is-active" : ""} type="button" onClick={() => setWorkspace("automation")}>
-          自动化
-        </button>
-        <button className={workspace === "runtime" ? "is-active" : ""} type="button" onClick={() => setWorkspace("runtime")}>
-          高级运维
-        </button>
-      </nav>
 
       {workspace === "nodes" ? (
         <NodesRoute
