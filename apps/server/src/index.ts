@@ -18,7 +18,9 @@ import {
 } from "@mihomo-hive/core";
 import { openSqlite, HiveRepository } from "@mihomo-hive/db";
 import { exportSub2Api } from "@mihomo-hive/exporters";
+import { readMihomoStatus, reloadMihomo, startMihomo } from "@mihomo-hive/mihomo";
 import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
+import { existsSync } from "node:fs";
 import { appRouter } from "./router.js";
 
 const config = await loadRuntimeConfig();
@@ -130,7 +132,31 @@ const port = Number(process.env.HIVE_PORT ?? 9990);
 
 serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   console.log(`Mihomo Hive listening on http://${info.address}:${info.port}`);
+  void autoBootMihomo();
 });
+
+async function autoBootMihomo(): Promise<void> {
+  if (process.env.HIVE_DISABLE_MIHOMO_AUTOBOOT === "true") {
+    console.log("Mihomo auto-boot skipped (HIVE_DISABLE_MIHOMO_AUTOBOOT=true).");
+    return;
+  }
+  if (!existsSync(config.mihomoConfigPath)) {
+    console.log(`Mihomo auto-boot skipped: no config at ${config.mihomoConfigPath}.`);
+    return;
+  }
+  try {
+    const current = await readMihomoStatus(config);
+    if (current.running) {
+      const reloaded = await reloadMihomo(config);
+      console.log(`Mihomo already running (pid ${reloaded.pid ?? current.pid}); SIGHUP sent.`);
+      return;
+    }
+    const started = await startMihomo(config);
+    console.log(`Mihomo auto-started (pid ${started.pid}).`);
+  } catch (error) {
+    console.error("Mihomo auto-boot failed:", error instanceof Error ? error.message : error);
+  }
+}
 
 async function writeGenerated(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
