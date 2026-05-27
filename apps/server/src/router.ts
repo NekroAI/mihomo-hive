@@ -26,6 +26,7 @@ import {
 import { exportSub2Api, previewSub2ApiExport } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
 import {
+  nodeDeletionPlanSchema,
   sub2ApiAccountFiltersSchema,
   sub2ApiAssignmentApplyResultSchema,
   sub2ApiAssignmentOptionsSchema,
@@ -35,6 +36,7 @@ import {
 } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import type {
+  NodeDeletionPlan,
   OperationJob,
   OperationJobStatus,
   ProxyNode,
@@ -204,21 +206,109 @@ export const appRouter = t.router({
       return buildNodeDeletionPlan({ nodes, proxies: snapshot.proxies, accounts: snapshot.accounts, exportHost: ctx.config.exportHost });
     }),
     applyDelete: protectedProcedure
-      .input(z.object({ hashes: z.array(z.string().min(8)).min(1), forceLocal: z.boolean().default(false) }))
+      .input(
+        z.object({
+          hashes: z.array(z.string().min(8)).min(1),
+          forceLocal: z.boolean().default(false)
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         const nodes = selectNodes(ctx.repo.listNodes(), input.hashes);
-        const snapshot = await loadSub2ApiSnapshot(ctx.repo);
-        const plan = buildNodeDeletionPlan({ nodes, proxies: snapshot.proxies, accounts: snapshot.accounts, exportHost: ctx.config.exportHost });
-        if (!plan.canDeleteNow && !input.forceLocal) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: plan.message });
+        if (nodes.some((node) => node.protected)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "包含受保护节点，请先解除保护。" });
         }
-        if (snapshot.client && plan.canDeleteNow) {
-          const mappings = mapLocalNodesToSub2ApiProxies({ nodes, proxies: snapshot.proxies, exportHost: ctx.config.exportHost });
-          for (const mapping of mappings) {
-            await snapshot.client.deleteProxy(mapping.proxyId);
+        const connection = ctx.repo.getSub2ApiConnection();
+        const client = connection && !input.forceLocal ? createSub2ApiClient(connection) : undefined;
+        const job = createJob(
+          "nodes.delete",
+          "正在删除节点",
+          client ? "先解绑 Sub2API 账号，再删除远端代理，最后删除本地节点。" : "未配置 Sub2API，仅删除本地节点。",
+          client ? ["读取 Sub2API 关联", "解绑账号", "删除 Sub2API 代理", "删除本地节点"] : ["删除本地节点"]
+        );
+        try {
+          let plan: NodeDeletionPlan = nodeDeletionPlanSchema.parse({
+            nodes,
+            blockingAccounts: [],
+            canDeleteNow: true,
+            requiresDrain: false,
+            message: client ? "已重新读取 Sub2API 关联。" : "未配置 Sub2API，跳过远端清理。"
+          });
+          let unboundAccounts = 0;
+          let deletedSub2ApiProxies = 0;
+          const failedSub2ApiDeletes: Array<{ proxyId: number; name: string; message: string }> = [];
+
+          if (client) {
+            updateJobStep(job.id, 0, "running", "读取 Sub2API 代理与账号。");
+            const [proxies, accounts] = await Promise.all([
+              client.listAllProxies(),
+              client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+            ]);
+            plan = buildNodeDeletionPlan({ nodes, proxies, accounts, exportHost: ctx.config.exportHost });
+            const mappings = mapLocalNodesToSub2ApiProxies({ nodes, proxies, exportHost: ctx.config.exportHost });
+            const proxyNames = new Map(proxies.map((proxy) => [proxy.id, proxy.name]));
+            updateJobStep(job.id, 0, "success", `匹配到 ${mappings.length} 个 Sub2API 代理。`);
+
+            updateJobStep(job.id, 1, "running", "查询每个代理 live 绑定账号并解绑。");
+            const accountIdsToUnbind = new Set<number>();
+            for (const mapping of mappings) {
+              const bound = await client.listProxyAccounts(mapping.proxyId);
+              for (const account of bound) {
+                accountIdsToUnbind.add(account.id);
+              }
+            }
+            if (accountIdsToUnbind.size > 0) {
+              const result = await client.clearAccountProxy(Array.from(accountIdsToUnbind));
+              unboundAccounts = result.success;
+            }
+            updateJobStep(job.id, 1, "success", `解绑 ${unboundAccounts} 个账号。`);
+
+            updateJobStep(job.id, 2, "running", "删除 Sub2API 代理。");
+            for (const mapping of mappings) {
+              try {
+                await client.deleteProxy(mapping.proxyId);
+                deletedSub2ApiProxies += 1;
+              } catch (error) {
+                failedSub2ApiDeletes.push({
+                  proxyId: mapping.proxyId,
+                  name: proxyNames.get(mapping.proxyId) ?? `proxy-${mapping.proxyId}`,
+                  message: error instanceof Error ? error.message : "未知错误"
+                });
+              }
+            }
+            updateJobStep(
+              job.id,
+              2,
+              failedSub2ApiDeletes.length === 0 ? "success" : "failed",
+              `删除 ${deletedSub2ApiProxies} 个代理，失败 ${failedSub2ApiDeletes.length} 个。`
+            );
           }
+
+          const localStepIndex = client ? 3 : 0;
+          updateJobStep(job.id, localStepIndex, "running", "删除本地节点。");
+          const deleted = ctx.repo.deleteNodes(input.hashes);
+          updateJobStep(job.id, localStepIndex, "success", `删除 ${deleted} 个本地节点。`);
+
+          const overallStatus = failedSub2ApiDeletes.length === 0 ? "success" : "failed";
+          finishJob(
+            job.id,
+            overallStatus,
+            client
+              ? `本地删除 ${deleted}，远端解绑 ${unboundAccounts} 个账号，远端删除 ${deletedSub2ApiProxies}/${deletedSub2ApiProxies + failedSub2ApiDeletes.length} 个代理。`
+              : `本地删除 ${deleted} 个节点。`
+          );
+
+          return {
+            operationId: job.id,
+            deleted,
+            unboundAccounts,
+            deletedSub2ApiProxies,
+            failedSub2ApiDeletes,
+            plan
+          };
+        } catch (error) {
+          finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");
+          throw error;
         }
-        return { deleted: ctx.repo.deleteNodes(input.hashes), plan };
       }),
     import: protectedProcedure.mutation(async ({ ctx }) => {
       let imported = 0;
