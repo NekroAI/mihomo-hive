@@ -8,6 +8,7 @@ import { NodeTable } from "./features/nodes/NodeTable.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
 import { Sub2ApiPanel } from "./features/sub2api/Sub2ApiPanel.js";
+import { TasksPanel } from "./features/tasks/TasksPanel.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
@@ -101,7 +102,10 @@ function Dashboard(props: { onLogout: () => void }) {
     status: ""
   });
   const [sub2apiOverwrite, setSub2apiOverwrite] = React.useState(false);
-  const [workspace, setWorkspace] = useLocalStorageState<"nodes" | "sub2api" | "runtime">("mihomo-hive.workspace", "nodes");
+  const [workspace, setWorkspace] = useLocalStorageState<"nodes" | "sub2api" | "tasks" | "runtime">(
+    "mihomo-hive.workspace",
+    "nodes"
+  );
   const [filters, setFilters] = useLocalStorageState<NodeFilters>("mihomo-hive.node-filters", defaultNodeFilters);
   const [selectedHashesList, setSelectedHashesList] = useLocalStorageState<string[]>("mihomo-hive.selected-hashes", []);
   const selectedHashes = React.useMemo(() => new Set(selectedHashesList), [selectedHashesList]);
@@ -170,7 +174,10 @@ function Dashboard(props: { onLogout: () => void }) {
   const sub2apiMaintenance = trpc.sub2api.maintenance.preview.useQuery(undefined, {
     enabled: Boolean(sub2apiConfig.data?.configured)
   });
-  const jobs = trpc.sub2api.jobs.list.useQuery(undefined, { enabled: workspace === "runtime", refetchInterval: 3000 });
+  const jobs = trpc.sub2api.jobs.list.useQuery(undefined, {
+    enabled: workspace === "tasks" || workspace === "runtime",
+    refetchInterval: 3000
+  });
 
   const refreshOperationalData = React.useCallback(async () => {
     await Promise.all([
@@ -519,10 +526,21 @@ function Dashboard(props: { onLogout: () => void }) {
         <button className={workspace === "sub2api" ? "is-active" : ""} type="button" onClick={() => setWorkspace("sub2api")}>
           Sub2API 自动化
         </button>
+        <button className={workspace === "tasks" ? "is-active" : ""} type="button" onClick={() => setWorkspace("tasks")}>
+          任务与审计
+        </button>
         <button className={workspace === "runtime" ? "is-active" : ""} type="button" onClick={() => setWorkspace("runtime")}>
-          运行与导出
+          高级运维
         </button>
       </nav>
+
+      {workspace === "tasks" ? (
+        <TasksPanel
+          jobs={jobs.data ?? []}
+          loading={jobs.isFetching}
+          onRefresh={() => void jobs.refetch()}
+        />
+      ) : null}
 
       {workspace === "nodes" ? (
         <section className="workspace-grid node-pool-grid">
@@ -750,7 +768,8 @@ function Dashboard(props: { onLogout: () => void }) {
             }
           >
             <section className="runtime-ops">
-              <h2>运行状态</h2>
+              <h2>Mihomo 运行控制</h2>
+              <p className="muted small">高级运维操作。日常发布通过节点池页"发布出口池"按钮即可。</p>
               <div className="button-row wrap">
                 <Button onClick={() => publishRuntime.mutate()} disabled={busy || activeCount === 0}>
                   发布出口池
@@ -765,14 +784,7 @@ function Dashboard(props: { onLogout: () => void }) {
                   停止
                 </Button>
               </div>
-              <div className="job-list">
-                {(jobs.data ?? []).slice(0, 8).map((job) => (
-                  <div key={job.id} className={`job-item job-${job.status}`}>
-                    <strong>{job.title}</strong>
-                    <span>{job.detail}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="muted small">完整任务历史在"任务与审计"页查看。</p>
             </section>
           </ExportPanel>
         </section>
