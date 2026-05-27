@@ -21,6 +21,7 @@ import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo } from "@mihomo-hive/mihomo";
 import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
 import { existsSync } from "node:fs";
+import { startReconcileScheduler, type ReconcileSchedulerHandle } from "./orchestrator.js";
 import { appRouter } from "./router.js";
 
 const config = await loadRuntimeConfig();
@@ -115,12 +116,21 @@ app.post("/api/mihomo/render", async (c) => {
   return c.json({ listeners: rendered.egressMap.length });
 });
 
+// ADR 0003：启动声明式编排调度器。HIVE_DISABLE_RECONCILE=true 可关掉（e2e 用）。
+const reconcileScheduler: ReconcileSchedulerHandle | undefined =
+  process.env.HIVE_DISABLE_RECONCILE === "true" ? undefined : startReconcileScheduler({ repo, config });
+
 app.use("/trpc/*", async (c) =>
   fetchRequestHandler({
     endpoint: "/trpc",
     req: c.req.raw,
     router: appRouter,
-    createContext: async () => ({ config, repo, authenticated: await isAuthenticated(c.req.raw) })
+    createContext: async () => ({
+      config,
+      repo,
+      authenticated: await isAuthenticated(c.req.raw),
+      orchestrator: reconcileScheduler
+    })
   })
 );
 

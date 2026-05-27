@@ -16,6 +16,7 @@ import {
   groupAssignmentChangesByProxy,
   isManagedProxy,
   mapLocalNodesToSub2ApiProxies,
+  validateIntakeAgainstSpec,
   mapWithConcurrency,
   parsePortRange,
   planSub2ApiAssignments,
@@ -28,6 +29,7 @@ import { exportSub2Api, previewSub2ApiExport } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
 import {
   nodeDeletionPlanSchema,
+  orchestrationSpecSchema,
   sub2ApiAccountFiltersSchema,
   sub2ApiAssignmentApplyResultSchema,
   sub2ApiAssignmentOptionsSchema,
@@ -52,6 +54,7 @@ export interface RouterContext {
   config: RuntimeConfig;
   repo: HiveRepository;
   authenticated: boolean;
+  orchestrator?: { triggerNow: () => Promise<unknown> } | undefined;
 }
 
 const t = initTRPC.context<RouterContext>().create();
@@ -796,6 +799,88 @@ export const appRouter = t.router({
             byProxy: Array.from(byProxy.values()).sort((a, b) => b.errors - a.errors)
           };
         })
+    }),
+    spec: t.router({
+      get: protectedProcedure.query(({ ctx }) => ctx.repo.getOrchestrationSpec()),
+      save: protectedProcedure.input(orchestrationSpecSchema).mutation(async ({ ctx, input }) => {
+        // 校验 intake 配置：不能命中保护规则、不能是托管代理、要存在
+        if (input.intake.proxyId !== null) {
+          const connection = ctx.repo.getSub2ApiConnection();
+          if (!connection) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+          }
+          const client = createSub2ApiClient(connection);
+          const proxies = await client.listAllProxies();
+          const err = validateIntakeAgainstSpec(input, proxies, connection.managedProxyPrefix);
+          if (err) throw new TRPCError({ code: "BAD_REQUEST", message: err });
+        }
+        const saved = ctx.repo.saveOrchestrationSpec(input);
+        // 立即触发一次 reconcile（让 spec 改动立即生效）
+        if (ctx.orchestrator) {
+          void ctx.orchestrator.triggerNow().catch(() => undefined);
+        }
+        return saved;
+      })
+    }),
+    orchestrator: t.router({
+      statusSnapshot: protectedProcedure.query(({ ctx }) => {
+        const spec = ctx.repo.getOrchestrationSpec();
+        const recentTicks = ctx.repo.listRecentReconcileTicks(10);
+        const lastTick = recentTicks[0];
+        const since24h = Date.now() - 24 * 60 * 60 * 1000;
+        const driftCount24h = ctx.repo
+          .listRecentReconcileTicks(500)
+          .filter((tick) => new Date(tick.startedAt).getTime() >= since24h)
+          .reduce(
+            (sum, tick) =>
+              sum +
+              tick.appliedChanges.filter(
+                (change) =>
+                  change.kind === "rebalance_overload" ||
+                  change.kind === "drift_correction" ||
+                  change.kind === "rebind_dead"
+              ).length,
+            0
+          );
+        const kpis = {
+          healthyProxies: lastTick?.observedSummary.proxiesServing ?? 0,
+          totalProxies: lastTick?.observedSummary.proxiesTotal ?? 0,
+          utilizationPercent: lastTick?.observedSummary.utilizationPercent ?? 0,
+          driftCount24h,
+          quarantinedCount: lastTick?.observedSummary.proxiesQuarantined ?? 0
+        };
+        return {
+          spec,
+          ...(lastTick ? { lastTick } : {}),
+          recentTicks,
+          nodeIntents: lastTick?.nodeIntents ?? [],
+          ...(lastTick?.observedSummary ? { observedSummary: lastTick.observedSummary } : {}),
+          kpis
+        };
+      }),
+      applyOnce: protectedProcedure.mutation(async ({ ctx }) => {
+        if (!ctx.orchestrator) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Orchestrator 未启用。" });
+        }
+        return ctx.orchestrator.triggerNow();
+      }),
+      pause: protectedProcedure.mutation(({ ctx }) => {
+        const spec = ctx.repo.getOrchestrationSpec();
+        if (spec.enabled === false) return spec;
+        return ctx.repo.saveOrchestrationSpec({ ...spec, enabled: false });
+      }),
+      resume: protectedProcedure.mutation(({ ctx }) => {
+        const spec = ctx.repo.getOrchestrationSpec();
+        if (spec.enabled === true) return spec;
+        const saved = ctx.repo.saveOrchestrationSpec({ ...spec, enabled: true });
+        if (ctx.orchestrator) {
+          void ctx.orchestrator.triggerNow().catch(() => undefined);
+        }
+        return saved;
+      }),
+      tickHistory: protectedProcedure
+        .input(z.object({ limit: z.number().int().min(1).max(100).default(20) }).default({}))
+        .query(({ ctx, input }) => ctx.repo.listRecentReconcileTicks(input.limit))
     }),
     reconcile: t.router({
       preview: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).query(async ({ ctx, input }) => {
