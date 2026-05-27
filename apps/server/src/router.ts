@@ -15,8 +15,9 @@ import {
   resolveProxyTestTargets,
   testProxyTarget
 } from "@mihomo-hive/core";
-import { exportSub2Api } from "@mihomo-hive/exporters";
+import { exportSub2Api, previewSub2ApiExport } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
+import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import type { RuntimeConfig, SubscriptionSource } from "@mihomo-hive/schemas";
 
@@ -156,11 +157,24 @@ export const appRouter = t.router({
     sub2api: protectedProcedure
       .input(z.object({ host: z.string().optional() }).optional())
       .query(({ ctx, input }) => exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost })),
+    previewSub2api: protectedProcedure.input(sub2ApiExportRequestSchema).query(({ ctx, input }) =>
+      previewSub2ApiExport(ctx.repo.listNodes(), {
+        host: input.host ?? ctx.config.exportHost,
+        selectedHashes: input.selectedHashes
+      })
+    ),
     writeSub2api: protectedProcedure
-      .input(z.object({ host: z.string().optional(), output: z.string().optional() }).optional())
+      .input(
+        sub2ApiExportRequestSchema.extend({
+          output: z.string().optional()
+        })
+      )
       .mutation(async ({ ctx, input }) => {
-        const payload = exportSub2Api(ctx.repo.listNodes(), { host: input?.host ?? ctx.config.exportHost });
-        const output = input?.output ?? `${ctx.config.generatedDir}/sub2api-proxies.json`;
+        const payload = exportSub2Api(ctx.repo.listNodes(), {
+          host: input.host ?? ctx.config.exportHost,
+          selectedHashes: input.selectedHashes
+        });
+        const output = input.output ?? `${ctx.config.generatedDir}/sub2api-proxies.json`;
         await writeGenerated(output, `${JSON.stringify(payload, null, 2)}\n`);
         return { output, proxies: payload.proxies.length };
       })

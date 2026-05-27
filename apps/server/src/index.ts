@@ -17,6 +17,7 @@ import {
 } from "@mihomo-hive/core";
 import { openSqlite, HiveRepository } from "@mihomo-hive/db";
 import { exportSub2Api } from "@mihomo-hive/exporters";
+import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
 import { appRouter } from "./router.js";
 
 const config = await loadRuntimeConfig();
@@ -78,6 +79,27 @@ app.get("/api/exports/sub2api", async (c) => {
   return c.json(exportSub2Api(repo.listNodes(), { host }));
 });
 
+app.post("/api/exports/sub2api/download", async (c) => {
+  if (!(await isAuthenticated(c.req.raw))) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const input = sub2ApiExportRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!input.success) {
+    return c.json({ error: "Invalid export request", issues: input.error.issues }, 400);
+  }
+  const payload = exportSub2Api(repo.listNodes(), {
+    host: input.data.host ?? config.exportHost,
+    selectedHashes: input.data.selectedHashes
+  });
+  const filename = sanitizeDownloadFilename(input.data.filename);
+  return new Response(`${JSON.stringify(payload, null, 2)}\n`, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "content-disposition": `attachment; filename="${filename}"`
+    }
+  });
+});
+
 app.post("/api/mihomo/render", async (c) => {
   if (!(await isAuthenticated(c.req.raw))) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -135,6 +157,11 @@ function createSession(c: Context): string {
     maxAge: sessionTtlSeconds
   });
   return token;
+}
+
+function sanitizeDownloadFilename(value: string): string {
+  const filename = value.replace(/[^A-Za-z0-9._-]/g, "_");
+  return filename.endsWith(".json") ? filename : `${filename}.json`;
 }
 
 function parseCookie(header: string): Record<string, string> {

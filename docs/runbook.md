@@ -96,7 +96,7 @@ Sub2API 导出：
 hive export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.json
 ```
 
-导出文件会保留已分配端口，并通过 `active` / `inactive` 表示当前状态，便于上游系统继续维护稳定绑定关系。
+导出文件只包含 `active` 且已分配端口的节点；Web UI 中可先筛选并选择目标节点，再下载或写出 Sub2API JSON。
 
 ## 开发模式
 

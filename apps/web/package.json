@@ -9,10 +9,12 @@
     "test": "vitest run --passWithNoTests --config ../../vitest.config.ts"
   },
   "dependencies": {
+    "@mihomo-hive/schemas": "workspace:*",
     "@mihomo-hive/server": "workspace:*",
+    "@tanstack/react-query": "^5.76.1",
+    "@tanstack/react-table": "^8.21.3",
     "@trpc/client": "^11.1.4",
     "@trpc/react-query": "^11.1.4",
-    "@tanstack/react-query": "^5.76.1",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

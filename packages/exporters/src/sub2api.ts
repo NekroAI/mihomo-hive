@@ -1,5 +1,7 @@
 import {
+  sub2ApiExportPreviewSchema,
   sub2ApiExportSchema,
+  type Sub2ApiExportPreview,
   type ProxyNode,
   type Sub2ApiExport
 } from "@mihomo-hive/schemas";
@@ -8,11 +10,12 @@ export interface ExportSub2ApiOptions {
   host: string;
   username?: string;
   password?: string;
+  selectedHashes?: string[];
 }
 
 export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions): Sub2ApiExport {
-  const proxies = nodes
-    .filter((node) => node.assignedPort)
+  const selected = normalizeSelectedHashes(options.selectedHashes);
+  const proxies = filterExportableNodes(nodes, selected)
     .sort((a, b) => Number(a.assignedPort) - Number(b.assignedPort))
     .map((node) => {
       const protocol = "socks5" as const;
@@ -27,7 +30,7 @@ export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions)
         port: Number(node.assignedPort),
         ...(username ? { username } : {}),
         ...(password ? { password } : {}),
-        status: node.status === "active" ? ("active" as const) : ("inactive" as const)
+        status: "active" as const
       };
     });
 
@@ -35,6 +38,54 @@ export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions)
     proxies,
     accounts: []
   });
+}
+
+export function previewSub2ApiExport(nodes: ProxyNode[], options: ExportSub2ApiOptions): Sub2ApiExportPreview {
+  const selected = normalizeSelectedHashes(options.selectedHashes);
+  const selectedCount = selected ? selected.size : nodes.filter((node) => node.status === "active" && node.assignedPort).length;
+  const excluded = nodes
+    .map((node) => {
+      if (selected && !selected.has(node.hash)) {
+        return { hash: node.hash, name: node.name, reason: "not_selected" as const };
+      }
+      if (node.status !== "active") {
+        return { hash: node.hash, name: node.name, reason: "not_active" as const };
+      }
+      if (!node.assignedPort) {
+        return { hash: node.hash, name: node.name, reason: "missing_port" as const };
+      }
+      return undefined;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const payload = exportSub2Api(nodes, options);
+
+  return sub2ApiExportPreviewSchema.parse({
+    export: payload,
+    selected: selectedCount,
+    exportable: payload.proxies.length,
+    excluded,
+    summary: {
+      notSelected: excluded.filter((item) => item.reason === "not_selected").length,
+      notActive: excluded.filter((item) => item.reason === "not_active").length,
+      missingPort: excluded.filter((item) => item.reason === "missing_port").length
+    }
+  });
+}
+
+function filterExportableNodes(nodes: ProxyNode[], selectedHashes?: Set<string>): ProxyNode[] {
+  return nodes.filter((node) => {
+    if (selectedHashes && !selectedHashes.has(node.hash)) {
+      return false;
+    }
+    return node.status === "active" && Boolean(node.assignedPort);
+  });
+}
+
+function normalizeSelectedHashes(selectedHashes: string[] | undefined): Set<string> | undefined {
+  if (!selectedHashes) {
+    return undefined;
+  }
+  return new Set(selectedHashes);
 }
 
 function readOptionalString(value: unknown): string | undefined {
