@@ -1,9 +1,15 @@
 name: Docker Image
 
 on:
-  push:
+  # 推 main 后等 CI workflow 跑完再触发；CI 失败时这个 workflow 的 job 会被跳过。
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: ["main"]
+  # Tag push 视为已经过测试的发布，直接构建。
+  push:
     tags: ["v*.*.*"]
+  # 手动触发后门（用于救火 / 重发）。
   workflow_dispatch:
 
 permissions:
@@ -17,9 +23,15 @@ jobs:
   build:
     name: Build and publish GHCR image
     runs-on: ubuntu-latest
+    # workflow_run 触发时只在 CI 成功后继续；其他触发器（tag push / 手动）无条件构建。
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # workflow_run 触发时 checkout 的是触发 CI 的那个 commit，
+          # 确保发出去的镜像和已通过测试的代码完全一致。
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
