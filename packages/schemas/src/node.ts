@@ -46,6 +46,12 @@ export const proxyNodeSchema = z.object({
   assignedPort: z.number().int().min(1).max(65535).optional(),
   lastTestStatus: z.string().optional(),
   lastTestLatencyMs: z.number().int().nonnegative().optional(),
+  // ADR 0003 orchestration intent
+  intentRole: z.enum(["serving", "standby", "quarantined", "evicted"]).optional(),
+  backoffUntil: z.string().optional().nullable(),
+  backoffAttempts: z.number().int().min(0).optional(),
+  healthScore: z.number().int().min(0).max(100).optional().nullable(),
+  lastHealthCheck: z.string().optional().nullable(),
   createdAt: z.string(),
   updatedAt: z.string()
 });

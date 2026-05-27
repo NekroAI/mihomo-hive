@@ -33,8 +33,33 @@ export const nodes = sqliteTable("nodes", {
   assignedPort: integer("assigned_port"),
   lastTestStatus: text("last_test_status"),
   lastTestLatencyMs: integer("last_test_latency_ms"),
+  // 编排意图（ADR 0003）
+  intentRole: text("intent_role", { enum: ["serving", "standby", "quarantined", "evicted"] })
+    .notNull()
+    .default("standby"),
+  backoffUntil: text("backoff_until"),
+  backoffAttempts: integer("backoff_attempts").notNull().default(0),
+  healthScore: integer("health_score"),
+  lastHealthCheck: text("last_health_check"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull()
+});
+
+export const reconcileTicks = sqliteTable("reconcile_ticks", {
+  id: text("id").primaryKey(),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull(),
+  skippedReason: text("skipped_reason").notNull(),
+  errorMessage: text("error_message"),
+  plannedTotal: integer("planned_total").notNull().default(0),
+  appliedTotal: integer("applied_total").notNull().default(0),
+  observedJson: text("observed_json").notNull(),
+  nodeIntentsJson: text("node_intents_json").notNull(),
+  plannedChangesJson: text("planned_changes_json").notNull(),
+  appliedChangesJson: text("applied_changes_json").notNull(),
+  operationId: text("operation_id")
 });
 
 export const settings = sqliteTable("settings", {

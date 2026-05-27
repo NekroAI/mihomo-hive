@@ -70,6 +70,26 @@ function ensureSchema(sqlite: HiveSqlite): void {
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS reconcile_ticks (
+      id TEXT PRIMARY KEY,
+      started_at TEXT NOT NULL,
+      finished_at TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      enabled INTEGER NOT NULL,
+      skipped_reason TEXT NOT NULL,
+      error_message TEXT,
+      planned_total INTEGER NOT NULL DEFAULT 0,
+      applied_total INTEGER NOT NULL DEFAULT 0,
+      observed_json TEXT NOT NULL,
+      node_intents_json TEXT NOT NULL,
+      planned_changes_json TEXT NOT NULL,
+      applied_changes_json TEXT NOT NULL,
+      operation_id TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reconcile_ticks_started_at
+      ON reconcile_ticks(started_at DESC);
   `);
   addColumnIfMissing(sqlite, "subscriptions", "exclude_keywords", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "nodes", "lifecycle_status", "TEXT NOT NULL DEFAULT 'candidate'");
@@ -77,6 +97,24 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "protected", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "nodes", "sub2api_proxy_id", "INTEGER");
   addColumnIfMissing(sqlite, "nodes", "quality_score", "INTEGER");
+  // ADR 0003: orchestration intent columns
+  addColumnIfMissing(sqlite, "nodes", "intent_role", "TEXT NOT NULL DEFAULT 'standby'");
+  addColumnIfMissing(sqlite, "nodes", "backoff_until", "TEXT");
+  addColumnIfMissing(sqlite, "nodes", "backoff_attempts", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "health_score", "INTEGER");
+  addColumnIfMissing(sqlite, "nodes", "last_health_check", "TEXT");
+  // Seed intent_role from lifecycle for nodes that pre-date this column.
+  sqlite.exec(`
+    UPDATE nodes
+       SET intent_role = CASE
+         WHEN lifecycle_status = 'schedulable' THEN 'serving'
+         WHEN lifecycle_status IN ('disabled', 'candidate', 'testing') THEN 'standby'
+         WHEN lifecycle_status IN ('cooling_down', 'draining') THEN 'quarantined'
+         WHEN lifecycle_status IN ('retired', 'deleted') THEN 'evicted'
+         ELSE intent_role
+       END
+     WHERE intent_role = 'standby' OR intent_role IS NULL;
+  `);
   sqlite.exec(`
     UPDATE nodes
     SET lifecycle_status = CASE
