@@ -5,6 +5,7 @@ export * from "./mihomo-render.js";
 export * from "./node-test.js";
 export * from "./node-plans.js";
 export * from "./ports.js";
+export * from "./reconcile.js";
 export * from "./region.js";
 export * from "./sub2api-assignment.js";
 export * from "./sub2api-client.js";
