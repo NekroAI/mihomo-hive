@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Mihomo Hive 首次访问 + 主导航", () => {
-  test("首次访问设密码、登录后 4 个 workspace tab 可切换", async ({ page }) => {
+  test("首次访问设密码、登录后 3 个 workspace tab 可切换", async ({ page }) => {
     await page.goto("/");
 
     // 首次访问应当展示"设置访问密码"
@@ -12,27 +12,25 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await passwordFields.nth(1).fill("e2e-test-pass-1234");
     await page.getByRole("button", { name: "设置并进入" }).click();
 
-    // 进入 dashboard，4 个 workspace tab 都出现
+    // 进入 dashboard，3 个 workspace tab 都出现
     const nav = page.getByRole("navigation", { name: "工作区" });
     await expect(nav.getByRole("button", { name: "节点池" })).toBeVisible();
-    await expect(nav.getByRole("button", { name: "Sub2API 自动化" })).toBeVisible();
-    await expect(nav.getByRole("button", { name: "任务与审计" })).toBeVisible();
+    await expect(nav.getByRole("button", { name: "自动化" })).toBeVisible();
     await expect(nav.getByRole("button", { name: "高级运维" })).toBeVisible();
 
-    // 默认在节点池：能看到导入订阅表单
+    // 默认在节点池：能看到导入订阅表单 + 节点池操作栏
     await expect(page.getByRole("heading", { name: "导入订阅" })).toBeVisible();
     await expect(page.getByRole("button", { name: "仅保存订阅源" })).toBeVisible();
     await expect(page.getByRole("button", { name: "拉取并预览" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "测试节点池" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "发布出口池" })).toBeVisible();
 
-    // 切到 Sub2API 自动化：未配置态
-    await nav.getByRole("button", { name: "Sub2API 自动化" }).click();
-    await expect(page.getByRole("heading", { name: "Sub2API 自动化" })).toBeVisible();
+    // 切到自动化：连接配置、自动接管状态、任务流 都在同一页
+    await nav.getByRole("button", { name: "自动化" }).click();
+    await expect(page.getByRole("heading", { name: "连接配置" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "自动接管状态" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "任务流" })).toBeVisible();
     await expect(page.getByText("待配置")).toBeVisible();
-
-    // 切到任务与审计：未配置 Sub2API 时不显示错误聚合卡，主面板显示空态
-    await nav.getByRole("button", { name: "任务与审计" }).click();
-    await expect(page.getByRole("heading", { name: "任务与审计" })).toBeVisible();
-    await expect(page.getByText("还没有后台任务")).toBeVisible();
 
     // 切到高级运维：能看到 Mihomo 运行控制 + 导出篮子
     await nav.getByRole("button", { name: "高级运维" }).click();

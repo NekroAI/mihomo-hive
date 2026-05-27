@@ -162,15 +162,56 @@ select {
   }
 }
 
-.sub2api-workspace,
 .runtime-workspace {
   overflow: auto;
 }
 
-.sub2api-workspace > .panel,
 .runtime-workspace > .export-panel {
   max-width: 1320px;
   margin: 0 auto;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 12px;
+  overflow: auto;
+}
+
+.automation-config,
+.automation-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ops-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.ops-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ops-group-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+@media (max-width: 1080px) {
+  .automation-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .node-pool-panel {

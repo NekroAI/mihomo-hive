@@ -4,10 +4,9 @@ import { ConfirmDialog, ToastStack, type ToastMessage } from "./components/ui.js
 import { AuthScreen } from "./features/auth/AuthScreen.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
-import { TasksPanel } from "./features/tasks/TasksPanel.js";
 import { AdminRoute } from "./routes/AdminRoute.js";
+import { AutomationRoute } from "./routes/AutomationRoute.js";
 import { NodesRoute } from "./routes/NodesRoute.js";
-import { Sub2ApiRoute } from "./routes/Sub2ApiRoute.js";
 import { useTaskFeedback, type TaskFeedback } from "./hooks/useTaskFeedback.js";
 import { useConfirmAction, type ConfirmAction } from "./hooks/useConfirmAction.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
@@ -97,10 +96,13 @@ function Dashboard(props: { onLogout: () => void }) {
     "mihomo-hive.upstream-error-window",
     "1h"
   );
-  const [workspace, setWorkspace] = useLocalStorageState<"nodes" | "sub2api" | "tasks" | "runtime">(
+  const [workspaceRaw, setWorkspace] = useLocalStorageState<"nodes" | "automation" | "runtime">(
     "mihomo-hive.workspace",
     "nodes"
   );
+  // 兼容旧 localStorage 值 "sub2api" / "tasks"，统一映射到 "automation"
+  const workspace: "nodes" | "automation" | "runtime" =
+    (workspaceRaw as string) === "sub2api" || (workspaceRaw as string) === "tasks" ? "automation" : workspaceRaw;
   const [filters, setFilters] = useLocalStorageState<NodeFilters>("mihomo-hive.node-filters", defaultNodeFilters);
   const [selectedHashesList, setSelectedHashesList] = useLocalStorageState<string[]>("mihomo-hive.selected-hashes", []);
   const selectedHashes = React.useMemo(() => new Set(selectedHashesList), [selectedHashesList]);
@@ -167,12 +169,12 @@ function Dashboard(props: { onLogout: () => void }) {
     enabled: Boolean(sub2apiConfig.data?.configured)
   });
   const jobs = trpc.sub2api.jobs.list.useQuery(undefined, {
-    enabled: workspace === "tasks" || workspace === "runtime",
+    enabled: workspace === "automation" || workspace === "runtime",
     refetchInterval: 3000
   });
   const upstreamErrorSummary = trpc.sub2api.automation.upstreamErrorSummary.useQuery(
     { timeRange: errorSummaryTimeRange },
-    { enabled: workspace === "tasks" && Boolean(sub2apiConfig.data?.configured), refetchInterval: 30000 }
+    { enabled: workspace === "automation" && Boolean(sub2apiConfig.data?.configured), refetchInterval: 30000 }
   );
 
   const refreshOperationalData = React.useCallback(async () => {
@@ -534,30 +536,13 @@ function Dashboard(props: { onLogout: () => void }) {
         <button className={workspace === "nodes" ? "is-active" : ""} type="button" onClick={() => setWorkspace("nodes")}>
           节点池
         </button>
-        <button className={workspace === "sub2api" ? "is-active" : ""} type="button" onClick={() => setWorkspace("sub2api")}>
-          Sub2API 自动化
-        </button>
-        <button className={workspace === "tasks" ? "is-active" : ""} type="button" onClick={() => setWorkspace("tasks")}>
-          任务与审计
+        <button className={workspace === "automation" ? "is-active" : ""} type="button" onClick={() => setWorkspace("automation")}>
+          自动化
         </button>
         <button className={workspace === "runtime" ? "is-active" : ""} type="button" onClick={() => setWorkspace("runtime")}>
           高级运维
         </button>
       </nav>
-
-      {workspace === "tasks" ? (
-        <TasksPanel
-          jobs={jobs.data ?? []}
-          loading={jobs.isFetching}
-          onRefresh={() => void jobs.refetch()}
-          errorSummaryEnabled={Boolean(sub2apiConfig.data?.configured)}
-          errorSummary={upstreamErrorSummary.data}
-          errorSummaryLoading={upstreamErrorSummary.isFetching}
-          errorTimeRange={errorSummaryTimeRange}
-          onErrorTimeRangeChange={setErrorSummaryTimeRange}
-          onErrorSummaryRefresh={() => void upstreamErrorSummary.refetch()}
-        />
-      ) : null}
 
       {workspace === "nodes" ? (
         <NodesRoute
@@ -598,8 +583,8 @@ function Dashboard(props: { onLogout: () => void }) {
         />
       ) : null}
 
-      {workspace === "sub2api" ? (
-        <Sub2ApiRoute
+      {workspace === "automation" ? (
+        <AutomationRoute
           config={sub2apiConfig.data}
           baseUrl={sub2apiBaseUrl}
           apiKey={sub2apiApiKey}
@@ -613,6 +598,12 @@ function Dashboard(props: { onLogout: () => void }) {
           preview={sub2apiPreview.data}
           previewFetching={sub2apiPreview.isFetching}
           maintenance={sub2apiMaintenance.data}
+          maintenanceFetching={sub2apiMaintenance.isFetching}
+          jobs={jobs.data ?? []}
+          jobsLoading={jobs.isFetching}
+          errorSummary={upstreamErrorSummary.data}
+          errorSummaryLoading={upstreamErrorSummary.isFetching}
+          errorTimeRange={errorSummaryTimeRange}
           setBaseUrl={setSub2apiBaseUrl}
           setApiKey={setSub2apiApiKey}
           setTimezone={setSub2apiTimezone}
@@ -620,9 +611,12 @@ function Dashboard(props: { onLogout: () => void }) {
           setFilters={setSub2apiFilters}
           setOverwriteExisting={setSub2apiOverwrite}
           onProtectedRuleChange={updateProtectedRule}
+          setErrorTimeRange={setErrorSummaryTimeRange}
           refetchProxies={() => void sub2apiProxies.refetch()}
           refetchPreview={() => void sub2apiPreview.refetch()}
           refetchMaintenance={() => void sub2apiMaintenance.refetch()}
+          refetchJobs={() => void jobs.refetch()}
+          refetchErrorSummary={() => void upstreamErrorSummary.refetch()}
           requestConfirmation={requestConfirmation}
           mutations={{
             saveConfig: saveSub2apiConfig,
