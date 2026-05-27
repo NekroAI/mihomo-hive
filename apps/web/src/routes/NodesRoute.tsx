@@ -59,6 +59,7 @@ export interface NodesRouteProps {
         lifecycleStatus: "schedulable" | "disabled" | "cooling_down" | "retired";
       }) => void;
     };
+    enableScheduling: PendingMutation & { mutate: (input: { hashes: string[] }) => void };
     deleteNodes: PendingMutation & { mutate: (input: { hashes: string[]; forceLocal: boolean }) => void };
     testNodes: PendingMutation & {
       mutate: (input: { targets: string[]; timeoutMs: number; concurrency: number; hashes?: string[] }) => void;
@@ -182,21 +183,20 @@ export function NodesRoute(props: NodesRouteProps) {
           onEnableSelected={() => {
             const total = selectedNodes.length;
             const untested = selectedUntestedCount;
+            const withoutPort = total - selectedWithPortCount;
             const description =
               untested > 0
-                ? `${untested}/${total} 个所选节点还没测试过。启用调度后系统会立即把它们纳入 Sub2API 自动化分配，可能会绑账号上去。建议先点"分配端口"再"测试所选"，确认可用后再启用。`
-                : `${total} 个所选节点都已经测试过，可以放心启用。`;
+                ? `${untested}/${total} 个所选节点还没测试过。启用调度后系统会立即推送到 Sub2API 并纳入自动化分配，可能会绑账号上去。建议先"分配端口"+"测试所选"，确认可用后再启用。`
+                : withoutPort > 0
+                  ? `${withoutPort}/${total} 个所选节点没有分配端口。这些节点会被标记 schedulable 但不会被推送（Sub2API 只接收 active+已分端口的代理）。`
+                  : `${total} 个所选节点都测试过且有端口，会一并推送到 Sub2API。`;
             props.requestConfirmation({
               title: "确认启用调度",
               description,
               detail:
-                "启用后这些节点 lifecycle 会变成 schedulable，会出现在 Sub2API 推送列表里，并参与编排器（账号自动绑定 / 漂移 / 故障自愈）。可以在下拉菜单里随时'暂停'回退。",
+                "启用调度 = 改本地 lifecycle 为 schedulable + 调用 Sub2API importProxyData 把节点上行同步并回填 proxy_id。完成后节点会出现在账号编排页的节点矩阵，参与账号自动绑定 / 漂移 / 故障自愈。可在下拉菜单里随时'暂停'回退。",
               confirmLabel: "启用调度",
-              run: async () =>
-                m.setLifecycle.mutate({
-                  hashes: props.selectedHashesList,
-                  lifecycleStatus: "schedulable"
-                })
+              run: async () => m.enableScheduling.mutate({ hashes: props.selectedHashesList })
             });
           }}
           onPublish={() => m.publishRuntime.mutate()}

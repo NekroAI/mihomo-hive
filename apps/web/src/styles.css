@@ -257,6 +257,16 @@ select {
   white-space: nowrap;
 }
 
+/* 选择按钮组：紧跟统计区，跟主操作区视觉上区分 */
+.node-toolbar-selectors {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+}
+
 .node-toolbar-actions {
   display: flex;
   flex-wrap: wrap;

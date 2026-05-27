@@ -326,6 +326,36 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "接入 Mihomo 失败", error.message)
   });
+  const enableScheduling = trpc.nodes.enableScheduling.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在启用调度", "把所选节点设为 schedulable，并推送到 Sub2API 代理池。"),
+    onSuccess: async (result) => {
+      if (result.syncedToSub2api && result.summary) {
+        await finishTask(
+          setTask,
+          pushToast,
+          "调度已启用",
+          `${result.updated} 个节点纳入调度。Sub2API：新增 ${result.summary.proxy_created}，复用 ${result.summary.proxy_reused}，失败 ${result.summary.proxy_failed}。`
+        );
+      } else if (result.reason === "no-connection") {
+        await finishTask(
+          setTask,
+          pushToast,
+          "调度已启用（未推送）",
+          `${result.updated} 个节点标记为 schedulable，但 Sub2API 未连接。请先在账号编排页配置连接，再到节点池重新启用以触发推送。`
+        );
+      } else {
+        await finishTask(
+          setTask,
+          pushToast,
+          "调度已启用（未推送）",
+          `${result.updated} 个节点标记为 schedulable，但没有 active+已分端口的节点可推送。请先"分配端口"并测试通过。`
+        );
+      }
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "启用调度失败", error.message)
+  });
   const startMihomo = trpc.mihomo.start.useMutation({
     onMutate: () => startTask(setTask, "正在启动 Mihomo", "服务会在后台保持运行。"),
     onSuccess: async (result) => {
@@ -520,6 +550,7 @@ function Dashboard(props: { onLogout: () => void }) {
     renderMihomo.isPending ||
     publishRuntime.isPending ||
     attachToMihomo.isPending ||
+    enableScheduling.isPending ||
     startMihomo.isPending ||
     reloadMihomo.isPending ||
     stopMihomo.isPending ||
@@ -651,6 +682,7 @@ function Dashboard(props: { onLogout: () => void }) {
             previewImport,
             applyImport: applyImportPreview,
             setLifecycle: setNodeLifecycle,
+            enableScheduling,
             deleteNodes,
             testNodes,
             attachToMihomo,

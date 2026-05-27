@@ -206,6 +206,67 @@ export const appRouter = t.router({
         const nodes = ctx.repo.markNodesLifecycle(input.hashes, input.lifecycleStatus);
         return { updated: nodes.length, nodes };
       }),
+    /**
+     * "启用调度" 按钮的语义：原子地把所选节点设为 schedulable，并同时推送到 Sub2API
+     * （importProxyData + 回填 sub2apiProxyId）。这样节点立刻出现在编排器视野里，
+     * 不再需要用户额外去高级运维页找"推送"按钮。
+     *
+     * Sub2API 未连接时只改 lifecycle，syncedCount=0，前端给出对应提示。
+     */
+    enableScheduling: protectedProcedure
+      .input(z.object({ hashes: z.array(z.string().min(8)).min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        // 1. 改 lifecycle
+        const updatedNodes = ctx.repo.markNodesLifecycle(input.hashes, "schedulable");
+
+        const connection = ctx.repo.getSub2ApiConnection();
+        if (!connection) {
+          return {
+            updated: updatedNodes.length,
+            syncedToSub2api: false,
+            reason: "no-connection" as const,
+            summary: null as null | Awaited<ReturnType<ReturnType<typeof createSub2ApiClient>["importProxyData"]>>,
+            mappedNodes: 0
+          };
+        }
+
+        // 2. 推送到 Sub2API（仅本批 hashes，且过滤 active + 已分端口）
+        const payload = exportSub2Api(ctx.repo.listNodes(), {
+          host: ctx.config.exportHost,
+          namePrefix: connection.managedProxyPrefix,
+          selectedHashes: input.hashes
+        });
+        const proxies = payload.proxies.filter((proxy) => proxy.status === "active");
+        if (proxies.length === 0) {
+          return {
+            updated: updatedNodes.length,
+            syncedToSub2api: false,
+            reason: "no-active-with-port" as const,
+            summary: null,
+            mappedNodes: 0
+          };
+        }
+
+        const client = createSub2ApiClient(connection);
+        const summary = await client.importProxyData({ proxies });
+
+        // 3. 回填 sub2apiProxyId
+        const liveProxies = await client.listAllProxies();
+        const mappings = mapLocalNodesToSub2ApiProxies({
+          nodes: ctx.repo.listNodes(),
+          proxies: liveProxies,
+          exportHost: ctx.config.exportHost
+        });
+        ctx.repo.updateSub2ApiProxyMappings(mappings);
+
+        return {
+          updated: updatedNodes.length,
+          syncedToSub2api: true,
+          reason: null,
+          summary,
+          mappedNodes: mappings.length
+        };
+      }),
     previewDelete: protectedProcedure.input(z.object({ hashes: z.array(z.string().min(8)).min(1) })).query(async ({ ctx, input }) => {
       const nodes = selectNodes(ctx.repo.listNodes(), input.hashes);
       const snapshot = await loadSub2ApiSnapshot(ctx.repo);

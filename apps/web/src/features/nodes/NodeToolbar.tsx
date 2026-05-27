@@ -3,14 +3,16 @@ import {
   Activity,
   Archive,
   Check,
+  CheckSquare,
   MoreHorizontal,
   PauseCircle,
   PlayCircle,
   Plug,
+  Replace,
   Rocket,
   Snowflake,
   Trash2,
-  X
+  XSquare
 } from "lucide-react";
 import type { ProxyNode } from "@mihomo-hive/schemas";
 import { Badge, Button, Dropdown, DropdownGroup, DropdownItem } from "../../components/ui.js";
@@ -69,6 +71,36 @@ export function NodeToolbar(props: NodeToolbarProps) {
         <span className="node-toolbar-stat muted small" title="已分配端口、非 retired 的节点数（导出基数）">
           可导出 {props.exportableCount}
         </span>
+        <div className="node-toolbar-selectors">
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<CheckSquare size={14} />}
+            onClick={props.onSelectFiltered}
+            title={`选中当前筛选的 ${props.filteredCount} 个节点`}
+          >
+            全选
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Replace size={14} />}
+            onClick={props.onInvertFiltered}
+            title="反转当前筛选结果的勾选状态"
+          >
+            反选
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<XSquare size={14} />}
+            disabled={!hasSelection}
+            onClick={props.onClearSelection}
+            title="取消所有勾选"
+          >
+            清空
+          </Button>
+        </div>
       </div>
 
       <div className="node-toolbar-actions">
@@ -148,14 +180,9 @@ export function NodeToolbar(props: NodeToolbarProps) {
             </span>
           }
         >
-          <DropdownGroup label="选择">
-            <DropdownItem onClick={props.onSelectFiltered}>选择当前筛选结果</DropdownItem>
+          <DropdownGroup label="筛选">
             <DropdownItem icon={<Check size={14} />} onClick={props.onSelectSuccessful}>
-              选择成功结果
-            </DropdownItem>
-            <DropdownItem onClick={props.onInvertFiltered}>反选当前结果</DropdownItem>
-            <DropdownItem icon={<X size={14} />} onClick={props.onClearSelection}>
-              清空选择
+              选择成功结果（status=active）
             </DropdownItem>
           </DropdownGroup>
           <DropdownGroup label="生命周期（所选）">
