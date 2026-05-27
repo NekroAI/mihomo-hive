@@ -14,6 +14,7 @@ import {
   filteredExistingNodeHashes,
   findOccupiedPorts,
   groupAssignmentChangesByProxy,
+  isManagedProxy,
   mapLocalNodesToSub2ApiProxies,
   mapWithConcurrency,
   parsePortRange,
@@ -617,6 +618,183 @@ export const appRouter = t.router({
             finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");
             throw error;
           }
+        }),
+      qualityCheckManaged: protectedProcedure.mutation(async ({ ctx }) => {
+        const connection = ctx.repo.getSub2ApiConnection();
+        if (!connection) {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+        }
+        const client = createSub2ApiClient(connection);
+        const job = createJob(
+          "sub2api.automation.qualityCheck",
+          "正在对 Hive 托管代理执行质量检查",
+          "对每个 Hive 托管代理调用 quality-check 并把分数回填到本地节点。",
+          ["列出托管代理", "调用质量检查", "回填本地节点"]
+        );
+        try {
+          updateJobStep(job.id, 0, "running", "拉取 Sub2API 代理列表。");
+          const allProxies = await client.listAllProxies();
+          const managedProxies = allProxies.filter((proxy) => isManagedProxy(proxy, connection.managedProxyPrefix));
+          updateJobStep(job.id, 0, "success", `识别 ${managedProxies.length} 个托管代理。`);
+
+          updateJobStep(job.id, 1, "running", `对 ${managedProxies.length} 个代理执行 quality-check。`);
+          const results: Array<{
+            proxyId: number;
+            proxyName: string;
+            score: number | null;
+            grade: string | null;
+            summary: string | null;
+            error?: string;
+          }> = [];
+          for (const proxy of managedProxies) {
+            try {
+              const result = await client.qualityCheckProxy(proxy.id);
+              results.push({
+                proxyId: proxy.id,
+                proxyName: proxy.name,
+                score: result.score ?? null,
+                grade: result.grade ?? null,
+                summary: result.summary ?? null
+              });
+            } catch (error) {
+              results.push({
+                proxyId: proxy.id,
+                proxyName: proxy.name,
+                score: null,
+                grade: null,
+                summary: null,
+                error: error instanceof Error ? error.message : "未知错误"
+              });
+            }
+          }
+          const passed = results.filter((item) => item.score !== null).length;
+          updateJobStep(job.id, 1, "success", `${passed}/${results.length} 个检查返回有效分数。`);
+
+          updateJobStep(job.id, 2, "running", "回填本地节点 qualityScore。");
+          const proxyToScore = new Map<number, number>();
+          for (const item of results) {
+            if (item.score !== null) {
+              proxyToScore.set(item.proxyId, item.score);
+            }
+          }
+          const localNodes = ctx.repo.listNodes();
+          const updates: ProxyNode[] = [];
+          for (const node of localNodes) {
+            if (!node.sub2apiProxyId) {
+              continue;
+            }
+            const score = proxyToScore.get(node.sub2apiProxyId);
+            if (score !== undefined && score !== node.qualityScore) {
+              updates.push({ ...node, qualityScore: score });
+            }
+          }
+          if (updates.length > 0) {
+            ctx.repo.saveNodes(updates);
+          }
+          updateJobStep(job.id, 2, "success", `更新 ${updates.length} 个本地节点的 qualityScore。`);
+
+          finishJob(
+            job.id,
+            "success",
+            `质量检查完成：${passed}/${results.length} 通过，回填 ${updates.length} 个本地节点。`
+          );
+          return {
+            operationId: job.id,
+            total: results.length,
+            passed,
+            updatedLocalNodes: updates.length,
+            results
+          };
+        } catch (error) {
+          finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");
+          throw error;
+        }
+      }),
+      upstreamErrorSummary: protectedProcedure
+        .input(
+          z
+            .object({
+              timeRange: z.string().min(1).default("1h"),
+              view: z.string().min(1).default("errors"),
+              phase: z.string().min(1).default("upstream")
+            })
+            .default({})
+        )
+        .query(async ({ ctx, input }) => {
+          const connection = ctx.repo.getSub2ApiConnection();
+          if (!connection) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 连接。" });
+          }
+          const client = createSub2ApiClient(connection);
+          const [errors, accounts, proxies] = await Promise.all([
+            client.listAllUpstreamErrors({ timeRange: input.timeRange, view: input.view, phase: input.phase }),
+            client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" })),
+            client.listAllProxies()
+          ]);
+          const accountToProxy = new Map<number, number>();
+          for (const account of accounts) {
+            if (account.proxy_id) {
+              accountToProxy.set(account.id, account.proxy_id);
+            }
+          }
+          const proxyNames = new Map(proxies.map((proxy) => [proxy.id, proxy.name]));
+          const proxyToNodeHash = new Map<number, string>();
+          for (const node of ctx.repo.listNodes()) {
+            if (node.sub2apiProxyId) {
+              proxyToNodeHash.set(node.sub2apiProxyId, node.hash);
+            }
+          }
+
+          const byProxy = new Map<
+            number,
+            {
+              proxyId: number;
+              proxyName: string;
+              nodeHash: string | null;
+              errors: number;
+              byStatus: Record<string, number>;
+              bySeverity: Record<string, number>;
+            }
+          >();
+          let attributed = 0;
+          let unattributed = 0;
+          for (const error of errors) {
+            const accountId = error.account_id ?? null;
+            const proxyId = accountId ? accountToProxy.get(accountId) : undefined;
+            if (!proxyId) {
+              unattributed += 1;
+              continue;
+            }
+            attributed += 1;
+            let bucket = byProxy.get(proxyId);
+            if (!bucket) {
+              bucket = {
+                proxyId,
+                proxyName: proxyNames.get(proxyId) ?? `proxy-${proxyId}`,
+                nodeHash: proxyToNodeHash.get(proxyId) ?? null,
+                errors: 0,
+                byStatus: {},
+                bySeverity: {}
+              };
+              byProxy.set(proxyId, bucket);
+            }
+            bucket.errors += 1;
+            if (error.status_code !== null && error.status_code !== undefined) {
+              const key = String(error.status_code);
+              bucket.byStatus[key] = (bucket.byStatus[key] ?? 0) + 1;
+            }
+            if (error.severity) {
+              bucket.bySeverity[error.severity] = (bucket.bySeverity[error.severity] ?? 0) + 1;
+            }
+          }
+
+          return {
+            timeRange: input.timeRange,
+            total: errors.length,
+            attributed,
+            unattributed,
+            byProxy: Array.from(byProxy.values()).sort((a, b) => b.errors - a.errors)
+          };
         })
     }),
     reconcile: t.router({
