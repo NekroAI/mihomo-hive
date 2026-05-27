@@ -23,6 +23,7 @@ interface SubscriptionRow {
   value: string;
   enabled: 0 | 1;
   last_content: string | null;
+  exclude_keywords: string;
   created_at: string;
   updated_at: string;
 }
@@ -70,8 +71,8 @@ export class HiveRepository {
     this.sqlite
       .prepare(
         `
-        INSERT INTO subscriptions (id, name, kind, value, enabled, created_at, updated_at)
-        VALUES (@id, @name, @kind, @value, 1, @now, @now)
+        INSERT INTO subscriptions (id, name, kind, value, enabled, exclude_keywords, created_at, updated_at)
+        VALUES (@id, @name, @kind, @value, 1, '[]', @now, @now)
         ON CONFLICT(id) DO UPDATE SET
           name = excluded.name,
           kind = excluded.kind,
@@ -87,6 +88,7 @@ export class HiveRepository {
       kind: input.kind,
       value: input.value,
       enabled: true,
+      excludeKeywords: [],
       createdAt: now,
       updatedAt: now
     };
@@ -120,6 +122,26 @@ export class HiveRepository {
     this.sqlite
       .prepare("UPDATE subscriptions SET last_content = ?, updated_at = ? WHERE id = ?")
       .run(content, new Date().toISOString(), id);
+  }
+
+  updateSubscriptionFilters(id: string, excludeKeywords: string[]): SubscriptionSource {
+    const keywords = normalizeKeywords(excludeKeywords);
+    this.sqlite
+      .prepare("UPDATE subscriptions SET exclude_keywords = ?, updated_at = ? WHERE id = ?")
+      .run(JSON.stringify(keywords), new Date().toISOString(), id);
+    const row = this.sqlite.prepare("SELECT * FROM subscriptions WHERE id = ?").get(id) as SubscriptionRow | undefined;
+    if (!row) {
+      throw new Error(`Subscription not found: ${id}`);
+    }
+    return subscriptionFromRow(row);
+  }
+
+  deleteSubscription(id: string): void {
+    const transaction = this.sqlite.transaction(() => {
+      this.sqlite.prepare("DELETE FROM nodes WHERE source_id = ?").run(id);
+      this.sqlite.prepare("DELETE FROM subscriptions WHERE id = ?").run(id);
+    });
+    transaction();
   }
 
   upsertNodes(nodes: ProxyNode[]): void {
@@ -320,9 +342,23 @@ function subscriptionFromRow(row: SubscriptionRow): SubscriptionSource {
     value: row.value,
     enabled: Boolean(row.enabled),
     ...(row.last_content ? { lastContent: row.last_content } : {}),
+    excludeKeywords: parseKeywords(row.exclude_keywords),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function parseKeywords(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return normalizeKeywords(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeKeywords(values: string[]): string[] {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
 }
 
 function nodeFromRow(row: NodeRow): ProxyNode {

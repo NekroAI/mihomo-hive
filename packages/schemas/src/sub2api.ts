@@ -8,7 +8,7 @@ export const sub2ApiProxySchema = z.object({
   port: z.number().int().min(1).max(65535),
   username: z.string().optional(),
   password: z.string().optional(),
-  status: z.literal("active")
+  status: z.enum(["active", "inactive"])
 });
 
 export type Sub2ApiProxy = z.infer<typeof sub2ApiProxySchema>;
@@ -23,7 +23,8 @@ export type Sub2ApiExport = z.infer<typeof sub2ApiExportSchema>;
 export const sub2ApiExportRequestSchema = z.object({
   selectedHashes: z.array(z.string().min(8)).default([]),
   host: z.string().min(1).optional(),
-  filename: z.string().min(1).default("sub2api-proxies.json")
+  filename: z.string().min(1).default("sub2api-proxies.json"),
+  failedNodeStatus: z.enum(["active", "inactive"]).default("inactive")
 });
 
 export type Sub2ApiExportRequest = z.infer<typeof sub2ApiExportRequestSchema>;

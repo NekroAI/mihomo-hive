@@ -33,6 +33,7 @@ function ensureSchema(sqlite: HiveSqlite): void {
       value TEXT NOT NULL,
       enabled INTEGER NOT NULL DEFAULT 1,
       last_content TEXT,
+      exclude_keywords TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -65,4 +66,12 @@ function ensureSchema(sqlite: HiveSqlite): void {
       expires_at TEXT NOT NULL
     );
   `);
+  addColumnIfMissing(sqlite, "subscriptions", "exclude_keywords", "TEXT NOT NULL DEFAULT '[]'");
+}
+
+function addColumnIfMissing(sqlite: HiveSqlite, table: string, column: string, definition: string): void {
+  const rows = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!rows.some((row) => row.name === column)) {
+    sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

@@ -77,6 +77,13 @@ export const appRouter = t.router({
         results.push({ id: source.id, name: source.name, bytes: content.length });
       }
       return results;
+    }),
+    updateFilters: protectedProcedure
+      .input(z.object({ id: z.string().min(1), excludeKeywords: z.array(z.string()).default([]) }))
+      .mutation(({ ctx, input }) => summarizeSubscription(ctx.repo.updateSubscriptionFilters(input.id, input.excludeKeywords))),
+    delete: protectedProcedure.input(z.object({ id: z.string().min(1) })).mutation(({ ctx, input }) => {
+      ctx.repo.deleteSubscription(input.id);
+      return { ok: true };
     })
   }),
   nodes: t.router({
@@ -85,7 +92,7 @@ export const appRouter = t.router({
       let imported = 0;
       for (const source of ctx.repo.listSubscriptions().filter((item) => item.enabled)) {
         const content = source.lastContent ?? (await ctx.repo.fetchSubscriptionContent(source));
-        const nodes = parseSubscription(content, source.id);
+        const nodes = parseSubscription(content, source.id).filter((node) => !matchesExcludeKeyword(node, source.excludeKeywords));
         ctx.repo.upsertNodes(nodes);
         imported += nodes.length;
       }
@@ -94,6 +101,10 @@ export const appRouter = t.router({
     assignPorts: protectedProcedure
       .input(z.object({ range: z.string().optional(), skipPortCheck: z.boolean().default(false) }))
       .mutation(async ({ ctx, input }) => {
+        const mihomoStatus = await readMihomoStatus(ctx.config);
+        if (mihomoStatus.running) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Mihomo 运行中不能重新分配端口，请先停止 Mihomo。" });
+        }
         ctx.repo.setAllUntestedActive();
         const range = input.range
           ? parsePortRange(input.range)
@@ -104,7 +115,8 @@ export const appRouter = t.router({
         const nodes = assignStablePorts({
           nodes: ctx.repo.listNodes(),
           range,
-          occupiedPorts: occupied
+          occupiedPorts: occupied,
+          preserveExisting: false
         });
         ctx.repo.saveNodes(nodes);
         return { assigned: nodes.filter((node) => node.assignedPort).length, occupied: occupied.size };
@@ -170,7 +182,8 @@ export const appRouter = t.router({
     previewSub2api: protectedProcedure.input(sub2ApiExportRequestSchema).query(({ ctx, input }) =>
       previewSub2ApiExport(ctx.repo.listNodes(), {
         host: input.host ?? ctx.config.exportHost,
-        selectedHashes: input.selectedHashes
+        selectedHashes: input.selectedHashes,
+        failedNodeStatus: input.failedNodeStatus
       })
     ),
     writeSub2api: protectedProcedure
@@ -182,7 +195,8 @@ export const appRouter = t.router({
       .mutation(async ({ ctx, input }) => {
         const payload = exportSub2Api(ctx.repo.listNodes(), {
           host: input.host ?? ctx.config.exportHost,
-          selectedHashes: input.selectedHashes
+          selectedHashes: input.selectedHashes,
+          failedNodeStatus: input.failedNodeStatus
         });
         const output = input.output ?? `${ctx.config.generatedDir}/sub2api-proxies.json`;
         await writeGenerated(output, `${JSON.stringify(payload, null, 2)}\n`);
@@ -306,6 +320,11 @@ function redactUrl(value: string): string {
   } catch {
     return "<redacted>";
   }
+}
+
+function matchesExcludeKeyword(node: { name: string; originalName: string; region: string; type: string }, keywords: string[]): boolean {
+  const haystack = `${node.name} ${node.originalName} ${node.region} ${node.type}`.toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
 }
 
 async function writeGenerated(path: string, content: string): Promise<void> {

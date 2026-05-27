@@ -1,7 +1,7 @@
 import React from "react";
 import { Download, FileJson, HardDriveDownload, Info } from "lucide-react";
 import type { Sub2ApiExportPreview } from "@mihomo-hive/schemas";
-import { Badge, Button, EmptyState, Panel, TextInput } from "../../components/ui.js";
+import { Badge, Button, EmptyState, Panel, SelectInput, TextInput } from "../../components/ui.js";
 
 export function ExportPanel(props: {
   host: string;
@@ -11,9 +11,11 @@ export function ExportPanel(props: {
   loading: boolean;
   writing: boolean;
   downloading: boolean;
+  failedNodeStatus: "active" | "inactive";
   children?: React.ReactNode;
   onHostChange: (host: string) => void;
   onFilenameChange: (filename: string) => void;
+  onFailedNodeStatusChange: (status: "active" | "inactive") => void;
   onDownload: () => void;
   onWrite: () => void;
 }) {
@@ -35,12 +37,21 @@ export function ExportPanel(props: {
         <div className="export-fields">
           <TextInput label="导出 Host" value={props.host} onChange={props.onHostChange} placeholder="127.0.0.1" mono />
           <TextInput label="文件名" value={props.filename} onChange={props.onFilenameChange} placeholder="sub2api-proxies.json" mono />
+          <SelectInput
+            label="失败节点导出状态"
+            value={props.failedNodeStatus}
+            onChange={(value) => props.onFailedNodeStatusChange(value as "active" | "inactive")}
+            options={[
+              { label: "未激活", value: "inactive" },
+              { label: "激活", value: "active" }
+            ]}
+          />
         </div>
         {props.selectedCount === 0 ? (
           <EmptyState
             icon={<Info size={22} />}
             title="还没有选择导出节点"
-            description="在节点表格中筛选目标节点，然后选择可导出节点。只有可用且已分配端口的节点会进入 JSON。"
+            description="在节点表格中筛选目标节点，然后选择要导出的节点。已分配端口的选中节点会进入 JSON。"
           />
         ) : props.loading ? (
           <div className="loading-block">正在计算导出预览...</div>
@@ -64,7 +75,7 @@ export function ExportPanel(props: {
                 )}
               </pre>
             ) : (
-              <EmptyState title="当前选择没有可导出节点" description="请先选择状态为可用且已经分配端口的节点。" />
+              <EmptyState title="当前选择没有可导出节点" description="请先选择已经分配端口的节点。" />
             )}
           </div>
         )}

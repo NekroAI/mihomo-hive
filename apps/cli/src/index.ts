@@ -224,7 +224,8 @@ ports
     const nodesWithPorts = assignStablePorts({
       nodes: repo.listNodes(),
       range,
-      occupiedPorts: occupied
+      occupiedPorts: occupied,
+      preserveExisting: false
     });
     repo.saveNodes(nodesWithPorts);
     console.log(`Assigned ports in ${range.start}-${range.end}; occupied skipped: ${occupied.size}`);
@@ -255,9 +256,13 @@ exportCommand
   .description("Export Sub2API-compatible proxy JSON")
   .option("--host <host>", "Host written to proxy entries")
   .option("--output <file>", "Output file", "generated/sub2api-proxies.json")
+  .option("--failed-node-status <status>", "Status for failed nodes: active or inactive", "inactive")
   .action(async (options) => {
     const { config, repo } = await openRepo();
-    const payload = exportSub2Api(repo.listNodes(), { host: options.host ?? config.exportHost });
+    const payload = exportSub2Api(repo.listNodes(), {
+      host: options.host ?? config.exportHost,
+      failedNodeStatus: options.failedNodeStatus
+    });
     await writeGenerated(options.output, `${JSON.stringify(payload, null, 2)}\n`);
     console.log(`Exported ${payload.proxies.length} proxies to ${options.output}`);
   });

@@ -62,13 +62,10 @@ export function filterNodes(nodes: ProxyNode[], filters: NodeFilters): ProxyNode
 }
 
 export function canExportNode(node: ProxyNode): boolean {
-  return node.status === "active" && Boolean(node.assignedPort);
+  return Boolean(node.assignedPort);
 }
 
 export function exportBlockReason(node: ProxyNode): string {
-  if (node.status !== "active") {
-    return `状态为${formatNodeStatus(node.status)}`;
-  }
   if (!node.assignedPort) {
     return "未分配端口";
   }
@@ -109,5 +106,43 @@ export function uniqueOptions(nodes: ProxyNode[], field: "region" | "type" | "so
   const values = Array.from(new Set(nodes.map((node) => node[field]).filter(Boolean))).sort((a, b) =>
     String(a).localeCompare(String(b))
   );
-  return values.map((value) => ({ label: String(value), value: String(value) }));
+  return values.map((value) => ({ label: field === "region" ? formatRegion(String(value)) : String(value), value: String(value) }));
+}
+
+export function formatRegion(region: string): string {
+  const labels: Record<string, string> = {
+    jp: "日本",
+    us: "美国",
+    sg: "新加坡",
+    hk: "香港",
+    tw: "台湾",
+    kr: "韩国",
+    de: "德国",
+    gb: "英国",
+    ca: "加拿大",
+    au: "澳大利亚",
+    unknown: "未知"
+  };
+  return labels[region] ?? region;
+}
+
+export interface ParsedTestResult {
+  target: "openai" | "claude" | string;
+  ok: boolean;
+  detail: string;
+}
+
+export function parseTestResults(value: string | undefined): ParsedTestResult[] {
+  if (!value) {
+    return [];
+  }
+  return value.split(",").map((item) => {
+    const [target = "unknown", ...rest] = item.split(":");
+    const detail = rest.join(":") || "-";
+    return {
+      target,
+      ok: target === "openai" ? detail === "401" : target === "claude" ? detail === "405" : /^(200|ok)$/i.test(detail),
+      detail
+    };
+  });
 }

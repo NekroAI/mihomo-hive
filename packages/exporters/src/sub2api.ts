@@ -11,6 +11,7 @@ export interface ExportSub2ApiOptions {
   username?: string;
   password?: string;
   selectedHashes?: string[];
+  failedNodeStatus?: "active" | "inactive";
 }
 
 export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions): Sub2ApiExport {
@@ -30,7 +31,7 @@ export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions)
         port: Number(node.assignedPort),
         ...(username ? { username } : {}),
         ...(password ? { password } : {}),
-        status: "active" as const
+        status: resolveExportStatus(node, options.failedNodeStatus ?? "inactive")
       };
     });
 
@@ -42,14 +43,11 @@ export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions)
 
 export function previewSub2ApiExport(nodes: ProxyNode[], options: ExportSub2ApiOptions): Sub2ApiExportPreview {
   const selected = normalizeSelectedHashes(options.selectedHashes);
-  const selectedCount = selected ? selected.size : nodes.filter((node) => node.status === "active" && node.assignedPort).length;
+  const selectedCount = selected ? selected.size : nodes.filter((node) => node.assignedPort).length;
   const excluded = nodes
     .map((node) => {
       if (selected && !selected.has(node.hash)) {
         return { hash: node.hash, name: node.name, reason: "not_selected" as const };
-      }
-      if (node.status !== "active") {
-        return { hash: node.hash, name: node.name, reason: "not_active" as const };
       }
       if (!node.assignedPort) {
         return { hash: node.hash, name: node.name, reason: "missing_port" as const };
@@ -66,7 +64,7 @@ export function previewSub2ApiExport(nodes: ProxyNode[], options: ExportSub2ApiO
     excluded,
     summary: {
       notSelected: excluded.filter((item) => item.reason === "not_selected").length,
-      notActive: excluded.filter((item) => item.reason === "not_active").length,
+      notActive: 0,
       missingPort: excluded.filter((item) => item.reason === "missing_port").length
     }
   });
@@ -77,7 +75,7 @@ function filterExportableNodes(nodes: ProxyNode[], selectedHashes?: Set<string>)
     if (selectedHashes && !selectedHashes.has(node.hash)) {
       return false;
     }
-    return node.status === "active" && Boolean(node.assignedPort);
+    return Boolean(node.assignedPort);
   });
 }
 
@@ -90,4 +88,14 @@ function normalizeSelectedHashes(selectedHashes: string[] | undefined): Set<stri
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function resolveExportStatus(node: ProxyNode, failedNodeStatus: "active" | "inactive"): "active" | "inactive" {
+  if (node.status === "active") {
+    return "active";
+  }
+  if (node.status === "failed") {
+    return failedNodeStatus;
+  }
+  return "inactive";
 }

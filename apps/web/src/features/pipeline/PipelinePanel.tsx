@@ -1,5 +1,5 @@
-import type React from "react";
-import { Database, DownloadCloud, FileJson, Play, RefreshCw, RotateCw, ShieldCheck, SlidersHorizontal, StopCircle, UploadCloud } from "lucide-react";
+import React from "react";
+import { Database, DownloadCloud, FileJson, Play, RefreshCw, RotateCw, ShieldCheck, SlidersHorizontal, StopCircle, Trash2, UploadCloud } from "lucide-react";
 import type { SubscriptionSource } from "@mihomo-hive/schemas";
 import { Badge, Button, Panel, TextInput } from "../../components/ui.js";
 
@@ -23,6 +23,7 @@ export function PipelinePanel(props: {
   assignedCount: number;
   canTest: boolean;
   canRender: boolean;
+  mihomoRunning: boolean;
   task: TaskFeedback;
   busy: boolean;
   onSubscriptionNameChange: (value: string) => void;
@@ -32,12 +33,26 @@ export function PipelinePanel(props: {
   onFetch: () => void;
   onImport: () => void;
   onAssignPorts: () => void;
+  onUpdateSubscriptionFilters: (id: string, excludeKeywords: string[]) => void;
+  onDeleteSubscription: (id: string) => void;
   onTest: () => void;
   onRender: () => void;
   onStart: () => void;
   onReload: () => void;
   onStop: () => void;
 }) {
+  const [expandedSubscriptionId, setExpandedSubscriptionId] = React.useState<string | undefined>();
+  const [keywordDrafts, setKeywordDrafts] = React.useState<Record<string, string>>({});
+
+  function addKeyword(subscription: Omit<SubscriptionSource, "lastContent"> & { fetched: boolean; lastContentBytes?: number }) {
+    const draft = (keywordDrafts[subscription.id] ?? "").trim();
+    if (!draft) {
+      return;
+    }
+    props.onUpdateSubscriptionFilters(subscription.id, [...subscription.excludeKeywords, draft]);
+    setKeywordDrafts((current) => ({ ...current, [subscription.id]: "" }));
+  }
+
   return (
     <aside className="pipeline-panel">
       <Panel title="任务流" actions={<Badge tone={props.busy ? "info" : "success"}>{props.busy ? "执行中" : "就绪"}</Badge>}>
@@ -67,9 +82,56 @@ export function PipelinePanel(props: {
             </div>
             <div className="subscription-list">
               {props.subscriptions.map((item) => (
-                <div key={item.id} className="subscription-item">
-                  <strong>{item.name}</strong>
-                  <span>{item.fetched ? `${item.lastContentBytes ?? 0} bytes` : "未拉取"}</span>
+                <div key={item.id} className="subscription-card">
+                  <button
+                    type="button"
+                    className="subscription-item"
+                    onClick={() => setExpandedSubscriptionId((current) => (current === item.id ? undefined : item.id))}
+                  >
+                    <strong>{item.name}</strong>
+                    <span>{item.fetched ? `${item.lastContentBytes ?? 0} bytes` : "未拉取"}</span>
+                  </button>
+                  {expandedSubscriptionId === item.id ? (
+                    <div className="subscription-filter-panel">
+                      <div className="filter-keyword-row">
+                        <TextInput
+                          value={keywordDrafts[item.id] ?? ""}
+                          onChange={(value) => setKeywordDrafts((current) => ({ ...current, [item.id]: value }))}
+                          placeholder="过滤关键词，如 官网 / 到期 / 剩余流量"
+                        />
+                        <Button size="sm" variant="secondary" onClick={() => addKeyword(item)}>
+                          添加
+                        </Button>
+                      </div>
+                      <div className="keyword-list">
+                        {item.excludeKeywords.length === 0 ? <span className="muted small">未设置过滤关键词</span> : null}
+                        {item.excludeKeywords.map((keyword) => (
+                          <button
+                            key={keyword}
+                            type="button"
+                            className="keyword-pill"
+                            onClick={() =>
+                              props.onUpdateSubscriptionFilters(
+                                item.id,
+                                item.excludeKeywords.filter((value) => value !== keyword)
+                              )
+                            }
+                          >
+                            {keyword} <XMark />
+                          </button>
+                        ))}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<Trash2 size={14} />}
+                        disabled={props.busy}
+                        onClick={() => props.onDeleteSubscription(item.id)}
+                      >
+                        删除订阅和节点
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -78,10 +140,11 @@ export function PipelinePanel(props: {
           <Step index={3} title="端口与测试" description={`当前筛选 ${props.filteredCount} 个节点，已选择 ${props.selectedCount} 个节点。`}>
             <div className="port-row">
               <TextInput value={props.portRange} onChange={props.onPortRangeChange} placeholder="10001-10300" mono />
-              <Button icon={<SlidersHorizontal size={16} />} disabled={props.busy} onClick={props.onAssignPorts}>
-                预览分配
+              <Button icon={<SlidersHorizontal size={16} />} disabled={props.busy || props.mihomoRunning} onClick={props.onAssignPorts}>
+                重新分配
               </Button>
             </div>
+            {props.mihomoRunning ? <p className="inline-warning">Mihomo 运行中不能重新分配端口，请先停止。</p> : null}
             <Button
               variant="secondary"
               icon={<ShieldCheck size={16} />}
@@ -93,17 +156,17 @@ export function PipelinePanel(props: {
           </Step>
 
           <Step index={4} title="Mihomo 运行" description="生成配置后再启动或热重载 Mihomo。">
-            <Button icon={<FileJson size={16} />} disabled={props.busy || !props.canRender} onClick={props.onRender}>
-              预览生成配置
-            </Button>
-            <div className="button-row three">
+            <div className="mihomo-action-grid">
+              <Button icon={<FileJson size={16} />} disabled={props.busy || !props.canRender} onClick={props.onRender}>
+                生成配置
+              </Button>
               <Button variant="secondary" icon={<Play size={16} />} disabled={props.busy} onClick={props.onStart}>
                 启动
               </Button>
               <Button variant="secondary" icon={<RotateCw size={16} />} disabled={props.busy} onClick={props.onReload}>
                 重载
               </Button>
-              <Button variant="secondary" icon={<StopCircle size={16} />} disabled={props.busy} onClick={props.onStop}>
+              <Button variant="danger" icon={<StopCircle size={16} />} disabled={props.busy || !props.mihomoRunning} onClick={props.onStop}>
                 停止
               </Button>
             </div>
@@ -125,6 +188,10 @@ export function PipelinePanel(props: {
       </Panel>
     </aside>
   );
+}
+
+function XMark() {
+  return <span aria-hidden="true">x</span>;
 }
 
 function Step(props: { index: number; title: string; description: string; children: React.ReactNode }) {

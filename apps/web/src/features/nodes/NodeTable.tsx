@@ -8,13 +8,15 @@ import {
   type ColumnDef,
   type SortingState
 } from "@tanstack/react-table";
-import { ArrowDownUp, Check, ChevronsLeft, ChevronsRight, Search, X } from "lucide-react";
+import { ArrowDownUp, Bot, Check, ChevronsLeft, ChevronsRight, MessageSquare, Search, X } from "lucide-react";
 import type { ProxyNode } from "@mihomo-hive/schemas";
 import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
 import {
   canExportNode,
   exportBlockReason,
+  formatRegion,
   formatNodeStatus,
+  parseTestResults,
   type NodeFilters,
   statusTone,
   uniqueOptions
@@ -29,6 +31,7 @@ export function NodeTable(props: {
   onFiltersChange: (filters: NodeFilters) => void;
   onToggleNode: (hash: string, selected: boolean) => void;
   onSelectFiltered: (exportableOnly: boolean) => void;
+  onSelectSuccessful: () => void;
   onInvertFiltered: () => void;
   onClearSelection: () => void;
 }) {
@@ -58,6 +61,12 @@ export function NodeTable(props: {
         size: 76
       },
       {
+        accessorKey: "name",
+        header: "节点名称",
+        cell: ({ row }) => <span className="node-name" title={row.original.name}>{row.original.name}</span>,
+        size: 300
+      },
+      {
         accessorKey: "status",
         header: "状态",
         cell: ({ row }) => <Badge tone={statusTone(row.original.status)}>{formatNodeStatus(row.original.status)}</Badge>,
@@ -78,7 +87,7 @@ export function NodeTable(props: {
       {
         accessorKey: "region",
         header: "地区",
-        cell: ({ row }) => row.original.region,
+        cell: ({ row }) => formatRegion(row.original.region),
         size: 82
       },
       {
@@ -96,20 +105,14 @@ export function NodeTable(props: {
       {
         accessorKey: "lastTestStatus",
         header: "测试结果",
-        cell: ({ row }) => <span className="truncate-cell mono">{row.original.lastTestStatus ?? "-"}</span>,
-        size: 180
+        cell: ({ row }) => <TestResult value={row.original.lastTestStatus} />,
+        size: 170
       },
       {
         accessorKey: "sourceId",
         header: "来源",
         cell: ({ row }) => <span className="truncate-cell">{props.sourceNames.get(row.original.sourceId) ?? row.original.sourceId}</span>,
         size: 140
-      },
-      {
-        accessorKey: "name",
-        header: "节点名称",
-        cell: ({ row }) => <span className="node-name" title={row.original.name}>{row.original.name}</span>,
-        size: 320
       }
     ],
     [props]
@@ -182,11 +185,11 @@ export function NodeTable(props: {
           <strong>{exportableFiltered}</strong> 个
         </div>
         <div className="selection-actions">
-          <Button size="sm" variant="secondary" icon={<Check size={15} />} onClick={() => props.onSelectFiltered(true)}>
-            选择可导出
-          </Button>
           <Button size="sm" variant="secondary" onClick={() => props.onSelectFiltered(false)}>
             选择当前结果
+          </Button>
+          <Button size="sm" variant="secondary" icon={<Check size={15} />} onClick={props.onSelectSuccessful}>
+            选择成功结果
           </Button>
           <Button size="sm" variant="secondary" onClick={props.onInvertFiltered}>
             反选当前结果
@@ -261,5 +264,23 @@ export function NodeTable(props: {
         </div>
       </footer>
     </section>
+  );
+}
+
+function TestResult(props: { value: string | undefined }) {
+  const results = parseTestResults(props.value);
+  if (results.length === 0) {
+    return <span className="muted small">-</span>;
+  }
+  return (
+    <div className="test-result-list" title={props.value}>
+      {results.map((result) => (
+        <span key={result.target} className={`test-chip ${result.ok ? "is-ok" : "is-fail"}`}>
+          {result.target === "openai" ? <Bot size={13} /> : result.target === "claude" ? <MessageSquare size={13} /> : null}
+          <span>{result.target === "openai" ? "OpenAI" : result.target === "claude" ? "Claude" : result.target}</span>
+          <strong>{result.ok ? "OK" : "Fail"}</strong>
+        </span>
+      ))}
+    </div>
   );
 }

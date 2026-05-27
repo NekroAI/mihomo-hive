@@ -10,6 +10,7 @@ export const subscriptionSourceSchema = z.object({
   value: z.string().min(1),
   enabled: z.boolean().default(true),
   lastContent: z.string().optional(),
+  excludeKeywords: z.array(z.string()).default([]),
   createdAt: z.string(),
   updatedAt: z.string()
 });

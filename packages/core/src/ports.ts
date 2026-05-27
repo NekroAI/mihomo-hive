@@ -45,10 +45,16 @@ export interface AssignPortsInput {
   nodes: ProxyNode[];
   range: PortRange;
   occupiedPorts?: Set<number>;
+  preserveExisting?: boolean;
 }
 
-export function assignStablePorts({ nodes, range, occupiedPorts = new Set() }: AssignPortsInput): ProxyNode[] {
-  const activeNodes = nodes.filter((node) => node.status === "active" || node.status === "untested");
+export function assignStablePorts({
+  nodes,
+  range,
+  occupiedPorts = new Set(),
+  preserveExisting = true
+}: AssignPortsInput): ProxyNode[] {
+  const activeNodes = nodes.filter((node) => node.status === "active" || node.status === "untested" || node.status === "failed");
   const capacity = range.end - range.start + 1 - occupiedPorts.size;
   if (activeNodes.length > capacity) {
     throw new Error(
@@ -57,8 +63,15 @@ export function assignStablePorts({ nodes, range, occupiedPorts = new Set() }: A
   }
 
   const used = new Set<number>(occupiedPorts);
+  const activeHashes = new Set(activeNodes.map((node) => node.hash));
+  for (const node of nodes) {
+    if (!activeHashes.has(node.hash)) {
+      node.assignedPort = undefined;
+    }
+  }
   for (const node of activeNodes) {
     if (
+      preserveExisting &&
       node.assignedPort &&
       node.assignedPort >= range.start &&
       node.assignedPort <= range.end &&

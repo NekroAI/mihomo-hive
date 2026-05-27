@@ -68,6 +68,7 @@ function Dashboard(props: { onLogout: () => void }) {
   const [portRange, setPortRange] = React.useState("10001-10300");
   const [exportHost, setExportHost] = React.useState("127.0.0.1");
   const [exportFilename, setExportFilename] = React.useState("sub2api-proxies.json");
+  const [failedNodeStatus, setFailedNodeStatus] = React.useState<"active" | "inactive">("inactive");
   const [sub2apiBaseUrl, setSub2apiBaseUrl] = React.useState("");
   const [sub2apiApiKey, setSub2apiApiKey] = React.useState("");
   const [sub2apiTimezone, setSub2apiTimezone] = React.useState("Asia/Shanghai");
@@ -134,7 +135,8 @@ function Dashboard(props: { onLogout: () => void }) {
     {
       selectedHashes: selectedHashesList,
       host: exportHost,
-      filename: exportFilename
+      filename: exportFilename,
+      failedNodeStatus
     },
     { enabled: selectedHashesList.length > 0 }
   );
@@ -188,6 +190,21 @@ function Dashboard(props: { onLogout: () => void }) {
       await refreshOperationalData();
     },
     onError: (error) => failTask(setTask, pushToast, "节点导入失败", error.message)
+  });
+  const updateSubscriptionFilters = trpc.subscriptions.updateFilters.useMutation({
+    onSuccess: async () => {
+      pushToast("success", "订阅过滤已保存", "下次导入节点时会应用这些过滤关键词。");
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "订阅过滤保存失败", error.message)
+  });
+  const deleteSubscription = trpc.subscriptions.delete.useMutation({
+    onMutate: () => startTask(setTask, "正在删除订阅", "会同时删除该订阅导入的节点。"),
+    onSuccess: async () => {
+      await finishTask(setTask, pushToast, "订阅已删除", "关联节点已从本地数据库移除。");
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "订阅删除失败", error.message)
   });
   const assignPorts = trpc.nodes.assignPorts.useMutation({
     onMutate: () => startTask(setTask, "正在分配端口", `端口段 ${portRange}，会保留已有稳定端口。`),
@@ -290,6 +307,8 @@ function Dashboard(props: { onLogout: () => void }) {
     fetchSubscriptions.isPending ||
     importNodes.isPending ||
     assignPorts.isPending ||
+    updateSubscriptionFilters.isPending ||
+    deleteSubscription.isPending ||
     testNodes.isPending ||
     renderMihomo.isPending ||
     startMihomo.isPending ||
@@ -342,7 +361,8 @@ function Dashboard(props: { onLogout: () => void }) {
         body: JSON.stringify({
           selectedHashes: selectedHashesList,
           host: exportHost,
-          filename: exportFilename
+          filename: exportFilename,
+          failedNodeStatus
         })
       });
       if (!response.ok) {
@@ -386,6 +406,7 @@ function Dashboard(props: { onLogout: () => void }) {
           assignedCount={assignedCount}
           canTest={assignedCount > 0}
           canRender={activeCount > 0}
+          mihomoRunning={Boolean(runtimeStatus.data?.running)}
           task={task}
           busy={busy}
           onSubscriptionNameChange={setSubscriptionName}
@@ -394,12 +415,23 @@ function Dashboard(props: { onLogout: () => void }) {
           onAddSubscription={() => addSubscription.mutate({ name: subscriptionName, url: subscriptionUrl })}
           onFetch={() => fetchSubscriptions.mutate()}
           onImport={() => importNodes.mutate()}
+          onUpdateSubscriptionFilters={(id, excludeKeywords) => updateSubscriptionFilters.mutate({ id, excludeKeywords })}
+          onDeleteSubscription={(id) =>
+            requestConfirmation({
+              title: "确认删除订阅",
+              description: "会删除订阅源以及由它导入的节点。",
+              detail: "这个操作不会删除其他订阅导入的节点。",
+              confirmLabel: "删除订阅",
+              dangerous: true,
+              run: async () => deleteSubscription.mutate({ id })
+            })
+          }
           onAssignPorts={() =>
             requestConfirmation({
-              title: "确认分配端口",
-              description: `将按 ${portRange} 为可用或未测试节点分配稳定端口。`,
-              detail: `当前数据库共有 ${allNodes.length} 个节点，已分配 ${assignedCount} 个端口。`,
-              confirmLabel: "开始分配",
+              title: "确认重新分配端口",
+              description: `将按 ${portRange} 重新生成唯一端口。`,
+              detail: `Mihomo 必须处于停止状态。当前数据库共有 ${allNodes.length} 个节点，已分配 ${assignedCount} 个端口。`,
+              confirmLabel: "重新分配",
               run: async () => assignPorts.mutate({ range: portRange, skipPortCheck: false })
             })
           }
@@ -470,6 +502,16 @@ function Dashboard(props: { onLogout: () => void }) {
               return current;
             })
           }
+          onSelectSuccessful={() =>
+            mutateSelection((current) => {
+              for (const node of filteredNodes) {
+                if (node.status === "active") {
+                  current.add(node.hash);
+                }
+              }
+              return current;
+            })
+          }
           onInvertFiltered={() =>
             mutateSelection((current) => {
               for (const node of filteredNodes) {
@@ -493,8 +535,10 @@ function Dashboard(props: { onLogout: () => void }) {
           loading={exportPreview.isFetching}
           writing={writeExport.isPending}
           downloading={downloading}
+          failedNodeStatus={failedNodeStatus}
           onHostChange={setExportHost}
           onFilenameChange={setExportFilename}
+          onFailedNodeStatusChange={setFailedNodeStatus}
           onDownload={downloadExport}
           onWrite={() =>
             requestConfirmation({
@@ -506,7 +550,8 @@ function Dashboard(props: { onLogout: () => void }) {
                 writeExport.mutate({
                   selectedHashes: selectedHashesList,
                   host: exportHost,
-                  filename: exportFilename
+                  filename: exportFilename,
+                  failedNodeStatus
                 })
             })
           }

@@ -12,7 +12,7 @@ describe("exportSub2Api", () => {
     expect(result.proxies[0]?.status).toBe("active");
   });
 
-  it("exports only active nodes with assigned ports", () => {
+  it("exports selected nodes with assigned ports and marks failed nodes inactive by default", () => {
     const result = exportSub2Api(
       [
         node({ hash: "active0001", status: "active", assignedPort: 10001 }),
@@ -24,10 +24,15 @@ describe("exportSub2Api", () => {
       { host: "127.0.0.1" }
     );
 
-    expect(result.proxies.map((proxy) => proxy.port)).toEqual([10001]);
+    expect(result.proxies.map((proxy) => [proxy.port, proxy.status])).toEqual([
+      [10001, "active"],
+      [10002, "inactive"],
+      [10003, "inactive"],
+      [10004, "inactive"]
+    ]);
   });
 
-  it("honors selected hashes and still rejects non-active selections", () => {
+  it("honors selected hashes strictly when nodes have assigned ports", () => {
     const result = exportSub2Api(
       [
         node({ hash: "active0001", status: "active", assignedPort: 10001 }),
@@ -37,7 +42,19 @@ describe("exportSub2Api", () => {
       { host: "127.0.0.1", selectedHashes: ["active0002", "failed0001"] }
     );
 
-    expect(result.proxies.map((proxy) => proxy.port)).toEqual([10002]);
+    expect(result.proxies.map((proxy) => [proxy.port, proxy.status])).toEqual([
+      [10002, "active"],
+      [10003, "inactive"]
+    ]);
+  });
+
+  it("can export failed nodes as active when requested", () => {
+    const result = exportSub2Api([node({ hash: "failed0001", status: "failed", assignedPort: 10003 })], {
+      host: "127.0.0.1",
+      failedNodeStatus: "active"
+    });
+
+    expect(result.proxies[0]?.status).toBe("active");
   });
 
   it("previews exported and excluded nodes with stable counts", () => {
@@ -52,8 +69,8 @@ describe("exportSub2Api", () => {
     );
 
     expect(preview.selected).toBe(3);
-    expect(preview.exportable).toBe(1);
-    expect(preview.summary).toEqual({ notSelected: 1, notActive: 1, missingPort: 1 });
+    expect(preview.exportable).toBe(2);
+    expect(preview.summary).toEqual({ notSelected: 1, notActive: 0, missingPort: 1 });
     expect(preview.export.proxies[0]?.proxy_key).toBe("socks5|127.0.0.1|10001||");
   });
 });
