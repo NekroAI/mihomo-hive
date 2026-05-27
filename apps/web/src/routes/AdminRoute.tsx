@@ -1,6 +1,5 @@
 import React from "react";
 import type { Sub2ApiExportPreview } from "@mihomo-hive/schemas";
-import { Button } from "../components/ui.js";
 import { ExportPanel } from "../features/export/ExportPanel.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
 
@@ -8,6 +7,14 @@ interface PendingMutation {
   isPending: boolean;
 }
 
+/**
+ * 导出页 —— 纯粹的"把当前选择集打包给外部使用"的工具页。
+ *
+ * 历史上这里挂过 Mihomo 启停按钮，但：
+ *   • 节点池"发布出口池"按钮已经覆盖了日常发布
+ *   • 服务启动时已自动 boot Mihomo
+ * 所以把运行控制从这里移除，避免与节点池页职责重叠。
+ */
 export interface AdminRouteProps {
   exportHost: string;
   exportFilename: string;
@@ -15,9 +22,6 @@ export interface AdminRouteProps {
   selectedCount: number;
   exportableSelectedCount: number;
   selectedHashesList: string[];
-  activeCount: number;
-  busy: boolean;
-  mihomoRunning: boolean;
   exportPreview: Sub2ApiExportPreview | undefined;
   exportPreviewFetching: boolean;
   downloading: boolean;
@@ -30,10 +34,6 @@ export interface AdminRouteProps {
     writeExport: PendingMutation & {
       mutate: (input: { selectedHashes: string[]; host: string; filename: string; failedNodeStatus: "active" | "inactive" }) => void;
     };
-    publishRuntime: PendingMutation & { mutate: () => void };
-    startMihomo: PendingMutation & { mutate: () => void };
-    reloadMihomo: PendingMutation & { mutate: () => void };
-    stopMihomo: PendingMutation & { mutate: () => void };
   };
 }
 
@@ -69,27 +69,7 @@ export function AdminRoute(props: AdminRouteProps) {
               })
           })
         }
-      >
-        <section className="runtime-ops">
-          <h2>Mihomo 运行控制</h2>
-          <p className="muted small">高级运维操作。日常发布通过节点池页"发布出口池"按钮即可。</p>
-          <div className="button-row wrap">
-            <Button onClick={() => m.publishRuntime.mutate()} disabled={props.busy || props.activeCount === 0}>
-              发布出口池
-            </Button>
-            <Button variant="secondary" onClick={() => m.startMihomo.mutate()} disabled={props.busy}>
-              启动
-            </Button>
-            <Button variant="secondary" onClick={() => m.reloadMihomo.mutate()} disabled={props.busy}>
-              重载
-            </Button>
-            <Button variant="danger" onClick={() => m.stopMihomo.mutate()} disabled={props.busy || !props.mihomoRunning}>
-              停止
-            </Button>
-          </div>
-          <p className="muted small">完整任务历史在"任务与审计"页查看。</p>
-        </section>
-      </ExportPanel>
+      />
     </section>
   );
 }

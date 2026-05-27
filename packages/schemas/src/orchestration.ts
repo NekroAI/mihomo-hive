@@ -136,7 +136,15 @@ export const reconcileNodeIntentSchema = z.object({
   backoffAttempts: z.number().int().min(0),
   currentLoad: z.number().int().min(0),
   targetLoad: z.number().int().min(0),
-  nextAction: z.string()
+  nextAction: z.string(),
+  // 富展示字段：本地节点名 / Sub2API proxy 名 / host / port / 国家代码 / 协议
+  // 让 UI 能像节点池那样显示用户认得出的标识
+  localName: z.string().nullable().default(null),
+  proxyName: z.string().nullable().default(null),
+  host: z.string().nullable().default(null),
+  port: z.number().int().nullable().default(null),
+  country: z.string().nullable().default(null),
+  protocol: z.string().nullable().default(null)
 });
 
 export type ReconcileNodeIntent = z.infer<typeof reconcileNodeIntentSchema>;

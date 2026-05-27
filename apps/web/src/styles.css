@@ -8,6 +8,13 @@
   --bg: #f6f7f9;
   --panel: #ffffff;
   --panel-subtle: #f9fafb;
+  --panel-input: #ffffff;     /* 表单输入背景 */
+  --row-hover: #fffafa;       /* 表格 / 列表 hover */
+  --row-selected: #fff5f5;    /* 表格 / 列表 selected */
+  --code-bg: #111827;
+  --code-text: #dbeafe;
+  --overlay: rgb(15 23 42 / 45%);
+  --on-accent: #ffffff;       /* 按钮 accent 背景上的文字 */
   --border: #d9dee7;
   --border-strong: #b8c0cc;
   --text: #121826;
@@ -28,12 +35,51 @@
   --radius: 8px;
 }
 
-/* —— 深色主题：auto 模式下系统偏好为深色，或显式 data-theme="dark" —— */
+/* —— 深色 palette 共享定义 —— */
+:root[data-theme="dark"],
+:root[data-theme="dark"][data-theme="dark"] {
+  --bg: #0f1117;
+  --panel: #181b22;
+  --panel-subtle: #1e222b;
+  --panel-input: #11141a;
+  --row-hover: #20242e;
+  --row-selected: #2c1c1d;
+  --code-bg: #0a0c12;
+  --code-text: #c9d2e3;
+  --overlay: rgb(0 0 0 / 65%);
+  --on-accent: #1a0e0e;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
+  --text: #e6e9f0;
+  --muted: #8d96a8;
+  --muted-strong: #b6bdcb;
+  --accent: #ff6b6b;
+  --accent-strong: #ff8a8a;
+  --accent-soft: #2c1c1d;
+  --success: #2dca85;
+  --success-soft: #142b22;
+  --danger: #ff5d5d;
+  --danger-soft: #2c1717;
+  --warning: #f0b34a;
+  --warning-soft: #2b2114;
+  --info: #5e9eff;
+  --info-soft: #16213a;
+  --shadow: 0 18px 48px rgb(0 0 0 / 50%);
+}
+
+/* auto 模式（未显式 data-theme）下，系统偏好深色时复用上面的深色 palette */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f1117;
     --panel: #181b22;
     --panel-subtle: #1e222b;
+    --panel-input: #11141a;
+    --row-hover: #20242e;
+    --row-selected: #2c1c1d;
+    --code-bg: #0a0c12;
+    --code-text: #c9d2e3;
+    --overlay: rgb(0 0 0 / 65%);
+    --on-accent: #1a0e0e;
     --border: #2a2f3a;
     --border-strong: #3a4150;
     --text: #e6e9f0;
@@ -52,29 +98,6 @@
     --info-soft: #16213a;
     --shadow: 0 18px 48px rgb(0 0 0 / 50%);
   }
-}
-
-:root[data-theme="dark"] {
-  --bg: #0f1117;
-  --panel: #181b22;
-  --panel-subtle: #1e222b;
-  --border: #2a2f3a;
-  --border-strong: #3a4150;
-  --text: #e6e9f0;
-  --muted: #8d96a8;
-  --muted-strong: #b6bdcb;
-  --accent: #ff6b6b;
-  --accent-strong: #ff8a8a;
-  --accent-soft: #2c1c1d;
-  --success: #2dca85;
-  --success-soft: #142b22;
-  --danger: #ff5d5d;
-  --danger-soft: #2c1717;
-  --warning: #f0b34a;
-  --warning-soft: #2b2114;
-  --info: #5e9eff;
-  --info-soft: #16213a;
-  --shadow: 0 18px 48px rgb(0 0 0 / 50%);
 }
 
 * {
@@ -123,33 +146,54 @@ select {
   background: var(--bg);
 }
 
+/* 工作区切换：segmented control 风格，active 指示器横向滑动 */
 .header-tabs {
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  flex-wrap: wrap;
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(96px, 1fr);
+  align-items: stretch;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-subtle);
+}
+
+.header-tabs-indicator {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  height: calc(100% - 8px);
+  width: calc((100% - 8px) / var(--tab-count, 3));
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%), 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  transform: translateX(calc(100% * var(--active-index, 0)));
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
 }
 
 .header-tabs button {
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel-subtle);
+  position: relative;
+  z-index: 1;
+  height: 30px;
+  border: 0;
+  background: transparent;
   color: var(--muted-strong);
-  padding: 0 12px;
+  padding: 0 16px;
   cursor: pointer;
   font-weight: 650;
   font-size: 13px;
   white-space: nowrap;
+  border-radius: 999px;
+  transition: color 0.18s ease;
 }
 
-.header-tabs button:hover {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+.header-tabs button:hover:not(.is-active) {
+  color: var(--text);
 }
 
 .header-tabs button.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
@@ -256,16 +300,16 @@ select {
   width: 100%;
 }
 
-/* 带鱼屏：左 spec 栏可以稍微宽点，右栏 KPI 自然 4-8 列铺开 */
-@media (min-width: 1920px) {
+/* 带鱼屏：spec 栏内部双列，所以外层 grid 给 spec 更多空间 */
+@media (min-width: 1700px) {
   .automation-grid {
-    grid-template-columns: 420px minmax(0, 1fr);
+    grid-template-columns: 760px minmax(0, 1fr);
   }
 }
 
-@media (min-width: 2400px) {
+@media (min-width: 2200px) {
   .automation-grid {
-    grid-template-columns: 460px minmax(0, 1fr);
+    grid-template-columns: 880px minmax(0, 1fr);
   }
 }
 
@@ -730,12 +774,23 @@ select {
 /* —— ADR 0003 编排面板 —— */
 
 .orchestration-spec-panel {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  align-content: start;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+/* 带鱼屏：spec 栏内部双列布局（与 .automation-grid 同断点联动） */
+@media (min-width: 1700px) {
+  .orchestration-spec-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .orchestration-spec-panel > .spec-save-bar {
+    grid-column: 1 / -1;
+  }
 }
 
 .orchestration-status-panel {
@@ -817,27 +872,70 @@ select {
   padding: 6px 4px;
 }
 
-.node-matrix {
-  display: grid;
-  gap: 4px;
+.node-matrix-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 
-.node-matrix-row {
-  display: grid;
-  grid-template-columns: 160px 90px 110px 80px minmax(0, 1fr);
-  gap: 10px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
+.node-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 13px;
 }
 
-.node-matrix-row.node-matrix-head {
-  border-top: 1px solid var(--border);
+.node-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--panel-subtle);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-strong);
   font-weight: 650;
   font-size: 12px;
-  color: var(--muted-strong);
+  text-align: left;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.node-matrix-table thead th.num {
+  text-align: right;
+}
+
+.node-matrix-table tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.node-matrix-table tbody td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.node-matrix-table tbody tr:hover {
+  background: var(--row-hover);
+}
+
+.node-matrix-table tbody tr.role-quarantined {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.node-matrix-table tbody tr.role-evicted {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.node-matrix-table .cell-name {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-matrix-table .cell-sub2api {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .reconcile-feed {
@@ -897,10 +995,11 @@ select {
   font-family: var(--font-mono, monospace);
 }
 
+/* 节点矩阵 deprecated row 样式 — 兼容旧 className 但实际表格已经接管 */
 @media (max-width: 1080px) {
-  .node-matrix-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+  .node-matrix-table .cell-name,
+  .node-matrix-table .cell-sub2api {
+    max-width: 140px;
   }
 }
 
@@ -949,10 +1048,14 @@ select {
 .collapsible-panel .collapsible-header {
   cursor: pointer;
   user-select: none;
-  display: grid;
-  grid-template-columns: 18px auto auto auto;
+  display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.collapsible-panel .collapsible-header > h2 {
+  flex: 1;          /* 标题占用剩余空间，把后面的 actions / InfoTip 推到右端 */
+  min-width: 0;
 }
 
 .collapsible-panel .collapsible-header:hover {
@@ -963,13 +1066,21 @@ select {
   display: inline-grid;
   place-items: center;
   color: var(--muted);
+  flex: 0 0 auto;
 }
 
 .collapsible-actions {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* —— InfoTip：自定义 hover/focus 弹窗，避开 native title 的延迟 + 样式不可控 —— */
+.info-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
 }
 
 .info-tip {
@@ -982,11 +1093,43 @@ select {
   color: var(--muted);
   cursor: help;
   border-radius: 50%;
+  flex: 0 0 auto;
 }
 
-.info-tip:hover {
+.info-tip:hover,
+.info-tip:focus-visible {
   color: var(--accent-strong);
   background: var(--accent-soft);
+  outline: none;
+}
+
+.info-tip-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: 320px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.info-tip-wrap:hover .info-tip-popover,
+.info-tip:focus-visible + .info-tip-popover {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 /* —— Reconcile feed: 合并的 no_change 行 —— */
@@ -1083,7 +1226,7 @@ select {
   place-items: center;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 800;
 }
@@ -1210,7 +1353,7 @@ select {
 
 .ui-button-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .ui-button-primary:hover:not(:disabled) {
@@ -1235,7 +1378,7 @@ select {
 
 .ui-button-danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .ui-button:disabled,
@@ -1266,7 +1409,7 @@ select {
   height: 38px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
+  background: var(--panel-input);
   color: var(--text);
   font-size: 13px;
   outline: none;
@@ -1279,7 +1422,7 @@ select {
 .text-input:focus,
 .select-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgb(234 82 82 / 12%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .select-wrap {
@@ -1331,30 +1474,30 @@ select {
 
 .badge-neutral {
   border-color: var(--border);
-  background: #f1f3f6;
+  background: var(--panel-subtle);
   color: var(--muted-strong);
 }
 
 .badge-success {
-  border-color: #bde8d1;
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
   background: var(--success-soft);
   color: var(--success);
 }
 
 .badge-danger {
-  border-color: #f3c2c2;
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   background: var(--danger-soft);
   color: var(--danger);
 }
 
 .badge-warning {
-  border-color: #f0d79d;
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
   background: var(--warning-soft);
   color: var(--warning);
 }
 
 .badge-info {
-  border-color: #c8d8fb;
+  border-color: color-mix(in srgb, var(--info) 40%, var(--border));
   background: var(--info-soft);
   color: var(--info);
 }
@@ -1480,7 +1623,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid #f0d79d;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
   border-radius: 999px;
   background: var(--warning-soft);
   color: var(--warning);
@@ -1620,7 +1763,7 @@ select {
   top: 0;
   z-index: 1;
   border-bottom: 1px solid var(--border);
-  background: #f2f4f7;
+  background: var(--panel-subtle);
   color: var(--muted-strong);
   font-weight: 760;
   text-align: left;
@@ -1629,17 +1772,17 @@ select {
 .node-table th,
 .node-table td {
   height: 40px;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--border);
   padding: 0 10px;
   vertical-align: middle;
 }
 
 .node-table tbody tr:hover {
-  background: #fffafa;
+  background: var(--row-hover);
 }
 
 .node-table tbody tr.is-selected {
-  background: #fff5f5;
+  background: var(--row-selected);
 }
 
 .sortable-header,
@@ -1697,13 +1840,13 @@ select {
 }
 
 .test-chip.is-ok {
-  border-color: #bde8d1;
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
   background: var(--success-soft);
   color: var(--success);
 }
 
 .test-chip.is-fail {
-  border-color: #f3c2c2;
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
   background: var(--danger-soft);
   color: var(--danger);
 }
@@ -1798,8 +1941,8 @@ select {
   overflow: auto;
   margin: 12px 0 0;
   border-radius: 7px;
-  background: #111827;
-  color: #dbeafe;
+  background: var(--code-bg);
+  color: var(--code-text);
   padding: 10px;
   font-size: 11px;
 }
@@ -1919,7 +2062,7 @@ select {
 }
 
 .proxy-pick-item.is-protected {
-  border-color: #f0d79d;
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
   background: var(--warning-soft);
 }
 
@@ -1978,7 +2121,7 @@ select {
   z-index: 50;
   display: grid;
   place-items: center;
-  background: rgb(15 23 42 / 45%);
+  background: var(--overlay);
   padding: 18px;
 }
 
@@ -2077,8 +2220,9 @@ select {
   min-height: 100dvh;
   place-items: center;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 80%), rgb(246 247 249 / 92%)),
-    radial-gradient(circle at 20% 10%, rgb(234 82 82 / 12%), transparent 34%);
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 80%, transparent), color-mix(in srgb, var(--panel-subtle) 92%, transparent)),
+    radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+    var(--bg);
   padding: 20px;
 }
 

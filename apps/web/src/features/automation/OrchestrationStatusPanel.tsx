@@ -131,31 +131,72 @@ function NodeMatrix(props: { intents: ReconcileNodeIntent[] }) {
   }
   return (
     <Panel title={`节点矩阵 (${props.intents.length})`}>
-      <div className="node-matrix">
-        <div className="node-matrix-row node-matrix-head">
-          <span>节点</span>
-          <span>角色</span>
-          <span>承载 / 目标</span>
-          <span>健康分</span>
-          <span>下次动作</span>
-        </div>
-        {props.intents.map((intent) => (
-          <div key={intent.hash} className="node-matrix-row">
-            <span className="font-mono">{intent.hash.slice(0, 12)}…</span>
-            <span>
-              <RoleBadge role={intent.intentRole} />
-            </span>
-            <span>
-              <strong>{intent.currentLoad}</strong>
-              <span className="muted"> / {intent.targetLoad}</span>
-            </span>
-            <span>{intent.healthScore === null ? <span className="muted">—</span> : `${intent.healthScore}`}</span>
-            <span className="muted small">{intent.nextAction}</span>
-          </div>
-        ))}
+      <div className="node-matrix-scroll">
+        <table className="node-matrix-table">
+          <thead>
+            <tr>
+              <th>节点名</th>
+              <th>地区</th>
+              <th>角色</th>
+              <th>Sub2API</th>
+              <th className="num">承载 / 目标</th>
+              <th className="num">健康分</th>
+              <th>下次动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.intents.map((intent) => {
+              const name = intent.localName ?? intent.proxyName ?? `${intent.hash.slice(0, 8)}…`;
+              const regionFlag = intent.country ? formatCountry(intent.country) : "—";
+              const sub2api = formatSub2Api(intent);
+              return (
+                <tr key={intent.hash} className={`node-matrix-tr role-${intent.intentRole}`}>
+                  <td className="cell-name" title={name}>
+                    <span className="mono-strong">{name}</span>
+                  </td>
+                  <td className="muted small">{regionFlag}</td>
+                  <td>
+                    <RoleBadge role={intent.intentRole} />
+                  </td>
+                  <td className="cell-sub2api muted small" title={sub2api}>
+                    {sub2api}
+                  </td>
+                  <td className="num">
+                    <strong>{intent.currentLoad}</strong>
+                    <span className="muted"> / {intent.targetLoad}</span>
+                  </td>
+                  <td className="num">
+                    {intent.healthScore === null ? <span className="muted">—</span> : intent.healthScore}
+                  </td>
+                  <td className="muted small">{intent.nextAction}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </Panel>
   );
+}
+
+function formatSub2Api(intent: ReconcileNodeIntent): string {
+  const id = intent.proxyId ? `#${intent.proxyId}` : "—";
+  const proto = intent.protocol ? intent.protocol.toLowerCase() : "";
+  const where = intent.host && intent.port ? `${intent.host}:${intent.port}` : "";
+  if (proto && where) return `${id} ${proto}://${where}`;
+  if (where) return `${id} ${where}`;
+  return id;
+}
+
+const FLAG_REGEX = /^[A-Z]{2}$/;
+
+function formatCountry(code: string): string {
+  const upper = code.trim().toUpperCase();
+  if (!FLAG_REGEX.test(upper)) return code;
+  const A = 0x1f1e6;
+  const codePoint1 = A + (upper.charCodeAt(0) - 65);
+  const codePoint2 = A + (upper.charCodeAt(1) - 65);
+  return `${String.fromCodePoint(codePoint1)}${String.fromCodePoint(codePoint2)} ${upper}`;
 }
 
 type ReconcileFeedItem =

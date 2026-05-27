@@ -14,9 +14,9 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
 
     // 进入 dashboard，3 个 workspace tab 都出现
     const nav = page.getByRole("navigation", { name: "工作区" });
-    await expect(nav.getByRole("button", { name: "节点池" })).toBeVisible();
-    await expect(nav.getByRole("button", { name: "自动化" })).toBeVisible();
-    await expect(nav.getByRole("button", { name: "高级运维" })).toBeVisible();
+    await expect(nav.getByRole("tab", { name: "节点池" })).toBeVisible();
+    await expect(nav.getByRole("tab", { name: "账号编排" })).toBeVisible();
+    await expect(nav.getByRole("tab", { name: "导出" })).toBeVisible();
 
     // 默认在节点池：能看到导入订阅表单 + 节点池操作栏
     await expect(page.getByRole("heading", { name: "导入订阅" })).toBeVisible();
@@ -25,8 +25,8 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await expect(page.getByRole("button", { name: "测试节点池" })).toBeVisible();
     await expect(page.getByRole("button", { name: "发布出口池" })).toBeVisible();
 
-    // 切到自动化：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
-    await nav.getByRole("button", { name: "自动化" }).click();
+    // 切到账号编排：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
+    await nav.getByRole("tab", { name: "账号编排" }).click();
     // 左栏顶部：自动协调开关
     await expect(page.getByRole("heading", { name: "自动协调" })).toBeVisible();
     // 未配置 Sub2API 时右栏空态
@@ -34,13 +34,12 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     // 暂停/恢复按钮（取决于 spec.enabled 默认 true，应该看到"暂停自动协调"）
     await expect(page.getByRole("button", { name: /暂停自动协调|恢复自动协调/ })).toBeVisible();
 
-    // 切到高级运维：能看到 Mihomo 运行控制 + 导出篮子
-    await nav.getByRole("button", { name: "高级运维" }).click();
-    await expect(page.getByRole("heading", { name: "Mihomo 运行控制" })).toBeVisible();
+    // 切到导出：纯导出工具，只有导出篮子（Mihomo 控制已下线到节点池页）
+    await nav.getByRole("tab", { name: "导出" }).click();
     await expect(page.getByRole("heading", { name: "导出篮子" })).toBeVisible();
 
     // 回到节点池
-    await nav.getByRole("button", { name: "节点池" }).click();
+    await nav.getByRole("tab", { name: "节点池" }).click();
     await expect(page.getByRole("heading", { name: "导入订阅" })).toBeVisible();
   });
 

@@ -189,12 +189,12 @@ export function CollapsiblePanel(props: {
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
         <h2>{props.title}</h2>
-        {props.hint ? <InfoTip text={props.hint} /> : null}
         {props.actions ? (
           <span className="collapsible-actions" onClick={(e) => e.stopPropagation()}>
             {props.actions}
           </span>
         ) : null}
+        {props.hint ? <InfoTip text={props.hint} /> : null}
       </header>
       {open ? <div className="panel-body">{props.children}</div> : null}
     </section>
@@ -202,20 +202,24 @@ export function CollapsiblePanel(props: {
 }
 
 /**
- * Info icon with hover tooltip via native `title` attribute (cheap and a11y-friendly).
- * Use to hide longish explanations from the常驻 page surface.
+ * 信息图标 + 自定义 hover/focus tooltip。
+ *
+ * 原本用 native `title` attr，浏览器 tooltip 延迟 ~500ms 出现且样式不可控，
+ * 在 panel header 里几乎用户看不到。改为 CSS popover：鼠标悬停或键盘 focus
+ * 时立刻显示，悬停在 popover 上也不消失。tooltip 用 absolute 定位避免被父级 overflow 裁掉。
  */
 export function InfoTip(props: { text: string }) {
   return (
-    <button
-      type="button"
-      className="info-tip"
-      title={props.text}
-      aria-label={props.text}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <Info size={13} />
-    </button>
+    <span className="info-tip-wrap" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="info-tip"
+        aria-label={props.text}
+      >
+        <Info size={13} />
+      </button>
+      <span role="tooltip" className="info-tip-popover">{props.text}</span>
+    </span>
   );
 }
 

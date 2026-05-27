@@ -505,6 +505,7 @@ function buildNodeIntents(world: ObservedWorld, decisions: NodeRoleDecision[]): 
     .filter((d) => world.localByProxyId.has(d.proxyId))
     .map((d) => {
       const local = world.localByProxyId.get(d.proxyId)!;
+      const proxy = world.proxiesById.get(d.proxyId);
       return {
         hash: local.hash,
         proxyId: d.proxyId,
@@ -514,7 +515,13 @@ function buildNodeIntents(world: ObservedWorld, decisions: NodeRoleDecision[]): 
         backoffAttempts: d.backoffAttempts,
         currentLoad: d.currentLoad,
         targetLoad: d.targetLoad,
-        nextAction: d.nextAction
+        nextAction: d.nextAction,
+        localName: local.name ?? null,
+        proxyName: proxy?.name ?? null,
+        host: proxy?.host ?? null,
+        port: proxy?.port ?? null,
+        country: proxy?.country_code ?? proxy?.country ?? null,
+        protocol: proxy?.protocol ?? null
       };
     });
 }

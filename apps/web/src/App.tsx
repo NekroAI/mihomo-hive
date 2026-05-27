@@ -683,9 +683,6 @@ function Dashboard(props: { onLogout: () => void }) {
           selectedCount={selectedHashes.size}
           exportableSelectedCount={exportableSelectedCount}
           selectedHashesList={selectedHashesList}
-          activeCount={activeCount}
-          busy={busy}
-          mihomoRunning={Boolean(runtimeStatus.data?.running)}
           exportPreview={exportPreview.data}
           exportPreviewFetching={exportPreview.isFetching}
           downloading={downloading}
@@ -694,7 +691,7 @@ function Dashboard(props: { onLogout: () => void }) {
           setFailedNodeStatus={setFailedNodeStatus}
           onDownload={downloadExport}
           requestConfirmation={requestConfirmation}
-          mutations={{ writeExport, publishRuntime, startMihomo, reloadMihomo, stopMihomo }}
+          mutations={{ writeExport }}
         />
       ) : null}
 

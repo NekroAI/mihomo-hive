@@ -12,8 +12,8 @@ interface WorkspaceTab {
 
 const tabs: WorkspaceTab[] = [
   { id: "nodes", label: "节点池" },
-  { id: "automation", label: "自动化" },
-  { id: "runtime", label: "高级运维" }
+  { id: "automation", label: "账号编排" },
+  { id: "runtime", label: "导出" }
 ];
 
 export function RuntimeHeader(props: {
@@ -37,11 +37,21 @@ export function RuntimeHeader(props: {
           <p>固定出口代理池工作台</p>
         </div>
       </div>
-      <nav className="header-tabs" aria-label="工作区">
+      <nav
+        className="header-tabs"
+        aria-label="工作区"
+        style={{
+          ["--tab-count" as string]: tabs.length,
+          ["--active-index" as string]: tabs.findIndex((t) => t.id === props.workspace)
+        }}
+      >
+        <span className="header-tabs-indicator" aria-hidden="true" />
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            aria-selected={props.workspace === tab.id}
             className={props.workspace === tab.id ? "is-active" : ""}
             onClick={() => props.onWorkspaceChange(tab.id)}
           >

@@ -12,7 +12,6 @@ export function ExportPanel(props: {
   writing: boolean;
   downloading: boolean;
   failedNodeStatus: "active" | "inactive";
-  children?: React.ReactNode;
   onHostChange: (host: string) => void;
   onFilenameChange: (filename: string) => void;
   onFailedNodeStatusChange: (status: "active" | "inactive") => void;
@@ -108,7 +107,6 @@ export function ExportPanel(props: {
           </div>
         </div>
       </Panel>
-      {props.children}
     </aside>
   );
 }

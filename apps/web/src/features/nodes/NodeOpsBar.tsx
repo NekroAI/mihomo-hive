@@ -79,7 +79,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<Trash2 size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onPreviewDeleteSelected}
-            title="完全删除：先在 Sub2API 解绑账号、删远端代理，再删除本地记录。整个流程作为一个 OperationJob 可在自动化页查看。"
+            title="完全删除：先在 Sub2API 解绑账号、删远端代理，再删除本地记录。整个流程作为一个 OperationJob 可在账号编排页查看。"
           >
             删除
           </Button>
