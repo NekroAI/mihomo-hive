@@ -8,8 +8,8 @@ import {
   PauseCircle,
   PlayCircle,
   Plug,
+  RefreshCw,
   Replace,
-  Rocket,
   Snowflake,
   Trash2,
   XSquare
@@ -29,12 +29,13 @@ export interface NodeToolbarProps {
   busy: boolean;
   attaching: boolean;
   testing: boolean;
-  publishing: boolean;
+  rebuilding: boolean;
   onAttach: () => void;
   onTestSelected: () => void;
   onTestAll: () => void;
   onEnableSelected: () => void;
-  onPublish: () => void;
+  /** 紧急兜底：用当前 DB 状态强制重新渲染 mihomo.yaml + reload。不动端口、不推 Sub2API。 */
+  onRebuildMihomo: () => void;
   onDisableSelected: () => void;
   onCoolingDownSelected: () => void;
   onRetireSelected: () => void;
@@ -161,24 +162,12 @@ export function NodeToolbar(props: NodeToolbarProps) {
 
         <Button
           size="sm"
-          variant="secondary"
           icon={<PlayCircle size={14} />}
           disabled={props.busy || !hasSelection}
           onClick={props.onEnableSelected}
-          title="把所选节点的 lifecycle 设为 schedulable。会进 Sub2API 推送队列、可能立即被自动化分配账号。建议先测过再启用。"
+          title="把所选节点的 lifecycle 设为 schedulable + 推送到 Sub2API + 回填 proxy_id。完成后节点出现在账号编排页。建议先测过再启用。"
         >
           启用调度
-        </Button>
-
-        <Button
-          size="sm"
-          icon={<Rocket size={14} />}
-          loading={props.publishing}
-          disabled={props.busy || props.schedulableCount === 0}
-          onClick={props.onPublish}
-          title="一键发布：给 schedulable 节点确保端口、生成 Mihomo 配置、启动/重载 Mihomo。仅 active + 已分配端口节点会成为 listener。"
-        >
-          发布出口池
         </Button>
 
         <Dropdown
@@ -189,6 +178,16 @@ export function NodeToolbar(props: NodeToolbarProps) {
             </span>
           }
         >
+          <DropdownGroup label="诊断">
+            <DropdownItem
+              icon={<RefreshCw size={14} />}
+              disabled={props.busy || props.rebuilding}
+              hint="用当前节点状态强制重新渲染 mihomo.yaml 并 reload 进程。不动端口、不改 lifecycle、不推 Sub2API。用于 yaml 损坏 / 进程挂掉时的兜底恢复。"
+              onClick={props.onRebuildMihomo}
+            >
+              重建 Mihomo
+            </DropdownItem>
+          </DropdownGroup>
           <DropdownGroup label="生命周期（所选）">
             <DropdownItem
               icon={<PauseCircle size={14} />}

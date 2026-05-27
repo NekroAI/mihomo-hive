@@ -22,8 +22,11 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await expect(page.getByRole("heading", { name: "导入订阅" })).toBeVisible();
     await expect(page.getByRole("button", { name: "仅保存订阅源" })).toBeVisible();
     await expect(page.getByRole("button", { name: "拉取并预览" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "测试节点池" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "发布出口池" })).toBeVisible();
+    // NodeToolbar 高频按钮（左→右工作流：分配端口 → 测试 → 启用调度）
+    await expect(page.getByRole("button", { name: "分配端口" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "测试所选" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "测试全部" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "启用调度" })).toBeVisible();
 
     // 切到账号编排：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
     await nav.getByRole("tab", { name: "账号编排" }).click();

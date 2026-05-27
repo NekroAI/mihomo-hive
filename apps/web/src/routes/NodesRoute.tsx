@@ -69,7 +69,7 @@ export interface NodesRouteProps {
       mutate: (input: { targets: string[]; timeoutMs: number; concurrency: number; hashes?: string[] }) => void;
     };
     attachToMihomo: PendingMutation & { mutate: (input: { hashes: string[] }) => void };
-    publishRuntime: PendingMutation & { mutate: () => void };
+    rebuildMihomo: PendingMutation & { mutate: () => void };
     deleteSubscription: PendingMutation & { mutate: (input: { id: string }) => void };
   };
 }
@@ -171,7 +171,7 @@ export function NodesRoute(props: NodesRouteProps) {
           busy={props.busy}
           attaching={m.attachToMihomo.isPending}
           testing={m.testNodes.isPending}
-          publishing={m.publishRuntime.isPending}
+          rebuilding={m.rebuildMihomo.isPending}
           onAttach={() => m.attachToMihomo.mutate({ hashes: props.selectedHashesList })}
           onTestSelected={() =>
             m.testNodes.mutate({
@@ -203,7 +203,17 @@ export function NodesRoute(props: NodesRouteProps) {
               run: async () => m.enableScheduling.mutate({ hashes: props.selectedHashesList })
             });
           }}
-          onPublish={() => m.publishRuntime.mutate()}
+          onRebuildMihomo={() =>
+            props.requestConfirmation({
+              title: "确认重建 Mihomo",
+              description:
+                "用当前节点状态强制重新渲染 mihomo.yaml 并 reload 进程。不动端口分配、不改 lifecycle、不会推送到 Sub2API。",
+              detail:
+                "用途：yaml 文件被外部改坏 / Mihomo 进程异常退出需要拉起 / 手动校验配置。reload 期间已建立的代理连接可能短暂中断。",
+              confirmLabel: "重建",
+              run: async () => m.rebuildMihomo.mutate()
+            })
+          }
           onDisableSelected={() =>
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
           }

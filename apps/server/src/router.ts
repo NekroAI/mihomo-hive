@@ -73,32 +73,32 @@ export const appRouter = t.router({
   runtime: t.router({
     config: protectedProcedure.query(({ ctx }) => ctx.config),
     status: protectedProcedure.query(async ({ ctx }) => readMihomoStatus(ctx.config)),
+    /**
+     * 紧急重建：基于当前 DB 状态重新渲染 mihomo.yaml + 启动/reload 进程。
+     *
+     * 不动端口分配 / 不改 lifecycle / 不推 Sub2API —— 仅诊断兜底用。
+     * 适用场景：mihomo.yaml 被外部改坏 / 进程异常退出 / 启动失败需要强制 reload。
+     *
+     * （历史名"runtime.publish"保留以避免前端老调用方编译失败；语义已改）
+     */
     publish: protectedProcedure.mutation(async ({ ctx }) => {
-      const job = createJob("runtime.publish", "正在发布出口池", "生成 Mihomo 配置并应用到运行进程。", [
+      const job = createJob("runtime.publish", "正在重建 Mihomo", "用当前节点状态重新渲染配置并 reload 进程。", [
         "渲染配置",
         "应用进程"
       ]);
       try {
         updateJobStep(job.id, 0, "running", "正在渲染 Mihomo 配置。");
-        const current = await readMihomoStatus(ctx.config);
-        const range = { start: ctx.config.portRangeStart, end: ctx.config.portRangeEnd };
-        const occupied = current.running ? new Set<number>() : await findOccupiedPorts(ctx.config.listenHost, enumeratePorts(range));
-        const assignedNodes = assignStablePorts({
-          nodes: ctx.repo.listNodes(),
-          range,
-          occupiedPorts: occupied,
-          preserveExisting: true
-        });
-        ctx.repo.saveNodes(assignedNodes);
-        const rendered = renderMihomoConfig(assignedNodes, ctx.config);
+        const nodes = ctx.repo.listNodes();
+        const rendered = renderMihomoConfig(nodes, ctx.config);
         await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
         await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
         updateJobStep(job.id, 0, "success", `生成 ${rendered.egressMap.length} 个 listener。`);
 
         updateJobStep(job.id, 1, "running", "正在启动或重载 Mihomo。");
+        const current = await readMihomoStatus(ctx.config);
         const status = current.running ? await reloadMihomo(ctx.config) : await startMihomo(ctx.config);
         updateJobStep(job.id, 1, "success", status.running ? "Mihomo 已运行。" : "未确认 Mihomo 运行状态。");
-        finishJob(job.id, "success", "出口池发布完成。");
+        finishJob(job.id, "success", "重建完成。");
         return { job: operationJobs.get(job.id), listeners: rendered.egressMap.length, status };
       } catch (error) {
         finishJob(job.id, "failed", error instanceof Error ? error.message : "未知错误");

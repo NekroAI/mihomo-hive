@@ -313,13 +313,14 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "Mihomo 配置生成失败", error.message)
   });
-  const publishRuntime = trpc.runtime.publish.useMutation({
-    onMutate: () => startTask(setTask, "正在发布出口池", "系统会生成配置并自动启动或重载 Mihomo。"),
+  const rebuildMihomo = trpc.runtime.publish.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在重建 Mihomo", "用当前节点状态重新渲染 mihomo.yaml 并 reload 进程；不动端口、不推 Sub2API。"),
     onSuccess: async (result) => {
-      await finishTask(setTask, pushToast, "出口池发布完成", `发布 ${result.listeners} 个 listener。`);
+      await finishTask(setTask, pushToast, "Mihomo 已重建", `当前 ${result.listeners} 个 listener。`);
       await refreshOperationalData();
     },
-    onError: (error) => failTask(setTask, pushToast, "出口池发布失败", error.message)
+    onError: (error) => failTask(setTask, pushToast, "重建 Mihomo 失败", error.message)
   });
   const attachToMihomo = trpc.nodes.attachToMihomo.useMutation({
     onMutate: () =>
@@ -557,7 +558,7 @@ function Dashboard(props: { onLogout: () => void }) {
     deleteSubscription.isPending ||
     testNodes.isPending ||
     renderMihomo.isPending ||
-    publishRuntime.isPending ||
+    rebuildMihomo.isPending ||
     attachToMihomo.isPending ||
     enableScheduling.isPending ||
     startMihomo.isPending ||
@@ -697,7 +698,7 @@ function Dashboard(props: { onLogout: () => void }) {
             deleteNodes,
             testNodes,
             attachToMihomo,
-            publishRuntime,
+            rebuildMihomo,
             deleteSubscription
           }}
         />
