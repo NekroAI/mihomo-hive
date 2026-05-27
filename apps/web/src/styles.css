@@ -773,23 +773,36 @@ select {
 
 /* —— ADR 0003 编排面板 —— */
 
+/* 默认（窄屏 / 中宽屏）：单列垂直堆叠 */
 .orchestration-spec-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-content: start;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
 }
 
-/* 带鱼屏：spec 栏内部双列布局（与 .automation-grid 同断点联动） */
+/* 带鱼屏：CSS columns 瀑布流，避免 grid 行高对齐导致的空白。
+   panels 按高度自动落到最短列；spec-save-bar 跨两列保留底部 sticky 行为。 */
 @media (min-width: 1700px) {
   .orchestration-spec-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    display: block;
+    column-count: 2;
+    column-gap: 12px;
+    column-fill: balance;
+  }
+  .orchestration-spec-panel > .panel,
+  .orchestration-spec-panel > .collapsible-panel {
+    break-inside: avoid;
+    display: block;
+    margin-bottom: 12px;
+    width: 100%;
   }
   .orchestration-spec-panel > .spec-save-bar {
-    grid-column: 1 / -1;
+    column-span: all;
+    position: static;       /* multi-column 容器内 sticky 行为不稳，关掉 */
+    margin-top: 4px;
   }
 }
 
@@ -1310,6 +1323,15 @@ select {
   margin: 0;
   font-size: 14px;
   font-weight: 720;
+}
+
+/* Panel/CollapsiblePanel header 右侧 trailing：actions + InfoTip
+   InfoTip 永远是 trailing 的最后一个 child，所以 ℹ️ 必在末尾。 */
+.panel-header-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .panel-body {

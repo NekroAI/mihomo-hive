@@ -127,13 +127,23 @@ export function Badge(props: { children: React.ReactNode; tone?: Tone }) {
   return <span className={`badge badge-${props.tone ?? "neutral"}`}>{props.children}</span>;
 }
 
-export function Panel(props: { title?: string; actions?: React.ReactNode; children: React.ReactNode; className?: string }) {
+export function Panel(props: {
+  title?: string;
+  actions?: React.ReactNode;
+  /** 如果给了，会在 panel-header 最右端渲染 InfoTip；这样无论 actions 含什么都保证 ℹ️ 永远在末尾。 */
+  hint?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <section className={`panel ${props.className ?? ""}`}>
-      {props.title || props.actions ? (
+      {props.title || props.actions || props.hint ? (
         <header className="panel-header">
           {props.title ? <h2>{props.title}</h2> : <span />}
-          {props.actions}
+          <span className="panel-header-trailing">
+            {props.actions}
+            {props.hint ? <InfoTip text={props.hint} /> : null}
+          </span>
         </header>
       ) : null}
       <div className="panel-body">{props.children}</div>

@@ -24,7 +24,6 @@ import {
   Button,
   CollapsiblePanel,
   EmptyState,
-  InfoTip,
   Panel,
   SelectInput,
   TextInput
@@ -103,12 +102,8 @@ export function OrchestrationSpecPanel(props: {
     <aside className="orchestration-spec-panel">
       <Panel
         title="自动协调"
-        actions={
-          <>
-            <InfoTip text="系统按你指定的'应该是什么样'自动调节配置：自动同步代理、自动迁移账号、自动隔离故障节点。火警按下后只观测不执行，便于排查。" />
-            <Badge tone={enabled ? "success" : "warning"}>{enabled ? "运行中" : "已暂停"}</Badge>
-          </>
-        }
+        actions={<Badge tone={enabled ? "success" : "warning"}>{enabled ? "运行中" : "已暂停"}</Badge>}
+        hint="系统按你指定的'应该是什么样'自动调节配置：自动同步代理、自动迁移账号、自动隔离故障节点。火警按下后只观测不执行，便于排查。"
       >
         <div className="button-row wrap">
           {enabled ? (
@@ -207,9 +202,7 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="入站代理"
-        actions={
-          <InfoTip text="新账号在 Sub2API 创建时默认挂到这里；系统每个 reconcile 周期把它上面的账号引流到合适的 Hive 节点。建议选手动配置的兜底代理（不能是托管代理或保护代理）。" />
-        }
+        hint="新账号在 Sub2API 创建时默认挂到这里；系统每个 reconcile 周期把它上面的账号引流到合适的 Hive 节点。建议选手动配置的兜底代理（不能是托管代理或保护代理）。"
       >
         {props.proxies.length === 0 ? (
           <EmptyState title="未拉取 Sub2API 代理" description="保存 + 测试连接后系统会自动拉取代理列表，再来此处选择入站代理。" />
@@ -227,7 +220,8 @@ export function OrchestrationSpecPanel(props: {
 
       <CollapsiblePanel
         title="节点供给"
-        storageKey="spec-supply"
+        storageKey="spec-supply-v2"
+        defaultOpen
         hint="订阅自动刷新周期、入池门槛、退役等待。0 = 关闭自动刷新。"
       >
         <div className="form-grid">
@@ -259,9 +253,7 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="容量与再平衡"
-        actions={
-          <InfoTip text="目标 = 总账号数 / 健康节点数（auto 时）。超过 overload 倍触发外迁；低于 underload 倍视为闲置等填。" />
-        }
+        hint="目标 = 总账号数 / 健康节点数（auto 时）。超过 overload 倍触发外迁；低于 underload 倍视为闲置等填。"
       >
         <div className="form-grid">
           <SelectInput
@@ -311,9 +303,7 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="灰度与稳定性"
-        actions={
-          <InfoTip text="灰度阀：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。" />
-        }
+        hint="灰度阀：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。"
       >
         <div className="form-grid">
           <SelectInput

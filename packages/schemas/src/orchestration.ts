@@ -188,7 +188,7 @@ export type ReconcileTick = z.infer<typeof reconcileTickSchema>;
 export const orchestrationStatusSnapshotSchema = z.object({
   spec: orchestrationSpecSchema,
   lastTick: reconcileTickSchema.optional(),
-  recentTicks: z.array(reconcileTickSchema),                            // 最近 N 条（默认 10）
+  recentTicks: z.array(reconcileTickSchema),                            // 最近 N 条（默认 500，前端再折叠无变更）
   nodeIntents: z.array(reconcileNodeIntentSchema),
   observedSummary: reconcileObservedSummarySchema.optional(),
   // 衍生 KPI

@@ -841,7 +841,9 @@ export const appRouter = t.router({
     orchestrator: t.router({
       statusSnapshot: protectedProcedure.query(({ ctx }) => {
         const spec = ctx.repo.getOrchestrationSpec();
-        const recentTicks = ctx.repo.listRecentReconcileTicks(10);
+        // 每 30 秒一个 tick + 大量 no_change 会很快冲掉真正有变化的记录。
+        // 这里拉 500 条；UI 端 mergeNoChangeRuns 把无变更折叠，让用户始终能看到几十条有效变化。
+        const recentTicks = ctx.repo.listRecentReconcileTicks(500);
         const lastTick = recentTicks[0];
         const since24h = Date.now() - 24 * 60 * 60 * 1000;
         const driftCount24h = ctx.repo
