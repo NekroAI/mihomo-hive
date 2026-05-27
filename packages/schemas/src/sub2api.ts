@@ -54,7 +54,8 @@ export type Sub2ApiExportPreview = z.infer<typeof sub2ApiExportPreviewSchema>;
 export const sub2ApiConnectionConfigSchema = z.object({
   baseUrl: z.string().url(),
   adminApiKey: z.string().min(1),
-  timezone: z.string().min(1).default("Asia/Shanghai")
+  timezone: z.string().min(1).default("Asia/Shanghai"),
+  managedProxyPrefix: z.string().min(1).default("MH-")
 });
 
 export type Sub2ApiConnectionConfig = z.infer<typeof sub2ApiConnectionConfigSchema>;
@@ -63,6 +64,7 @@ export const sub2ApiSafeConnectionConfigSchema = z.object({
   configured: z.boolean(),
   baseUrl: z.string().url().optional(),
   timezone: z.string().min(1).optional(),
+  managedProxyPrefix: z.string().min(1).optional(),
   apiKeyConfigured: z.boolean()
 });
 
@@ -205,3 +207,38 @@ export const sub2ApiReconcileApplyResultSchema = sub2ApiAssignmentApplyResultSch
 });
 
 export type Sub2ApiReconcileApplyResult = z.infer<typeof sub2ApiReconcileApplyResultSchema>;
+
+export const sub2ApiMaintenancePreviewSchema = z.object({
+  managedProxyPrefix: z.string().min(1),
+  summary: z.object({
+    proxies: z.number().int().nonnegative(),
+    managedProxies: z.number().int().nonnegative(),
+    managedAccounts: z.number().int().nonnegative(),
+    emptyManagedProxies: z.number().int().nonnegative(),
+    drainChanges: z.number().int().nonnegative(),
+    protectedAccounts: z.number().int().nonnegative(),
+    assignableTargets: z.number().int().nonnegative()
+  }),
+  managedProxies: z.array(sub2ApiProxyRecordSchema),
+  emptyManagedProxies: z.array(sub2ApiProxyRecordSchema),
+  drainPlan: sub2ApiAssignmentPreviewSchema,
+  risks: z.array(z.string()).default([])
+});
+
+export type Sub2ApiMaintenancePreview = z.infer<typeof sub2ApiMaintenancePreviewSchema>;
+
+export const sub2ApiMaintenanceApplyResultSchema = z.object({
+  preview: sub2ApiMaintenancePreviewSchema,
+  reassigned: z.number().int().nonnegative(),
+  failedReassign: z.number().int().nonnegative(),
+  deletedProxies: z.number().int().nonnegative(),
+  failedDeleteProxies: z.array(
+    z.object({
+      proxyId: z.number().int().positive(),
+      name: z.string().min(1),
+      message: z.string().min(1)
+    })
+  )
+});
+
+export type Sub2ApiMaintenanceApplyResult = z.infer<typeof sub2ApiMaintenanceApplyResultSchema>;

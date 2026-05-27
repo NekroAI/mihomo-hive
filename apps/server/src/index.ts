@@ -91,7 +91,8 @@ app.post("/api/exports/sub2api/download", async (c) => {
   const payload = exportSub2Api(repo.listNodes(), {
     host: input.data.host ?? config.exportHost,
     selectedHashes: input.data.selectedHashes,
-    failedNodeStatus: input.data.failedNodeStatus
+    failedNodeStatus: input.data.failedNodeStatus,
+    namePrefix: repo.getSub2ApiConnection()?.managedProxyPrefix
   });
   const filename = sanitizeDownloadFilename(input.data.filename);
   return new Response(`${JSON.stringify(payload, null, 2)}\n`, {

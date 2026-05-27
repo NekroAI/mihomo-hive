@@ -12,6 +12,7 @@ export interface ExportSub2ApiOptions {
   password?: string;
   selectedHashes?: string[];
   failedNodeStatus?: "active" | "inactive";
+  namePrefix?: string | undefined;
 }
 
 export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions): Sub2ApiExport {
@@ -25,7 +26,7 @@ export function exportSub2Api(nodes: ProxyNode[], options: ExportSub2ApiOptions)
       const proxyKey = [protocol, options.host, Number(node.assignedPort), username ?? "", password ?? ""].join("|");
       return {
         proxy_key: proxyKey,
-        name: node.name,
+        name: `${options.namePrefix ?? ""}${node.name}`,
         protocol,
         host: options.host,
         port: Number(node.assignedPort),

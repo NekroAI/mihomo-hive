@@ -18,6 +18,7 @@ import {
   mapWithConcurrency,
   parsePortRange,
   planSub2ApiAssignments,
+  planSub2ApiManagedMaintenance,
   renderMihomoConfig,
   resolveProxyTestTargets,
   testProxyTarget
@@ -306,7 +307,8 @@ export const appRouter = t.router({
       previewSub2ApiExport(ctx.repo.listNodes(), {
         host: input.host ?? ctx.config.exportHost,
         selectedHashes: input.selectedHashes,
-        failedNodeStatus: input.failedNodeStatus
+        failedNodeStatus: input.failedNodeStatus,
+        namePrefix: ctx.repo.getSub2ApiConnection()?.managedProxyPrefix
       })
     ),
     writeSub2api: protectedProcedure
@@ -315,7 +317,8 @@ export const appRouter = t.router({
         const payload = exportSub2Api(ctx.repo.listNodes(), {
           host: input.host ?? ctx.config.exportHost,
           selectedHashes: input.selectedHashes,
-          failedNodeStatus: input.failedNodeStatus
+          failedNodeStatus: input.failedNodeStatus,
+          namePrefix: ctx.repo.getSub2ApiConnection()?.managedProxyPrefix
         });
         const output = input.output ?? `${ctx.config.generatedDir}/sub2api-proxies.json`;
         await writeGenerated(output, `${JSON.stringify(payload, null, 2)}\n`);
@@ -371,6 +374,79 @@ export const appRouter = t.router({
         matchedLocalNodes: mappings.length,
         protectedProxies: proxies.filter((proxy) => matchesProtectedProxyLike(proxy, protectedRule)).length
       };
+    }),
+    maintenance: t.router({
+      preview: protectedProcedure.query(async ({ ctx }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        const connection = ctx.repo.getSub2ApiConnection();
+        const [proxies, accounts] = await Promise.all([
+          client.listAllProxies(),
+          client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+        ]);
+        return planSub2ApiManagedMaintenance({
+          proxies,
+          accounts,
+          protectedRule: ctx.repo.getSub2ApiProtectedRule(),
+          managedProxyPrefix: connection?.managedProxyPrefix ?? "MH-"
+        });
+      }),
+      drainManaged: protectedProcedure.mutation(async ({ ctx }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        const connection = ctx.repo.getSub2ApiConnection();
+        const [proxies, accounts] = await Promise.all([
+          client.listAllProxies(),
+          client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+        ]);
+        const preview = planSub2ApiManagedMaintenance({
+          proxies,
+          accounts,
+          protectedRule: ctx.repo.getSub2ApiProtectedRule(),
+          managedProxyPrefix: connection?.managedProxyPrefix ?? "MH-"
+        });
+        if (preview.risks.length > 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: preview.risks.join("；") });
+        }
+        const results = [];
+        for (const batch of groupAssignmentChangesByProxy(preview.drainPlan.changes)) {
+          results.push(await client.bulkUpdateProxy(batch.accountIds, batch.proxyId));
+        }
+        return {
+          preview,
+          reassigned: results.reduce((sum, item) => sum + item.success, 0),
+          failedReassign: results.reduce((sum, item) => sum + item.failed, 0),
+          deletedProxies: 0,
+          failedDeleteProxies: []
+        };
+      }),
+      cleanupEmpty: protectedProcedure.mutation(async ({ ctx }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        const connection = ctx.repo.getSub2ApiConnection();
+        const [proxies, accounts] = await Promise.all([
+          client.listAllProxies(),
+          client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
+        ]);
+        const preview = planSub2ApiManagedMaintenance({
+          proxies,
+          accounts,
+          protectedRule: ctx.repo.getSub2ApiProtectedRule(),
+          managedProxyPrefix: connection?.managedProxyPrefix ?? "MH-"
+        });
+        let deletedProxies = 0;
+        const failedDeleteProxies = [];
+        for (const proxy of preview.emptyManagedProxies) {
+          try {
+            await client.deleteProxy(proxy.id);
+            deletedProxies += 1;
+          } catch (error) {
+            failedDeleteProxies.push({
+              proxyId: proxy.id,
+              name: proxy.name,
+              message: error instanceof Error ? error.message : "未知错误"
+            });
+          }
+        }
+        return { preview, reassigned: 0, failedReassign: 0, deletedProxies, failedDeleteProxies };
+      })
     }),
     reconcile: t.router({
       preview: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).query(async ({ ctx, input }) => {

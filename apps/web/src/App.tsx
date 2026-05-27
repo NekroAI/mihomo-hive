@@ -83,6 +83,7 @@ function Dashboard(props: { onLogout: () => void }) {
   const [sub2apiBaseUrl, setSub2apiBaseUrl] = React.useState("");
   const [sub2apiApiKey, setSub2apiApiKey] = React.useState("");
   const [sub2apiTimezone, setSub2apiTimezone] = React.useState("Asia/Shanghai");
+  const [sub2apiManagedPrefix, setSub2apiManagedPrefix] = React.useState("MH-");
   const [sub2apiFilters, setSub2apiFilters] = useLocalStorageState<Sub2ApiAccountFilters>("mihomo-hive.sub2api-filters", {
     platform: "openai",
     type: "",
@@ -126,6 +127,7 @@ function Dashboard(props: { onLogout: () => void }) {
     if (sub2apiConfig.data?.baseUrl) {
       setSub2apiBaseUrl(sub2apiConfig.data.baseUrl);
       setSub2apiTimezone(sub2apiConfig.data.timezone ?? "Asia/Shanghai");
+      setSub2apiManagedPrefix(sub2apiConfig.data.managedProxyPrefix ?? "MH-");
     }
   }, [sub2apiConfig.data]);
 
@@ -165,6 +167,9 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     { enabled: Boolean(sub2apiConfig.data?.configured) }
   );
+  const sub2apiMaintenance = trpc.sub2api.maintenance.preview.useQuery(undefined, {
+    enabled: Boolean(sub2apiConfig.data?.configured)
+  });
   const jobs = trpc.sub2api.jobs.list.useQuery(undefined, { enabled: workspace === "runtime", refetchInterval: 3000 });
 
   const refreshOperationalData = React.useCallback(async () => {
@@ -176,7 +181,8 @@ function Dashboard(props: { onLogout: () => void }) {
       utils.sub2api.config.get.invalidate(),
       utils.sub2api.proxies.list.invalidate(),
       utils.sub2api.proxies.protectedRule.invalidate(),
-      utils.sub2api.assign.preview.invalidate()
+      utils.sub2api.assign.preview.invalidate(),
+      utils.sub2api.maintenance.preview.invalidate()
     ]);
   }, [utils]);
 
@@ -343,6 +349,14 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "Sub2API 连接失败", error.message)
   });
+  const syncSub2api = trpc.sub2api.sync.useMutation({
+    onMutate: () => startTask(setTask, "正在同步 Sub2API", "系统会读取代理和账号，并识别 Hive 管理的代理。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "Sub2API 已同步", `代理 ${result.proxies} 个，账号 ${result.accounts} 个，匹配本地节点 ${result.matchedLocalNodes} 个。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Sub2API 同步失败", error.message)
+  });
   const saveProtectedRule = trpc.sub2api.proxies.saveProtectedRule.useMutation({
     onError: (error) => pushToast("danger", "保护节点保存失败", error.message)
   });
@@ -358,6 +372,22 @@ function Dashboard(props: { onLogout: () => void }) {
       await refreshOperationalData();
     },
     onError: (error) => failTask(setTask, pushToast, "Sub2API 绑定失败", error.message)
+  });
+  const drainManagedSub2api = trpc.sub2api.maintenance.drainManaged.useMutation({
+    onMutate: () => startTask(setTask, "正在排空 Hive 托管代理", "会把绑定到 Hive 代理的账号迁移到非保护代理。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "Hive 托管代理已排空", `迁移 ${result.reassigned} 个账号，失败 ${result.failedReassign} 个。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Hive 托管代理排空失败", error.message)
+  });
+  const cleanupManagedSub2api = trpc.sub2api.maintenance.cleanupEmpty.useMutation({
+    onMutate: () => startTask(setTask, "正在清理 Hive 空代理", "只会删除名称带托管前缀且没有账号使用的代理。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "Hive 空代理清理完成", `删除 ${result.deletedProxies} 个代理，失败 ${result.failedDeleteProxies.length} 个。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Hive 空代理清理失败", error.message)
   });
 
   const busy =
@@ -381,6 +411,9 @@ function Dashboard(props: { onLogout: () => void }) {
     saveSub2apiConfig.isPending ||
     testSub2apiConnection.isPending ||
     applySub2apiAssignments.isPending ||
+    syncSub2api.isPending ||
+    drainManagedSub2api.isPending ||
+    cleanupManagedSub2api.isPending ||
     downloading;
 
   function pushToast(tone: ToastMessage["tone"], title: string, detail?: string) {
@@ -611,18 +644,24 @@ function Dashboard(props: { onLogout: () => void }) {
             baseUrl={sub2apiBaseUrl}
             apiKey={sub2apiApiKey}
             timezone={sub2apiTimezone}
+            managedProxyPrefix={sub2apiManagedPrefix}
             filters={sub2apiFilters}
             protectedRule={sub2apiProtected}
             proxies={sub2apiProxies.data ?? []}
             preview={sub2apiPreview.data}
+            maintenance={sub2apiMaintenance.data}
             loading={sub2apiProxies.isFetching || sub2apiPreview.isFetching}
             saving={saveSub2apiConfig.isPending}
             testing={testSub2apiConnection.isPending}
             applying={applySub2apiAssignments.isPending}
+            syncing={syncSub2api.isPending}
+            draining={drainManagedSub2api.isPending}
+            cleaning={cleanupManagedSub2api.isPending}
             overwriteExisting={sub2apiOverwrite}
             onBaseUrlChange={setSub2apiBaseUrl}
             onApiKeyChange={setSub2apiApiKey}
             onTimezoneChange={setSub2apiTimezone}
+            onManagedProxyPrefixChange={setSub2apiManagedPrefix}
             onFiltersChange={setSub2apiFilters}
             onProtectedRuleChange={updateProtectedRule}
             onOverwriteExistingChange={setSub2apiOverwrite}
@@ -630,13 +669,16 @@ function Dashboard(props: { onLogout: () => void }) {
               saveSub2apiConfig.mutate({
                 baseUrl: sub2apiBaseUrl,
                 adminApiKey: sub2apiApiKey || undefined,
-                timezone: sub2apiTimezone || "Asia/Shanghai"
+                timezone: sub2apiTimezone || "Asia/Shanghai",
+                managedProxyPrefix: sub2apiManagedPrefix || "MH-"
               })
             }
             onTest={() => testSub2apiConnection.mutate()}
+            onSync={() => syncSub2api.mutate()}
             onRefresh={() => {
               void sub2apiProxies.refetch();
               void sub2apiPreview.refetch();
+              void sub2apiMaintenance.refetch();
             }}
             onApply={() =>
               requestConfirmation({
@@ -650,6 +692,26 @@ function Dashboard(props: { onLogout: () => void }) {
                     protectedRule: sub2apiProtected,
                     overwriteExisting: sub2apiOverwrite
                   })
+              })
+            }
+            onDrainManaged={() =>
+              requestConfirmation({
+                title: "确认排空 Hive 托管代理",
+                description: `将迁移 ${sub2apiMaintenance.data?.summary.drainChanges ?? 0} 个账号，保护账号不会被修改。`,
+                detail: "用于清理 Sub2API 中已经被账号使用、暂时无法删除的 Hive 代理。",
+                confirmLabel: "排空代理",
+                dangerous: true,
+                run: async () => drainManagedSub2api.mutate()
+              })
+            }
+            onCleanupEmpty={() =>
+              requestConfirmation({
+                title: "确认清理 Hive 空代理",
+                description: `将删除 ${sub2apiMaintenance.data?.summary.emptyManagedProxies ?? 0} 个没有账号使用的 Hive 托管代理。`,
+                detail: `系统按名称前缀 ${sub2apiManagedPrefix || "MH-"} 识别托管代理。`,
+                confirmLabel: "清理空代理",
+                dangerous: true,
+                run: async () => cleanupManagedSub2api.mutate()
               })
             }
           />

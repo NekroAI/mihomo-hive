@@ -10,6 +10,7 @@
 - `FilterProfile`：用于筛选节点的包含/排除规则。
 - `Sub2ApiExport`：供 Sub2API 消费的导出 JSON。
 - `Sub2ApiReconcilePlan`：Sub2API 账号代理绑定计划，服务端会在应用前重新读取 live 数据。
+- `Sub2ApiMaintenancePreview`：Sub2API 托管代理维护计划，统计可排空账号、可清理空代理和风险项。
 - `OperationJob`：后台发布、协调和其他长任务的状态记录。
 
 SQLite schema 与这些对象保持对应，并将原始节点配置保存为 JSON。

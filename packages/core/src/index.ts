@@ -8,5 +8,6 @@ export * from "./ports.js";
 export * from "./region.js";
 export * from "./sub2api-assignment.js";
 export * from "./sub2api-client.js";
+export * from "./sub2api-maintenance.js";
 export * from "./subscription.js";
 export * from "./subscription-preview.js";

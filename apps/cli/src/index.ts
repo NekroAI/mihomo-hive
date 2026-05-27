@@ -275,12 +275,14 @@ sub2api
   .requiredOption("--base-url <url>", "Sub2API base URL")
   .requiredOption("--api-key <key>", "Sub2API admin API key")
   .option("--timezone <timezone>", "Sub2API timezone", "Asia/Shanghai")
+  .option("--managed-proxy-prefix <prefix>", "Prefix used to identify Mihomo Hive managed proxies", "MH-")
   .action(async (options) => {
     const { repo } = await openRepo();
     repo.setSub2ApiConnection({
       baseUrl: options.baseUrl,
       adminApiKey: options.apiKey,
-      timezone: options.timezone
+      timezone: options.timezone,
+      managedProxyPrefix: options.managedProxyPrefix
     });
     console.log(JSON.stringify(repo.getSafeSub2ApiConnection(), null, 2));
   });

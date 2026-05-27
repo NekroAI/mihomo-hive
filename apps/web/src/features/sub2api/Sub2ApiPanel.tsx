@@ -1,8 +1,9 @@
 import React from "react";
-import { Link2, RefreshCw, Save, ShieldCheck, Wand2 } from "lucide-react";
+import { Link2, RefreshCw, Save, ShieldCheck, Trash2, Unlink, Wand2 } from "lucide-react";
 import type {
   Sub2ApiAccountFilters,
   Sub2ApiAssignmentPreview,
+  Sub2ApiMaintenancePreview,
   Sub2ApiProtectedProxyRule,
   Sub2ApiProxyRecord,
   Sub2ApiSafeConnectionConfig
@@ -14,25 +15,34 @@ export function Sub2ApiPanel(props: {
   baseUrl: string;
   apiKey: string;
   timezone: string;
+  managedProxyPrefix: string;
   filters: Sub2ApiAccountFilters;
   protectedRule: Sub2ApiProtectedProxyRule;
   proxies: Sub2ApiProxyRecord[];
   preview: Sub2ApiAssignmentPreview | undefined;
+  maintenance: Sub2ApiMaintenancePreview | undefined;
   loading: boolean;
   saving: boolean;
   testing: boolean;
   applying: boolean;
+  syncing: boolean;
+  draining: boolean;
+  cleaning: boolean;
   overwriteExisting: boolean;
   onBaseUrlChange: (value: string) => void;
   onApiKeyChange: (value: string) => void;
   onTimezoneChange: (value: string) => void;
+  onManagedProxyPrefixChange: (value: string) => void;
   onFiltersChange: (value: Sub2ApiAccountFilters) => void;
   onProtectedRuleChange: (value: Sub2ApiProtectedProxyRule) => void;
   onOverwriteExistingChange: (value: boolean) => void;
   onSaveConfig: () => void;
   onTest: () => void;
+  onSync: () => void;
   onRefresh: () => void;
   onApply: () => void;
+  onDrainManaged: () => void;
+  onCleanupEmpty: () => void;
 }) {
   const configured = Boolean(props.config?.configured);
   const protectedIds = new Set(props.protectedRule.proxyIds);
@@ -64,7 +74,7 @@ export function Sub2ApiPanel(props: {
 
   return (
     <Panel
-      title="Sub2API 绑定"
+      title="Sub2API 自动化"
       actions={<Badge tone={configured ? "success" : "warning"}>{configured ? "已连接配置" : "待配置"}</Badge>}
     >
       <div className="sub2api-stack">
@@ -84,6 +94,13 @@ export function Sub2ApiPanel(props: {
               mono
             />
             <TextInput label="时区" value={props.timezone} onChange={props.onTimezoneChange} placeholder="Asia/Shanghai" mono />
+            <TextInput
+              label="Hive 托管代理前缀"
+              value={props.managedProxyPrefix}
+              onChange={props.onManagedProxyPrefixChange}
+              placeholder="MH-"
+              mono
+            />
           </div>
           <div className="button-row">
             <Button icon={<Save size={16} />} loading={props.saving} disabled={!props.baseUrl || (!props.apiKey && !props.config?.apiKeyConfigured)} onClick={props.onSaveConfig}>
@@ -92,13 +109,56 @@ export function Sub2ApiPanel(props: {
             <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.testing} disabled={!configured} onClick={props.onTest}>
               测试连接
             </Button>
+            <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.syncing} disabled={!configured} onClick={props.onSync}>
+              同步接管
+            </Button>
           </div>
         </section>
 
         <section className="sub2api-section">
           <div className="section-title">
             <ShieldCheck size={16} />
-            <strong>账号范围与保护节点</strong>
+            <strong>自动接管状态</strong>
+          </div>
+          <div className="sub2api-summary">
+            <SmallMetric label="Hive 代理" value={props.maintenance?.summary.managedProxies ?? 0} />
+            <SmallMetric label="关联账号" value={props.maintenance?.summary.managedAccounts ?? 0} />
+            <SmallMetric label="可排空" value={props.maintenance?.summary.drainChanges ?? 0} />
+            <SmallMetric label="可清理" value={props.maintenance?.summary.emptyManagedProxies ?? 0} />
+          </div>
+          <p className="muted small">
+            系统通过代理名称前缀识别由 Mihomo Hive 管理的代理。用户只需要维护保护节点，账号迁移和清理由系统按计划执行。
+          </p>
+          {props.maintenance?.risks.length ? <div className="form-error">{props.maintenance.risks.join("；")}</div> : null}
+          <div className="button-row wrap">
+            <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.loading} disabled={!configured} onClick={props.onRefresh}>
+              刷新计划
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Unlink size={16} />}
+              loading={props.draining}
+              disabled={!configured || !props.maintenance || props.maintenance.summary.drainChanges === 0}
+              onClick={props.onDrainManaged}
+            >
+              一键排空 Hive 代理
+            </Button>
+            <Button
+              variant="danger"
+              icon={<Trash2 size={16} />}
+              loading={props.cleaning}
+              disabled={!configured || !props.maintenance || props.maintenance.summary.emptyManagedProxies === 0}
+              onClick={props.onCleanupEmpty}
+            >
+              清理空 Hive 代理
+            </Button>
+          </div>
+        </section>
+
+        <section className="sub2api-section">
+          <div className="section-title">
+            <ShieldCheck size={16} />
+            <strong>账号范围与绑定策略</strong>
           </div>
           <div className="sub2api-filter-grid">
             <SelectInput
@@ -121,11 +181,8 @@ export function Sub2ApiPanel(props: {
             label="覆盖现有非保护代理绑定"
           />
           <div className="button-row">
-            <Button variant="secondary" icon={<RefreshCw size={16} />} loading={props.loading} disabled={!configured} onClick={props.onRefresh}>
-              刷新预览
-            </Button>
             <Button icon={<Wand2 size={16} />} loading={props.applying} disabled={!canApply} onClick={props.onApply}>
-              应用绑定
+              应用自动绑定
             </Button>
           </div>
         </section>

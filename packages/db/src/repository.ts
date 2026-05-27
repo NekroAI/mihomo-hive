@@ -376,7 +376,13 @@ export class HiveRepository {
     const connection = this.getSub2ApiConnection();
     return {
       configured: Boolean(connection),
-      ...(connection ? { baseUrl: connection.baseUrl, timezone: connection.timezone } : {}),
+      ...(connection
+        ? {
+            baseUrl: connection.baseUrl,
+            timezone: connection.timezone,
+            managedProxyPrefix: connection.managedProxyPrefix
+          }
+        : {}),
       apiKeyConfigured: Boolean(connection?.adminApiKey)
     };
   }
