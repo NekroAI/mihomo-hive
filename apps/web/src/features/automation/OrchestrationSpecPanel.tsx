@@ -277,9 +277,19 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel title="灰度与稳定性">
         <p className="muted small">
-          灰度阀给"系统判错"留缓冲：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希阶段 A 默认；阶段 C 切到 Rendezvous Hashing 后切换前会有"切换日"工具。
+          灰度阀给"系统判错"留缓冲：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。
+          稳定哈希策略决定节点集合变化时账号会漂移多少；Rendezvous Hashing 只让原节点已下线的账号漂移（≈ 1/N），稳定哈希则会触发大规模重排。切换策略会引起一次性大漂移，建议低峰期执行。
         </p>
         <div className="form-grid">
+          <SelectInput
+            label="哈希策略"
+            value={draft.stickiness.strategy}
+            onChange={(v) => patchNested("stickiness", (c) => ({ ...c, strategy: v as "stable-hash" | "rendezvous-hash" }))}
+            options={[
+              { label: "稳定哈希 (sha256 % N，默认)", value: "stable-hash" },
+              { label: "Rendezvous Hashing (HRW)", value: "rendezvous-hash" }
+            ]}
+          />
           <NumberInput
             label="灰度百分比 (%)"
             value={draft.graceBatchPercent}

@@ -418,6 +418,72 @@ describe("reconcile health state machine", () => {
   });
 });
 
+describe("rendezvous hashing (HRW) drift", () => {
+  // 用 reconcile 在两种节点配置下计算账号目标，比较漂移率。
+  // HRW 的数学性质：N→N-1 时漂移比例 ≈ 1/N。
+  function bindMissingTargets(strategy: "stable-hash" | "rendezvous-hash", proxyIds: number[]): Map<number, number> {
+    const proxies = proxyIds.map((id) => buildProxy({ id }));
+    const localNodes = proxyIds.map((id) => buildNode({ hash: `n${id}xxxxxx`, sub2apiProxyId: id }));
+    const accounts = Array.from({ length: 1000 }, (_, i) => buildAccount({ id: 1000 + i, proxy_id: null }));
+    const spec = specWith({
+      stickiness: { strategy, rebalanceTriggerPercent: 15, perTickMigrationCap: 9999 },
+      graceBatchPercent: 100,
+      graceBatchAbs: 99999
+    });
+    const result = reconcile({
+      now: NOW,
+      spec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX
+    });
+    const out = new Map<number, number>();
+    for (const change of result.plannedChanges) {
+      if (change.kind === "bind_missing") out.set(change.accountId, change.toProxyId);
+    }
+    return out;
+  }
+
+  it("removing one node from a 5-node HRW pool drifts ~1/5 accounts (vs ~4/5 with stable-hash)", () => {
+    const fullPool = [1, 2, 3, 4, 5];
+    const shrunkPool = [1, 2, 3, 4]; // 删 #5
+
+    // HRW
+    const hrwBefore = bindMissingTargets("rendezvous-hash", fullPool);
+    const hrwAfter = bindMissingTargets("rendezvous-hash", shrunkPool);
+    let hrwDrifted = 0;
+    let hrwOnRemoved = 0; // 原来在 #5 的账号，必然漂移
+    for (const [accountId, before] of hrwBefore) {
+      if (before === 5) hrwOnRemoved += 1;
+      const after = hrwAfter.get(accountId);
+      if (after !== undefined && after !== before) hrwDrifted += 1;
+    }
+    const hrwDriftRate = hrwDrifted / hrwBefore.size;
+
+    // stable-hash
+    const stableBefore = bindMissingTargets("stable-hash", fullPool);
+    const stableAfter = bindMissingTargets("stable-hash", shrunkPool);
+    let stableDrifted = 0;
+    for (const [accountId, before] of stableBefore) {
+      const after = stableAfter.get(accountId);
+      if (after !== undefined && after !== before) stableDrifted += 1;
+    }
+    const stableDriftRate = stableDrifted / stableBefore.size;
+
+    // HRW: 漂移率 ≈ 1/5 = 0.2，等于原来在 #5 的账号比例
+    expect(hrwDriftRate).toBeGreaterThan(0.15);
+    expect(hrwDriftRate).toBeLessThan(0.25);
+    expect(hrwDrifted).toBe(hrwOnRemoved); // 漂移的恰好就是原本在 #5 的账号
+
+    // stable-hash: 因为 % length 变化，几乎所有账号 % 4 ≠ % 5 → 大规模漂移
+    expect(stableDriftRate).toBeGreaterThan(0.6);
+
+    // HRW 优势 ≥ 3x
+    expect(hrwDriftRate * 3).toBeLessThan(stableDriftRate);
+  });
+});
+
 describe("validateIntakeAgainstSpec", () => {
   it("returns null when proxy is plain (not managed, not protected)", () => {
     const proxies = [buildProxy({ id: 50, name: "handoff" })];
