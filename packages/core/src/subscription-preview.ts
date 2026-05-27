@@ -55,9 +55,15 @@ export function buildSubscriptionImportPreview(input: BuildSubscriptionPreviewIn
       updates: items.filter((item) => item.action === "update").length,
       duplicates: items.filter((item) => item.action === "skip_duplicate").length,
       existing: items.filter((item) => item.action === "skip_existing").length,
-      filtered: items.filter((item) => item.action === "skip_filtered").length
+      filtered: items.filter((item) => item.action === "skip_filtered").length,
+      deletedByFilter: items.filter((item) => item.action === "skip_filtered" && item.deletesExisting).length
     }
   });
+}
+
+export function filteredExistingNodeHashes(input: BuildSubscriptionPreviewInput): string[] {
+  const preview = buildSubscriptionImportPreview(input);
+  return preview.items.filter((item) => item.action === "skip_filtered" && item.deletesExisting).map((item) => item.hash);
 }
 
 export function filterPreviewImportableNodes(input: BuildSubscriptionPreviewInput): ProxyNode[] {
@@ -84,6 +90,7 @@ function previewItem(
     action,
     reason,
     matchedKeywords,
+    deletesExisting: action === "skip_filtered" && Boolean(existingNode),
     ...(existingNode?.assignedPort ? { existingAssignedPort: existingNode.assignedPort } : {})
   };
 }

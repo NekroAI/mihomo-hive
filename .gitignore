@@ -18,3 +18,8 @@ apps/web/dist/
 coverage/
 playwright-report/
 test-results/
+
+# 本地参考文档：含真实密钥/cookie/服务器信息，绝不入库
+/Sub2API*.md
+/notes/
+

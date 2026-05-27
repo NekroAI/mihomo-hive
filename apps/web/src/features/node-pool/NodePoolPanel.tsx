@@ -74,10 +74,10 @@ export function NodePoolPanel(props: {
               variant="secondary"
               icon={<DownloadCloud size={16} />}
               loading={props.importing}
-              disabled={!props.preview || props.preview.summary.importable === 0}
+              disabled={!props.preview || (props.preview.summary.importable === 0 && props.preview.summary.deletedByFilter === 0)}
               onClick={props.onApplyImport}
             >
-              导入预览结果
+              重新导入
             </Button>
           </div>
           {keywordList.length > 0 ? <p className="muted small">将排除：{keywordList.join("、")}</p> : null}
@@ -91,8 +91,14 @@ export function NodePoolPanel(props: {
           ) : (
             props.subscriptions.map((source) => (
               <div key={source.id} className="subscription-row-card">
-                <button
-                  type="button"
+                <div className="subscription-row-main">
+                  <strong>{source.name}</strong>
+                  <span>{source.fetched ? `${source.lastContentBytes ?? 0} bytes` : "已保存"}</span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<RefreshCw size={14} />}
                   onClick={() =>
                     props.onPreviewImport({
                       id: source.id,
@@ -102,9 +108,8 @@ export function NodePoolPanel(props: {
                     })
                   }
                 >
-                  <strong>{source.name}</strong>
-                  <span>{source.fetched ? `${source.lastContentBytes ?? 0} bytes` : "点击更新预览"}</span>
-                </button>
+                  重新导入
+                </Button>
                 <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} onClick={() => props.onDeleteSubscription(source.id)}>
                   删除
                 </Button>
@@ -154,7 +159,7 @@ function ImportPreviewDialog(props: { preview: SubscriptionImportPreview; onClos
         <h2>订阅导入预览</h2>
         <p>
           共解析 {props.preview.summary.total} 个节点，可导入/更新 {props.preview.summary.importable} 个，过滤{" "}
-          {props.preview.summary.filtered} 个，重复 {props.preview.summary.duplicates} 个。
+          {props.preview.summary.filtered} 个，其中会从现有节点池删除 {props.preview.summary.deletedByFilter} 个，重复 {props.preview.summary.duplicates} 个。
         </p>
         <div className="preview-table-wrap">
           <table className="preview-table">
@@ -182,7 +187,9 @@ function ImportPreviewDialog(props: { preview: SubscriptionImportPreview; onClos
         </div>
         <footer>
           <Button variant="secondary" onClick={props.onClose}>取消</Button>
-          <Button disabled={props.preview.summary.importable === 0} onClick={props.onApply}>导入这些节点</Button>
+          <Button disabled={props.preview.summary.importable === 0 && props.preview.summary.deletedByFilter === 0} onClick={props.onApply}>
+            重新导入这些节点
+          </Button>
         </footer>
       </section>
     </div>
@@ -221,7 +228,7 @@ function PreviewAction(props: { action: SubscriptionImportPreview["items"][numbe
     update: "更新",
     skip_duplicate: "重复",
     skip_existing: "已存在",
-    skip_filtered: "过滤"
+    skip_filtered: "过滤删除"
   }[props.action];
   const tone = props.action === "import" || props.action === "update" ? "success" : props.action === "skip_filtered" ? "warning" : "neutral";
   return <Badge tone={tone}>{label}</Badge>;

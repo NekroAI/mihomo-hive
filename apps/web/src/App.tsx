@@ -202,7 +202,7 @@ function Dashboard(props: { onLogout: () => void }) {
     onMutate: () => startTask(setTask, "正在导入预览结果", "只会导入预览中标记为导入或更新的节点。"),
     onSuccess: async (result) => {
       setImportPreview(undefined);
-      await finishTask(setTask, pushToast, "节点已导入候选池", `导入或更新 ${result.imported} 个节点。`);
+      await finishTask(setTask, pushToast, "节点已重新导入", `导入或更新 ${result.imported} 个节点，按过滤规则删除 ${result.deletedByFilter} 个旧节点。`);
       await refreshOperationalData();
     },
     onError: (error) => failTask(setTask, pushToast, "节点导入失败", error.message)

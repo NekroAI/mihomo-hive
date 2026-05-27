@@ -60,6 +60,7 @@ export const subscriptionImportPreviewItemSchema = z.object({
   action: z.enum(["import", "update", "skip_duplicate", "skip_existing", "skip_filtered"]),
   reason: z.string().min(1),
   matchedKeywords: z.array(z.string()).default([]),
+  deletesExisting: z.boolean().default(false),
   existingAssignedPort: z.number().int().min(1).max(65535).optional()
 });
 
@@ -80,7 +81,8 @@ export const subscriptionImportPreviewSchema = z.object({
     updates: z.number().int().nonnegative(),
     duplicates: z.number().int().nonnegative(),
     existing: z.number().int().nonnegative(),
-    filtered: z.number().int().nonnegative()
+    filtered: z.number().int().nonnegative(),
+    deletedByFilter: z.number().int().nonnegative()
   })
 });
 

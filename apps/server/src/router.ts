@@ -11,6 +11,7 @@ import {
   createSub2ApiClient,
   enumeratePorts,
   filterPreviewImportableNodes,
+  filteredExistingNodeHashes,
   findOccupiedPorts,
   groupAssignmentChangesByProxy,
   mapLocalNodesToSub2ApiProxies,
@@ -150,8 +151,15 @@ export const appRouter = t.router({
           lifecycleStatus: "candidate" as const,
           schedulable: false
         }));
+        const deleteHashes = filteredExistingNodeHashes({
+          source: filteredSource,
+          content,
+          existingNodes: ctx.repo.listNodes(),
+          excludeKeywords: filteredSource.excludeKeywords
+        });
+        const deletedByFilter = ctx.repo.deleteNodes(deleteHashes);
         ctx.repo.upsertNodes(nodes);
-        return { imported: nodes.length, sourceId: filteredSource.id };
+        return { imported: nodes.length, deletedByFilter, sourceId: filteredSource.id };
       }),
     add: protectedProcedure
       .input(z.object({ name: z.string().min(1), url: z.string().url() }))

@@ -173,7 +173,8 @@ select {
   padding: 8px;
 }
 
-.subscription-row-card > button:first-child {
+.subscription-row-card > button:first-child,
+.subscription-row-main {
   display: grid;
   min-width: 0;
   flex: 1;

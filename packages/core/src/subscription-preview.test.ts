@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSubscription } from "./subscription.js";
-import { buildSubscriptionImportPreview, filterPreviewImportableNodes } from "./subscription-preview.js";
+import { buildSubscriptionImportPreview, filteredExistingNodeHashes, filterPreviewImportableNodes } from "./subscription-preview.js";
 
 describe("buildSubscriptionImportPreview", () => {
   it("classifies importable, filtered, duplicate and existing nodes before import", () => {
@@ -47,5 +47,34 @@ proxies:
       existingNodes: existing,
       excludeKeywords: ["BadNode"]
     })).toHaveLength(1);
+  });
+
+  it("marks filtered existing nodes for deletion during re-import", () => {
+    const content = `
+proxies:
+  - name: Hong Kong 01
+    type: vless
+    server: hk.example.com
+    port: 443
+`;
+    const existing = parseSubscription(content, "source-1").map((node) => ({
+      ...node,
+      lifecycleStatus: "schedulable" as const,
+      schedulable: true
+    }));
+    const preview = buildSubscriptionImportPreview({
+      source: { id: "source-1", name: "primary", kind: "url", value: "https://example.com/sub" },
+      content,
+      existingNodes: existing,
+      excludeKeywords: ["Hong Kong"]
+    });
+
+    expect(preview.summary.deletedByFilter).toBe(1);
+    expect(filteredExistingNodeHashes({
+      source: { id: "source-1", name: "primary", kind: "url", value: "https://example.com/sub" },
+      content,
+      existingNodes: existing,
+      excludeKeywords: ["Hong Kong"]
+    })).toEqual([existing[0]?.hash]);
   });
 });
