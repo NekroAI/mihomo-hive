@@ -118,6 +118,8 @@ export function startReconcileScheduler(input: {
       writeBackNodeIntents(repo, result.nodeIntents, localNodes);
       // 退役计时：长期 evicted 节点 → lifecycleStatus = retired
       retireOldEvicted(repo, spec, startedAt);
+      // 每 24h 清理一次过老 tick，避免表无限膨胀
+      maybePruneTicks(repo, startedAt);
 
       const tickResult: ReconcileSkippedReason = errorMessage
         ? "applied" // 即便错也算 applied（部分），让 errorMessage 解释
@@ -350,6 +352,18 @@ function msToTimeRange(ms: number): string {
   if (minutes < 60) return `${Math.max(1, minutes)}m`;
   const hours = Math.round(ms / 3_600_000);
   return `${Math.max(1, hours)}h`;
+}
+
+// 每个 scheduler 实例独立计数；进程重启即重置（也会立刻清理一次，副作用可接受）。
+let lastPruneAtMs = 0;
+function maybePruneTicks(repo: HiveRepository, now: Date): void {
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  if (now.getTime() - lastPruneAtMs < ONE_DAY) return;
+  const deleted = repo.pruneReconcileTicks(7);
+  lastPruneAtMs = now.getTime();
+  if (deleted > 0) {
+    console.log(`pruned ${deleted} reconcile tick(s) older than 7 days`);
+  }
 }
 
 /**
