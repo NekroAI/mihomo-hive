@@ -49,3 +49,135 @@ export const sub2ApiExportPreviewSchema = z.object({
 });
 
 export type Sub2ApiExportPreview = z.infer<typeof sub2ApiExportPreviewSchema>;
+
+export const sub2ApiConnectionConfigSchema = z.object({
+  baseUrl: z.string().url(),
+  adminApiKey: z.string().min(1),
+  timezone: z.string().min(1).default("Asia/Shanghai")
+});
+
+export type Sub2ApiConnectionConfig = z.infer<typeof sub2ApiConnectionConfigSchema>;
+
+export const sub2ApiSafeConnectionConfigSchema = z.object({
+  configured: z.boolean(),
+  baseUrl: z.string().url().optional(),
+  timezone: z.string().min(1).optional(),
+  apiKeyConfigured: z.boolean()
+});
+
+export type Sub2ApiSafeConnectionConfig = z.infer<typeof sub2ApiSafeConnectionConfigSchema>;
+
+export const sub2ApiProxyRecordSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().min(1),
+  protocol: z.string().min(1),
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  username: z.string().optional().nullable(),
+  password: z.string().optional().nullable(),
+  status: z.string().min(1),
+  account_count: z.number().int().nonnegative().optional(),
+  country: z.string().optional().nullable(),
+  country_code: z.string().optional().nullable(),
+  region: z.string().optional().nullable(),
+  city: z.string().optional().nullable()
+});
+
+export type Sub2ApiProxyRecord = z.infer<typeof sub2ApiProxyRecordSchema>;
+
+export const sub2ApiAccountRecordSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string().min(1),
+  platform: z.string().optional().nullable(),
+  type: z.string().optional().nullable(),
+  status: z.string().optional().nullable(),
+  group_ids: z.array(z.number().int()).optional(),
+  proxy_id: z.number().int().positive().optional().nullable(),
+  proxy: sub2ApiProxyRecordSchema.partial().optional().nullable(),
+  email: z.string().optional().nullable()
+});
+
+export type Sub2ApiAccountRecord = z.infer<typeof sub2ApiAccountRecordSchema>;
+
+export const sub2ApiAccountFiltersSchema = z.object({
+  platform: z.string().default("openai"),
+  type: z.string().default(""),
+  status: z.string().default("active"),
+  privacyMode: z.string().default(""),
+  group: z.string().default(""),
+  search: z.string().default("")
+});
+
+export type Sub2ApiAccountFilters = z.infer<typeof sub2ApiAccountFiltersSchema>;
+
+export const sub2ApiProtectedProxyRuleSchema = z.object({
+  proxyIds: z.array(z.number().int().positive()).default([]),
+  nameIncludes: z.string().default(""),
+  hostIncludes: z.string().default(""),
+  port: z.number().int().min(1).max(65535).optional(),
+  countryIncludes: z.string().default(""),
+  regionIncludes: z.string().default(""),
+  status: z.string().default("")
+});
+
+export type Sub2ApiProtectedProxyRule = z.infer<typeof sub2ApiProtectedProxyRuleSchema>;
+
+export const sub2ApiAssignmentOptionsSchema = z.object({
+  filters: sub2ApiAccountFiltersSchema.default({}),
+  protectedRule: sub2ApiProtectedProxyRuleSchema.default({}),
+  overwriteExisting: z.boolean().default(false)
+});
+
+export type Sub2ApiAssignmentOptions = z.infer<typeof sub2ApiAssignmentOptionsSchema>;
+
+export const sub2ApiAssignmentChangeSchema = z.object({
+  accountId: z.number().int().positive(),
+  accountName: z.string().min(1),
+  oldProxyId: z.number().int().positive().nullable(),
+  oldProxyName: z.string().nullable(),
+  newProxyId: z.number().int().positive(),
+  newProxyName: z.string().min(1),
+  reason: z.enum(["missing_proxy", "invalid_proxy", "overwrite"])
+});
+
+export type Sub2ApiAssignmentChange = z.infer<typeof sub2ApiAssignmentChangeSchema>;
+
+export const sub2ApiAssignmentPreviewSchema = z.object({
+  options: sub2ApiAssignmentOptionsSchema,
+  summary: z.object({
+    accounts: z.number().int().nonnegative(),
+    proxies: z.number().int().nonnegative(),
+    protectedProxies: z.number().int().nonnegative(),
+    assignableProxies: z.number().int().nonnegative(),
+    protectedAccounts: z.number().int().nonnegative(),
+    unchangedAccounts: z.number().int().nonnegative(),
+    changedAccounts: z.number().int().nonnegative(),
+    batches: z.number().int().nonnegative()
+  }),
+  protectedProxies: z.array(sub2ApiProxyRecordSchema),
+  assignableProxies: z.array(sub2ApiProxyRecordSchema),
+  protectedAccounts: z.array(sub2ApiAccountRecordSchema),
+  unchangedAccounts: z.array(sub2ApiAccountRecordSchema),
+  changes: z.array(sub2ApiAssignmentChangeSchema),
+  errors: z.array(z.string())
+});
+
+export type Sub2ApiAssignmentPreview = z.infer<typeof sub2ApiAssignmentPreviewSchema>;
+
+export const sub2ApiAssignmentApplyResultSchema = z.object({
+  preview: sub2ApiAssignmentPreviewSchema,
+  success: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  successIds: z.array(z.number().int().positive()),
+  failedIds: z.array(z.number().int().positive()),
+  results: z.array(
+    z.object({
+      accountId: z.number().int().positive(),
+      proxyId: z.number().int().positive(),
+      success: z.boolean(),
+      message: z.string().optional()
+    })
+  )
+});
+
+export type Sub2ApiAssignmentApplyResult = z.infer<typeof sub2ApiAssignmentApplyResultSchema>;

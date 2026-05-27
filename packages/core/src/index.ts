@@ -4,4 +4,6 @@ export * from "./filter.js";
 export * from "./mihomo-render.js";
 export * from "./node-test.js";
 export * from "./ports.js";
+export * from "./sub2api-assignment.js";
+export * from "./sub2api-client.js";
 export * from "./subscription.js";

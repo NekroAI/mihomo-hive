@@ -5,13 +5,16 @@ import { randomUUID } from "node:crypto";
 import { Command } from "commander";
 import {
   assignStablePorts,
+  createSub2ApiClient,
   enumeratePorts,
   findOccupiedPorts,
+  groupAssignmentChangesByProxy,
   hashPassword,
   loadRuntimeConfig,
   mapWithConcurrency,
   parsePortRange,
   parseSubscription,
+  planSub2ApiAssignments,
   renderMihomoConfig,
   resolveProxyTestTargets,
   resolveConfigPath,
@@ -21,8 +24,8 @@ import {
 import { openSqlite, HiveRepository } from "@mihomo-hive/db";
 import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
-import { defaultRuntimeConfig, parseRuntimeConfig } from "@mihomo-hive/schemas";
-import type { SubscriptionSource } from "@mihomo-hive/schemas";
+import { defaultRuntimeConfig, parseRuntimeConfig, sub2ApiAccountFiltersSchema, sub2ApiProtectedProxyRuleSchema } from "@mihomo-hive/schemas";
+import type { Sub2ApiAssignmentOptions, SubscriptionSource } from "@mihomo-hive/schemas";
 
 const program = new Command();
 
@@ -259,6 +262,83 @@ exportCommand
     console.log(`Exported ${payload.proxies.length} proxies to ${options.output}`);
   });
 
+const sub2api = program.command("sub2api").description("Manage Sub2API integration");
+
+sub2api
+  .command("config")
+  .description("Save Sub2API URL and admin API key")
+  .requiredOption("--base-url <url>", "Sub2API base URL")
+  .requiredOption("--api-key <key>", "Sub2API admin API key")
+  .option("--timezone <timezone>", "Sub2API timezone", "Asia/Shanghai")
+  .action(async (options) => {
+    const { repo } = await openRepo();
+    repo.setSub2ApiConnection({
+      baseUrl: options.baseUrl,
+      adminApiKey: options.apiKey,
+      timezone: options.timezone
+    });
+    console.log(JSON.stringify(repo.getSafeSub2ApiConnection(), null, 2));
+  });
+
+sub2api
+  .command("test")
+  .description("Test Sub2API connection")
+  .action(async () => {
+    const client = createStoredSub2ApiClient((await openRepo()).repo);
+    console.log(JSON.stringify(await client.testConnection(), null, 2));
+  });
+
+sub2api
+  .command("preview")
+  .description("Preview account to proxy assignment")
+  .option("--platform <platform>", "Account platform", "openai")
+  .option("--status <status>", "Account status", "active")
+  .option("--type <type>", "Account type", "")
+  .option("--group <group>", "Account group", "")
+  .option("--search <search>", "Account search", "")
+  .option("--protect-proxy-ids <ids>", "Comma-separated protected Sub2API proxy IDs", "")
+  .option("--protect-name <text>", "Protect proxies whose name contains text", "")
+  .option("--overwrite-existing", "Reassign non-protected accounts even when they already have an assignable proxy")
+  .action(async (options) => {
+    const { repo } = await openRepo();
+    const preview = await previewSub2ApiAssignments(repo, buildSub2ApiAssignmentOptions(options));
+    console.log(JSON.stringify(preview, null, 2));
+  });
+
+sub2api
+  .command("apply")
+  .description("Apply account to proxy assignment through Sub2API bulk-update")
+  .option("--platform <platform>", "Account platform", "openai")
+  .option("--status <status>", "Account status", "active")
+  .option("--type <type>", "Account type", "")
+  .option("--group <group>", "Account group", "")
+  .option("--search <search>", "Account search", "")
+  .option("--protect-proxy-ids <ids>", "Comma-separated protected Sub2API proxy IDs", "")
+  .option("--protect-name <text>", "Protect proxies whose name contains text", "")
+  .option("--overwrite-existing", "Reassign non-protected accounts even when they already have an assignable proxy")
+  .action(async (options) => {
+    const { repo } = await openRepo();
+    const assignment = buildSub2ApiAssignmentOptions(options);
+    const preview = await previewSub2ApiAssignments(repo, assignment);
+    if (preview.errors.length > 0) {
+      throw new Error(preview.errors.join("；"));
+    }
+    const client = createStoredSub2ApiClient(repo);
+    let success = 0;
+    let failed = 0;
+    const successIds: number[] = [];
+    const failedIds: number[] = [];
+    for (const batch of groupAssignmentChangesByProxy(preview.changes)) {
+      const result = await client.bulkUpdateProxy(batch.accountIds, batch.proxyId);
+      success += result.success;
+      failed += result.failed;
+      successIds.push(...result.successIds);
+      failedIds.push(...result.failedIds);
+      console.log(`Updated proxy ${batch.proxyId}: success=${result.success}, failed=${result.failed}`);
+    }
+    console.log(JSON.stringify({ changed: preview.changes.length, success, failed, successIds, failedIds }, null, 2));
+  });
+
 program.parseAsync().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
@@ -272,6 +352,54 @@ async function openRepo() {
     sqlite,
     repo: new HiveRepository(sqlite, { subscriptionUserAgent: config.subscriptionUserAgent })
   };
+}
+
+function createStoredSub2ApiClient(repo: HiveRepository) {
+  const connection = repo.getSub2ApiConnection();
+  if (!connection) {
+    throw new Error("请先运行 hive sub2api config 配置 Sub2API。");
+  }
+  return createSub2ApiClient(connection);
+}
+
+async function previewSub2ApiAssignments(repo: HiveRepository, options: Sub2ApiAssignmentOptions) {
+  const client = createStoredSub2ApiClient(repo);
+  const [proxies, accounts] = await Promise.all([
+    client.listAllProxies(),
+    client.listAllAccounts(options.filters)
+  ]);
+  return planSub2ApiAssignments({ proxies, accounts, options });
+}
+
+function buildSub2ApiAssignmentOptions(options: Record<string, unknown>): Sub2ApiAssignmentOptions {
+  return {
+    filters: sub2ApiAccountFiltersSchema.parse({
+      platform: options.platform,
+      status: options.status,
+      type: options.type,
+      group: options.group,
+      search: options.search
+    }),
+    protectedRule: sub2ApiProtectedProxyRuleSchema.parse({
+      proxyIds: parseIdList(String(options.protectProxyIds ?? "")),
+      nameIncludes: String(options.protectName ?? "")
+    }),
+    overwriteExisting: Boolean(options.overwriteExisting)
+  };
+}
+
+function parseIdList(value: string): number[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const id = Number(item);
+      if (!Number.isInteger(id) || id <= 0) {
+        throw new Error(`Invalid proxy id: ${item}`);
+      }
+      return id;
+    });
 }
 
 async function writeGenerated(path: string, content: string): Promise<void> {

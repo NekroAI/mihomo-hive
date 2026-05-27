@@ -6,10 +6,13 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import {
   assignStablePorts,
+  createSub2ApiClient,
   enumeratePorts,
   findOccupiedPorts,
+  groupAssignmentChangesByProxy,
   parsePortRange,
   parseSubscription,
+  planSub2ApiAssignments,
   renderMihomoConfig,
   mapWithConcurrency,
   resolveProxyTestTargets,
@@ -17,7 +20,14 @@ import {
 } from "@mihomo-hive/core";
 import { exportSub2Api, previewSub2ApiExport } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
-import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
+import {
+  sub2ApiAccountFiltersSchema,
+  sub2ApiAssignmentApplyResultSchema,
+  sub2ApiAssignmentOptionsSchema,
+  sub2ApiConnectionConfigSchema,
+  sub2ApiExportRequestSchema,
+  sub2ApiProtectedProxyRuleSchema
+} from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import type { RuntimeConfig, SubscriptionSource } from "@mihomo-hive/schemas";
 
@@ -178,6 +188,101 @@ export const appRouter = t.router({
         await writeGenerated(output, `${JSON.stringify(payload, null, 2)}\n`);
         return { output, proxies: payload.proxies.length };
       })
+  }),
+  sub2api: t.router({
+    config: t.router({
+      get: protectedProcedure.query(({ ctx }) => ctx.repo.getSafeSub2ApiConnection()),
+      save: protectedProcedure
+        .input(
+          sub2ApiConnectionConfigSchema.extend({
+            adminApiKey: z.string().optional()
+          })
+        )
+        .mutation(({ ctx, input }) => {
+        const current = ctx.repo.getSub2ApiConnection();
+        if (!input.adminApiKey && !current?.adminApiKey) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "请填写 Sub2API 管理员 API Key。" });
+        }
+        ctx.repo.setSub2ApiConnection({
+          ...input,
+          adminApiKey: input.adminApiKey || current?.adminApiKey || ""
+        });
+        return ctx.repo.getSafeSub2ApiConnection();
+      }),
+      test: protectedProcedure.mutation(async ({ ctx }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        return client.testConnection();
+      })
+    }),
+    proxies: t.router({
+      list: protectedProcedure.query(async ({ ctx }) => createConfiguredSub2ApiClient(ctx.repo).listAllProxies()),
+      saveProtectedRule: protectedProcedure.input(sub2ApiProtectedProxyRuleSchema).mutation(({ ctx, input }) => {
+        ctx.repo.setSub2ApiProtectedRule(input);
+        return ctx.repo.getSub2ApiProtectedRule();
+      }),
+      protectedRule: protectedProcedure.query(({ ctx }) => ctx.repo.getSub2ApiProtectedRule())
+    }),
+    accounts: t.router({
+      list: protectedProcedure
+        .input(sub2ApiAccountFiltersSchema.optional())
+        .query(async ({ ctx, input }) =>
+          createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(sub2ApiAccountFiltersSchema.parse(input ?? {}))
+        )
+    }),
+    assign: t.router({
+      preview: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).query(async ({ ctx, input }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        const [proxies, accounts] = await Promise.all([
+          client.listAllProxies(),
+          client.listAllAccounts(input.filters)
+        ]);
+        return planSub2ApiAssignments({ proxies, accounts, options: input });
+      }),
+      applyChanges: protectedProcedure.input(sub2ApiAssignmentOptionsSchema).mutation(async ({ ctx, input }) => {
+        const client = createConfiguredSub2ApiClient(ctx.repo);
+        const [proxies, accounts] = await Promise.all([
+          client.listAllProxies(),
+          client.listAllAccounts(input.filters)
+        ]);
+        const preview = planSub2ApiAssignments({ proxies, accounts, options: input });
+        if (preview.errors.length > 0) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: preview.errors.join("；") });
+        }
+
+        const results = [];
+        const successIds: number[] = [];
+        const failedIds: number[] = [];
+        for (const batch of groupAssignmentChangesByProxy(preview.changes)) {
+          const result = await client.bulkUpdateProxy(batch.accountIds, batch.proxyId);
+          successIds.push(...result.successIds);
+          failedIds.push(...result.failedIds);
+          for (const item of result.results) {
+            results.push({ ...item, proxyId: batch.proxyId });
+          }
+          for (const id of result.successIds) {
+            if (!results.some((item) => item.accountId === id)) {
+              results.push({ accountId: id, proxyId: batch.proxyId, success: true });
+            }
+          }
+          for (const id of result.failedIds) {
+            if (!results.some((item) => item.accountId === id)) {
+              results.push({ accountId: id, proxyId: batch.proxyId, success: false });
+            }
+          }
+        }
+
+        const finalSuccessIds = Array.from(new Set([...successIds, ...results.filter((item) => item.success).map((item) => item.accountId)]));
+        const finalFailedIds = Array.from(new Set([...failedIds, ...results.filter((item) => !item.success).map((item) => item.accountId)]));
+        return sub2ApiAssignmentApplyResultSchema.parse({
+          preview,
+          success: finalSuccessIds.length,
+          failed: finalFailedIds.length,
+          successIds: finalSuccessIds,
+          failedIds: finalFailedIds,
+          results
+        });
+      })
+    })
   })
 });
 
@@ -206,4 +311,12 @@ function redactUrl(value: string): string {
 async function writeGenerated(path: string, content: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
+}
+
+function createConfiguredSub2ApiClient(repo: HiveRepository) {
+  const connection = repo.getSub2ApiConnection();
+  if (!connection) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "请先配置 Sub2API 地址和管理员 API Key。" });
+  }
+  return createSub2ApiClient(connection);
 }

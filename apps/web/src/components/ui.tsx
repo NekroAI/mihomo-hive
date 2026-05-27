@@ -51,11 +51,13 @@ export function TextInput(props: {
   placeholder?: string | undefined;
   type?: string | undefined;
   mono?: boolean | undefined;
+  disabled?: boolean | undefined;
 }) {
   const input = (
     <input
       className={`text-input ${props.mono ? "font-mono" : ""}`}
       value={props.value}
+      disabled={props.disabled}
       onChange={(event) => props.onChange(event.target.value)}
       placeholder={props.placeholder}
       type={props.type ?? "text"}
@@ -77,10 +79,11 @@ export function SelectInput(props: {
   value: string;
   onChange: (value: string) => void;
   options: Array<{ label: string; value: string }>;
+  disabled?: boolean | undefined;
 }) {
   const select = (
     <span className="select-wrap">
-      <select className="select-input" value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+      <select className="select-input" value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)}>
         {props.options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}

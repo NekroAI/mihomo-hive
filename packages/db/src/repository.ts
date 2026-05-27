@@ -1,5 +1,12 @@
 import { readFile } from "node:fs/promises";
-import type { ProxyNode, SubscriptionSource } from "@mihomo-hive/schemas";
+import { sub2ApiConnectionConfigSchema, sub2ApiProtectedProxyRuleSchema } from "@mihomo-hive/schemas";
+import type {
+  ProxyNode,
+  Sub2ApiConnectionConfig,
+  Sub2ApiProtectedProxyRule,
+  Sub2ApiSafeConnectionConfig,
+  SubscriptionSource
+} from "@mihomo-hive/schemas";
 import type { HiveSqlite } from "./client.js";
 
 interface PasswordHash {
@@ -44,6 +51,8 @@ interface AuthSessionRow {
 }
 
 const authPasswordSettingKey = "auth.password";
+const sub2ApiConnectionSettingKey = "sub2api.connection";
+const sub2ApiProtectedRuleSettingKey = "sub2api.protectedRule";
 
 export class HiveRepository {
   constructor(
@@ -251,6 +260,55 @@ export class HiveRepository {
 
   deleteExpiredSessions(): void {
     this.sqlite.prepare("DELETE FROM auth_sessions WHERE expires_at <= ?").run(new Date().toISOString());
+  }
+
+  getSub2ApiConnection(): Sub2ApiConnectionConfig | undefined {
+    const row = this.sqlite
+      .prepare("SELECT value_json FROM settings WHERE key = ?")
+      .get(sub2ApiConnectionSettingKey) as { value_json: string } | undefined;
+    return row ? sub2ApiConnectionConfigSchema.parse(JSON.parse(row.value_json)) : undefined;
+  }
+
+  getSafeSub2ApiConnection(): Sub2ApiSafeConnectionConfig {
+    const connection = this.getSub2ApiConnection();
+    return {
+      configured: Boolean(connection),
+      ...(connection ? { baseUrl: connection.baseUrl, timezone: connection.timezone } : {}),
+      apiKeyConfigured: Boolean(connection?.adminApiKey)
+    };
+  }
+
+  setSub2ApiConnection(config: Sub2ApiConnectionConfig): void {
+    const parsed = sub2ApiConnectionConfigSchema.parse(config);
+    this.sqlite
+      .prepare(
+        `
+        INSERT INTO settings (key, value_json)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+      `
+      )
+      .run(sub2ApiConnectionSettingKey, JSON.stringify(parsed));
+  }
+
+  getSub2ApiProtectedRule(): Sub2ApiProtectedProxyRule {
+    const row = this.sqlite
+      .prepare("SELECT value_json FROM settings WHERE key = ?")
+      .get(sub2ApiProtectedRuleSettingKey) as { value_json: string } | undefined;
+    return sub2ApiProtectedProxyRuleSchema.parse(row ? JSON.parse(row.value_json) : {});
+  }
+
+  setSub2ApiProtectedRule(rule: Sub2ApiProtectedProxyRule): void {
+    const parsed = sub2ApiProtectedProxyRuleSchema.parse(rule);
+    this.sqlite
+      .prepare(
+        `
+        INSERT INTO settings (key, value_json)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+      `
+      )
+      .run(sub2ApiProtectedRuleSettingKey, JSON.stringify(parsed));
   }
 }
 

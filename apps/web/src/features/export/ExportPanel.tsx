@@ -11,6 +11,7 @@ export function ExportPanel(props: {
   loading: boolean;
   writing: boolean;
   downloading: boolean;
+  children?: React.ReactNode;
   onHostChange: (host: string) => void;
   onFilenameChange: (filename: string) => void;
   onDownload: () => void;
@@ -96,6 +97,7 @@ export function ExportPanel(props: {
           </div>
         </div>
       </Panel>
+      {props.children}
     </aside>
   );
 }

@@ -7,9 +7,11 @@ import { NodeTable } from "./features/nodes/NodeTable.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
 import { PipelinePanel, type TaskFeedback } from "./features/pipeline/PipelinePanel.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
+import { Sub2ApiPanel } from "./features/sub2api/Sub2ApiPanel.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
+import type { Sub2ApiAccountFilters, Sub2ApiProtectedProxyRule } from "@mihomo-hive/schemas";
 
 export function AppRoot() {
   return (
@@ -58,12 +60,34 @@ function Dashboard(props: { onLogout: () => void }) {
   const runtimeStatus = trpc.runtime.status.useQuery(undefined, { refetchInterval: 5000 });
   const subscriptions = trpc.subscriptions.list.useQuery();
   const nodes = trpc.nodes.list.useQuery();
+  const sub2apiConfig = trpc.sub2api.config.get.useQuery();
+  const sub2apiProtectedRule = trpc.sub2api.proxies.protectedRule.useQuery();
 
   const [subscriptionName, setSubscriptionName] = React.useState("");
   const [subscriptionUrl, setSubscriptionUrl] = React.useState("");
   const [portRange, setPortRange] = React.useState("10001-10300");
   const [exportHost, setExportHost] = React.useState("127.0.0.1");
   const [exportFilename, setExportFilename] = React.useState("sub2api-proxies.json");
+  const [sub2apiBaseUrl, setSub2apiBaseUrl] = React.useState("");
+  const [sub2apiApiKey, setSub2apiApiKey] = React.useState("");
+  const [sub2apiTimezone, setSub2apiTimezone] = React.useState("Asia/Shanghai");
+  const [sub2apiFilters, setSub2apiFilters] = useLocalStorageState<Sub2ApiAccountFilters>("mihomo-hive.sub2api-filters", {
+    platform: "openai",
+    type: "",
+    status: "active",
+    privacyMode: "",
+    group: "",
+    search: ""
+  });
+  const [sub2apiProtected, setSub2apiProtected] = useLocalStorageState<Sub2ApiProtectedProxyRule>("mihomo-hive.sub2api-protected", {
+    proxyIds: [],
+    nameIncludes: "",
+    hostIncludes: "",
+    countryIncludes: "",
+    regionIncludes: "",
+    status: ""
+  });
+  const [sub2apiOverwrite, setSub2apiOverwrite] = React.useState(false);
   const [filters, setFilters] = useLocalStorageState<NodeFilters>("mihomo-hive.node-filters", defaultNodeFilters);
   const [selectedHashesList, setSelectedHashesList] = useLocalStorageState<string[]>("mihomo-hive.selected-hashes", []);
   const selectedHashes = React.useMemo(() => new Set(selectedHashesList), [selectedHashesList]);
@@ -83,6 +107,19 @@ function Dashboard(props: { onLogout: () => void }) {
     }
   }, [config.data]);
 
+  React.useEffect(() => {
+    if (sub2apiConfig.data?.baseUrl) {
+      setSub2apiBaseUrl(sub2apiConfig.data.baseUrl);
+      setSub2apiTimezone(sub2apiConfig.data.timezone ?? "Asia/Shanghai");
+    }
+  }, [sub2apiConfig.data]);
+
+  React.useEffect(() => {
+    if (sub2apiProtectedRule.data) {
+      setSub2apiProtected(sub2apiProtectedRule.data);
+    }
+  }, [sub2apiProtectedRule.data, setSub2apiProtected]);
+
   const allNodes = nodes.data ?? [];
   const filteredNodes = React.useMemo(() => filterNodes(allNodes, filters), [allNodes, filters]);
   const activeCount = allNodes.filter((node) => node.status === "active").length;
@@ -101,13 +138,28 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     { enabled: selectedHashesList.length > 0 }
   );
+  const sub2apiProxies = trpc.sub2api.proxies.list.useQuery(undefined, {
+    enabled: Boolean(sub2apiConfig.data?.configured)
+  });
+  const sub2apiPreview = trpc.sub2api.assign.preview.useQuery(
+    {
+      filters: sub2apiFilters,
+      protectedRule: sub2apiProtected,
+      overwriteExisting: sub2apiOverwrite
+    },
+    { enabled: Boolean(sub2apiConfig.data?.configured) }
+  );
 
   const refreshOperationalData = React.useCallback(async () => {
     await Promise.all([
       utils.subscriptions.list.invalidate(),
       utils.nodes.list.invalidate(),
       utils.runtime.status.invalidate(),
-      utils.exports.previewSub2api.invalidate()
+      utils.exports.previewSub2api.invalidate(),
+      utils.sub2api.config.get.invalidate(),
+      utils.sub2api.proxies.list.invalidate(),
+      utils.sub2api.proxies.protectedRule.invalidate(),
+      utils.sub2api.assign.preview.invalidate()
     ]);
   }, [utils]);
 
@@ -199,6 +251,39 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "Sub2API 写入失败", error.message)
   });
+  const saveSub2apiConfig = trpc.sub2api.config.save.useMutation({
+    onMutate: () => startTask(setTask, "正在保存 Sub2API 配置", "API Key 只会保存在服务端，不会回显到前端。"),
+    onSuccess: async () => {
+      setSub2apiApiKey("");
+      await finishTask(setTask, pushToast, "Sub2API 配置已保存", "可以继续测试连接并拉取代理与账号。");
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Sub2API 配置保存失败", error.message)
+  });
+  const testSub2apiConnection = trpc.sub2api.config.test.useMutation({
+    onMutate: () => startTask(setTask, "正在测试 Sub2API 连接", "使用 x-api-key 拉取代理与账号摘要。"),
+    onSuccess: async (result) => {
+      await finishTask(setTask, pushToast, "Sub2API 连接正常", `代理 ${result.proxies} 个，账号 ${result.accounts} 个。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Sub2API 连接失败", error.message)
+  });
+  const saveProtectedRule = trpc.sub2api.proxies.saveProtectedRule.useMutation({
+    onError: (error) => pushToast("danger", "保护节点保存失败", error.message)
+  });
+  const applySub2apiAssignments = trpc.sub2api.assign.applyChanges.useMutation({
+    onMutate: () => startTask(setTask, "正在应用 Sub2API 绑定", "服务端会重新拉取账号和代理并执行批量更新。"),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "Sub2API 绑定已应用",
+        `成功 ${result.success} 个，失败 ${result.failed} 个，保护 ${result.preview.summary.protectedAccounts} 个账号。`
+      );
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "Sub2API 绑定失败", error.message)
+  });
 
   const busy =
     addSubscription.isPending ||
@@ -211,6 +296,9 @@ function Dashboard(props: { onLogout: () => void }) {
     reloadMihomo.isPending ||
     stopMihomo.isPending ||
     writeExport.isPending ||
+    saveSub2apiConfig.isPending ||
+    testSub2apiConnection.isPending ||
+    applySub2apiAssignments.isPending ||
     downloading;
 
   function pushToast(tone: ToastMessage["tone"], title: string, detail?: string) {
@@ -225,6 +313,13 @@ function Dashboard(props: { onLogout: () => void }) {
 
   function requestConfirmation(action: ConfirmAction) {
     setConfirmAction(action);
+  }
+
+  function updateProtectedRule(rule: Sub2ApiProtectedProxyRule) {
+    setSub2apiProtected(rule);
+    if (sub2apiConfig.data?.configured) {
+      saveProtectedRule.mutate(rule);
+    }
   }
 
   async function runConfirmedAction() {
@@ -415,7 +510,55 @@ function Dashboard(props: { onLogout: () => void }) {
                 })
             })
           }
-        />
+        >
+          <Sub2ApiPanel
+            config={sub2apiConfig.data}
+            baseUrl={sub2apiBaseUrl}
+            apiKey={sub2apiApiKey}
+            timezone={sub2apiTimezone}
+            filters={sub2apiFilters}
+            protectedRule={sub2apiProtected}
+            proxies={sub2apiProxies.data ?? []}
+            preview={sub2apiPreview.data}
+            loading={sub2apiProxies.isFetching || sub2apiPreview.isFetching}
+            saving={saveSub2apiConfig.isPending}
+            testing={testSub2apiConnection.isPending}
+            applying={applySub2apiAssignments.isPending}
+            overwriteExisting={sub2apiOverwrite}
+            onBaseUrlChange={setSub2apiBaseUrl}
+            onApiKeyChange={setSub2apiApiKey}
+            onTimezoneChange={setSub2apiTimezone}
+            onFiltersChange={setSub2apiFilters}
+            onProtectedRuleChange={updateProtectedRule}
+            onOverwriteExistingChange={setSub2apiOverwrite}
+            onSaveConfig={() =>
+              saveSub2apiConfig.mutate({
+                baseUrl: sub2apiBaseUrl,
+                adminApiKey: sub2apiApiKey || undefined,
+                timezone: sub2apiTimezone || "Asia/Shanghai"
+              })
+            }
+            onTest={() => testSub2apiConnection.mutate()}
+            onRefresh={() => {
+              void sub2apiProxies.refetch();
+              void sub2apiPreview.refetch();
+            }}
+            onApply={() =>
+              requestConfirmation({
+                title: "确认应用 Sub2API 账号绑定",
+                description: `将更新 ${sub2apiPreview.data?.summary.changedAccounts ?? 0} 个账号，保护 ${sub2apiPreview.data?.summary.protectedAccounts ?? 0} 个账号。`,
+                detail: `会按目标 proxy_id 分成 ${sub2apiPreview.data?.summary.batches ?? 0} 个批次调用 Sub2API bulk-update。`,
+                confirmLabel: "应用绑定",
+                run: async () =>
+                  applySub2apiAssignments.mutate({
+                    filters: sub2apiFilters,
+                    protectedRule: sub2apiProtected,
+                    overwriteExisting: sub2apiOverwrite
+                  })
+              })
+            }
+          />
+        </ExportPanel>
       </section>
 
       <ConfirmDialog
