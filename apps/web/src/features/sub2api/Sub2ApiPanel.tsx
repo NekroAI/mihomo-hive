@@ -54,6 +54,18 @@ export function Sub2ApiPanel(props: {
   const protectedProxies = props.proxies.filter((proxy) => isProtectedProxy(proxy, props.protectedRule));
   const previewErrors = props.preview?.errors ?? [];
   const canApply = configured && props.preview && props.preview.summary.changedAccounts > 0 && previewErrors.length === 0;
+  const [proxySearch, setProxySearch] = React.useState("");
+  const filteredProxies = React.useMemo(() => {
+    const query = proxySearch.trim().toLowerCase();
+    if (!query) {
+      return props.proxies;
+    }
+    return props.proxies.filter((proxy) => {
+      const haystack = `${proxy.name} ${proxy.host} ${proxy.port} ${proxy.country ?? ""} ${proxy.region ?? ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [props.proxies, proxySearch]);
+  const visibleProxies = filteredProxies.slice(0, 120);
 
   function setFilter(key: keyof Sub2ApiAccountFilters, value: string) {
     props.onFiltersChange({ ...props.filters, [key]: value });
@@ -261,11 +273,23 @@ export function Sub2ApiPanel(props: {
             <SmallMetric label="active" value={activeProxies} />
             <SmallMetric label="保护节点" value={protectedProxies.length} />
           </div>
+          <div className="proxy-pick-controls">
+            <TextInput
+              value={proxySearch}
+              onChange={setProxySearch}
+              placeholder="搜索名称/host/国家/地区"
+            />
+            <span className="muted small">
+              显示 {visibleProxies.length} / 匹配 {filteredProxies.length} / 总 {props.proxies.length}
+            </span>
+          </div>
           <div className="proxy-pick-list">
             {props.proxies.length === 0 ? (
               <EmptyState title="还没有拉取代理" description="保存并测试 Sub2API 连接后刷新预览，系统会读取 Sub2API 中已有代理。" />
+            ) : filteredProxies.length === 0 ? (
+              <EmptyState title="没有匹配的代理" description="清空搜索框或调整关键词。" />
             ) : (
-              props.proxies.slice(0, 80).map((proxy) => (
+              visibleProxies.map((proxy) => (
                 <label key={proxy.id} className={`proxy-pick-item ${isProtectedProxy(proxy, props.protectedRule) ? "is-protected" : ""}`}>
                   <input
                     type="checkbox"
@@ -281,6 +305,9 @@ export function Sub2ApiPanel(props: {
                 </label>
               ))
             )}
+            {filteredProxies.length > visibleProxies.length ? (
+              <div className="muted small">还有 {filteredProxies.length - visibleProxies.length} 个未展示，请缩小搜索关键词。</div>
+            ) : null}
           </div>
         </section>
 
