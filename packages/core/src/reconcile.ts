@@ -12,6 +12,12 @@ import {
 import { matchesProtectedProxy } from "./sub2api-assignment.js";
 import { isManagedProxy } from "./sub2api-maintenance.js";
 
+export interface ProxyHealthSignal {
+  // 窗口内 Sub2API 上游错误条数（5xx / 429 / timeout 等）。
+  // Sub2API 没有"总请求数"接口，所以这里用绝对错误数当主信号。
+  errorsInWindow: number;
+}
+
 export interface ReconcileInput {
   now: Date;
   spec: OrchestrationSpec;
@@ -19,6 +25,8 @@ export interface ReconcileInput {
   remoteProxies: Sub2ApiProxyRecord[];
   remoteAccounts: Sub2ApiAccountRecord[];
   managedProxyPrefix: string;
+  // 健康信号（阶段 B）：按 proxy_id 聚合的滑动窗口错误统计。可选，缺省时不参与判定。
+  healthSignals?: Map<number, ProxyHealthSignal>;
 }
 
 export type ReconcileSkippedReason = "paused" | "batch_capped" | "no_change" | "applied";
@@ -42,10 +50,8 @@ interface ObservedWorld {
   protectedProxyIds: Set<number>;
   accountsByProxyId: Map<number, Sub2ApiAccountRecord[]>;
   uniqueAccounts: Sub2ApiAccountRecord[];
-  servingProxyIds: Set<number>;
-  quarantinedProxyIds: Set<number>;
-  evictedProxyIds: Set<number>;
   intakeProxyId: number | null;
+  healthSignals: Map<number, ProxyHealthSignal>;
 }
 
 interface NodeRoleDecision {
@@ -56,6 +62,10 @@ interface NodeRoleDecision {
   currentLoad: number;
   targetLoad: number;
   nextAction: string;
+  // 阶段 B 新增 — 由 decide 阶段写出，给 orchestrator 写回数据库
+  backoffUntilIso: string | null;
+  backoffAttempts: number;
+  healthScore: number | null;
 }
 
 /**
@@ -64,8 +74,8 @@ interface NodeRoleDecision {
  */
 export function reconcile(input: ReconcileInput): ReconcileResult {
   const world = observeWorld(input);
-  const decisions = decideNodeRoles(world);
-  const planned = planChanges(world, decisions);
+  const { decisions, roleSets } = decideNodeRoles(world);
+  const planned = planChanges(world, decisions, roleSets);
   const { applied, skippedReason } = gateChanges(world, planned);
 
   return {
@@ -75,6 +85,12 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     appliedChanges: applied,
     skippedReason
   };
+}
+
+interface RoleSets {
+  serving: Set<number>;
+  quarantined: Set<number>;
+  evicted: Set<number>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -107,30 +123,6 @@ function observeWorld(input: ReconcileInput): ObservedWorld {
   const intakeProxyId =
     input.spec.intake.proxyId && proxiesById.has(input.spec.intake.proxyId) ? input.spec.intake.proxyId : null;
 
-  const servingProxyIds = new Set<number>();
-  const quarantinedProxyIds = new Set<number>();
-  const evictedProxyIds = new Set<number>();
-
-  for (const proxy of proxies) {
-    if (protectedProxyIds.has(proxy.id)) continue;
-    if (proxy.id === intakeProxyId) continue;
-    if (!managedProxyIds.has(proxy.id)) continue;
-
-    const local = localByProxyId.get(proxy.id);
-    if (!local) continue; // 远端有但本地无记录 → 视为 standby，不参与调度
-
-    const backoffUntil = local.backoffUntil ? new Date(local.backoffUntil) : null;
-    const stillInBackoff = backoffUntil ? backoffUntil > input.now : false;
-
-    if (local.intentRole === "evicted") {
-      evictedProxyIds.add(proxy.id);
-    } else if (local.intentRole === "quarantined" || stillInBackoff) {
-      quarantinedProxyIds.add(proxy.id);
-    } else if (local.intentRole === "serving" || local.lifecycleStatus === "schedulable") {
-      servingProxyIds.add(proxy.id);
-    }
-  }
-
   return {
     enabled: input.spec.enabled,
     spec: input.spec,
@@ -142,62 +134,135 @@ function observeWorld(input: ReconcileInput): ObservedWorld {
     protectedProxyIds,
     accountsByProxyId,
     uniqueAccounts: dedupeAccounts(input.remoteAccounts),
-    servingProxyIds,
-    quarantinedProxyIds,
-    evictedProxyIds,
-    intakeProxyId
+    intakeProxyId,
+    healthSignals: input.healthSignals ?? new Map()
   };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Step 2 — decide
 
-function decideNodeRoles(world: ObservedWorld): NodeRoleDecision[] {
-  const servingCount = world.servingProxyIds.size;
-
+function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[]; roleSets: RoleSets } {
+  // 估算 target：用"managed 且非保护非入站非旧 evicted"作为 serving 候选数（稳定不抖动）。
+  // 节点退避不会让 target 立刻突增，下一拍 reconcile 自然收敛。
+  const candidateServingCount = countCandidateServing(world);
   const assignableAccountCount = world.uniqueAccounts.filter((account) => {
     if (account.proxy_id && world.protectedProxyIds.has(account.proxy_id)) return false;
     return true;
   }).length;
-
   const target =
     world.spec.capacity.targetPerNode === "auto"
-      ? servingCount > 0
-        ? Math.ceil(assignableAccountCount / servingCount)
+      ? candidateServingCount > 0
+        ? Math.ceil(assignableAccountCount / candidateServingCount)
         : 0
       : world.spec.capacity.targetPerNode;
 
   const decisions: NodeRoleDecision[] = [];
+  const roleSets: RoleSets = { serving: new Set(), quarantined: new Set(), evicted: new Set() };
+
   for (const proxy of world.proxies) {
     const local = world.localByProxyId.get(proxy.id);
     const currentLoad = (world.accountsByProxyId.get(proxy.id) ?? []).length;
 
     let role: NodeRoleDecision["role"] = "standby";
+    let backoffUntilIso: string | null = null;
+    let backoffAttempts = local?.backoffAttempts ?? 0;
+    let healthScore: number | null = local?.healthScore ?? null;
     let nextAction = "等待启用";
 
     if (world.protectedProxyIds.has(proxy.id)) {
       nextAction = "保护代理，不参与自动调度";
     } else if (proxy.id === world.intakeProxyId) {
-      nextAction = currentLoad > 0 ? `入站代理，下次将引流 ${currentLoad} 个账号` : "入站代理，当前无待引流账号";
-    } else if (world.evictedProxyIds.has(proxy.id)) {
-      role = "evicted";
-      nextAction = "已驱逐，等待人工恢复或退役";
-    } else if (world.quarantinedProxyIds.has(proxy.id)) {
-      role = "quarantined";
-      const until = local?.backoffUntil ? ` (退避至 ${local.backoffUntil})` : "";
-      nextAction = `退避中${until}，账号留在原地等待恢复`;
-    } else if (world.servingProxyIds.has(proxy.id)) {
-      role = "serving";
+      nextAction =
+        currentLoad > 0 ? `入站代理，下次将引流 ${currentLoad} 个账号` : "入站代理，当前无待引流账号";
+    } else if (!world.managedProxyIds.has(proxy.id) || !local) {
+      // 非托管代理或本地无对应节点 → 不参与编排
+      nextAction = "非托管代理或本地未记录，不参与编排";
+    } else {
+      // 状态机入口：根据 local 当前角色 + healthSignals 决定下一态
+      const previousRole = local.intentRole ?? (local.lifecycleStatus === "schedulable" ? "serving" : "standby");
+      const signal = world.healthSignals.get(proxy.id);
+      // 有信号即可参与判定（错误数 0 也是有效信号"窗口内无错"）
+      const haveSignal = signal !== undefined;
+      const errors = signal?.errorsInWindow ?? 0;
+      const errorOverThreshold = haveSignal && errors >= world.spec.health.errorBudgetPerWindow;
+      const backoffUntilDate = local.backoffUntil ? new Date(local.backoffUntil) : null;
+      const backoffStillActive = backoffUntilDate ? backoffUntilDate > world.nowDate : false;
+
+      if (haveSignal) {
+        // 每条错误扣 5 分，封顶 100 / 0
+        healthScore = Math.max(0, Math.min(100, 100 - errors * 5));
+      }
+
+      if (previousRole === "evicted") {
+        role = "evicted";
+        nextAction = "已驱逐，等待人工恢复或重置";
+      } else if (previousRole === "quarantined" && backoffStillActive) {
+        role = "quarantined";
+        const remaining = Math.max(0, backoffUntilDate!.getTime() - world.nowDate.getTime());
+        nextAction = `退避中，${formatRemainingMs(remaining)} 后自动重测`;
+      } else if (previousRole === "quarantined") {
+        // 退避到期，依据 health 决定恢复或加深退避
+        if (!haveSignal) {
+          role = "quarantined";
+          nextAction = "退避到期但暂无 upstream-errors 信号，再等一个周期";
+        } else if (errorOverThreshold) {
+          backoffAttempts += 1;
+          if (backoffAttempts > world.spec.health.evictAfterBackoffs) {
+            role = "evicted";
+            backoffUntilIso = null;
+            nextAction = `连续 ${backoffAttempts} 次失败，永久驱逐`;
+          } else {
+            role = "quarantined";
+            const duration = pickBackoffDuration(world.spec.health.backoffSequenceMs, backoffAttempts);
+            const newUntil = new Date(world.nowDate.getTime() + duration);
+            backoffUntilIso = newUntil.toISOString();
+            nextAction = `窗口内 ${errors} 条错误 ≥ 预算，进入第 ${backoffAttempts} 阶段退避（${formatMs(duration)}）`;
+          }
+        } else {
+          role = "serving";
+          backoffUntilIso = null;
+          nextAction = errors > 0 ? `恢复服务，窗口内仅 ${errors} 条错误` : "恢复服务";
+        }
+      } else {
+        // serving / standby promoted 检查 health
+        if (errorOverThreshold) {
+          backoffAttempts += 1;
+          if (backoffAttempts > world.spec.health.evictAfterBackoffs) {
+            role = "evicted";
+            backoffUntilIso = null;
+            nextAction = `累计失败 ${backoffAttempts} 次，永久驱逐`;
+          } else {
+            role = "quarantined";
+            const duration = pickBackoffDuration(world.spec.health.backoffSequenceMs, backoffAttempts);
+            const newUntil = new Date(world.nowDate.getTime() + duration);
+            backoffUntilIso = newUntil.toISOString();
+            nextAction = `窗口内 ${errors} 条错误超出预算 ${world.spec.health.errorBudgetPerWindow}，进入退避（${formatMs(duration)}）`;
+          }
+        } else {
+          role = "serving";
+          backoffUntilIso = null;
+        }
+      }
+    }
+
+    if (role === "serving") {
       const upper = Math.ceil(target * world.spec.capacity.overloadRatio);
       const lower = Math.floor(target * world.spec.capacity.underloadRatio);
       if (currentLoad > upper) {
         nextAction = `过载（${currentLoad} > ${upper}），下次将外迁 ${currentLoad - target} 个账号`;
       } else if (currentLoad < lower && target > 0) {
         nextAction = `欠载（${currentLoad} < ${lower}），等待新账号填入`;
+      } else if (healthScore !== null) {
+        nextAction = `承载 ${currentLoad}/${target}，健康分 ${healthScore}`;
       } else {
-        nextAction = `承载 ${currentLoad}/${target}，稳定`;
+        nextAction = `承载 ${currentLoad}/${target}`;
       }
     }
+
+    if (role === "serving") roleSets.serving.add(proxy.id);
+    else if (role === "quarantined") roleSets.quarantined.add(proxy.id);
+    else if (role === "evicted") roleSets.evicted.add(proxy.id);
 
     decisions.push({
       proxyId: proxy.id,
@@ -206,17 +271,55 @@ function decideNodeRoles(world: ObservedWorld): NodeRoleDecision[] {
       role,
       currentLoad,
       targetLoad: target,
-      nextAction
+      nextAction,
+      backoffUntilIso,
+      backoffAttempts,
+      healthScore
     });
   }
 
-  return decisions;
+  return { decisions, roleSets };
+}
+
+function countCandidateServing(world: ObservedWorld): number {
+  let count = 0;
+  for (const proxy of world.proxies) {
+    if (world.protectedProxyIds.has(proxy.id)) continue;
+    if (proxy.id === world.intakeProxyId) continue;
+    if (!world.managedProxyIds.has(proxy.id)) continue;
+    const local = world.localByProxyId.get(proxy.id);
+    if (!local) continue;
+    if (local.intentRole === "evicted") continue;
+    count += 1;
+  }
+  return count;
+}
+
+function pickBackoffDuration(sequence: number[], attempt: number): number {
+  if (sequence.length === 0) return 60_000;
+  const idx = Math.min(attempt - 1, sequence.length - 1);
+  return sequence[Math.max(0, idx)] ?? 60_000;
+}
+
+function formatMs(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 60 * 60_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
+}
+
+function formatRemainingMs(ms: number): string {
+  if (ms <= 0) return "0s";
+  return formatMs(ms);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
 // Step 3 — plan
 
-function planChanges(world: ObservedWorld, decisions: NodeRoleDecision[]): ReconcilePlannedChange[] {
+function planChanges(
+  world: ObservedWorld,
+  decisions: NodeRoleDecision[],
+  roleSets: RoleSets
+): ReconcilePlannedChange[] {
   const planned: ReconcilePlannedChange[] = [];
   const servingProxies = decisions
     .filter((d) => d.role === "serving" && !world.protectedProxyIds.has(d.proxyId))
@@ -253,8 +356,8 @@ function planChanges(world: ObservedWorld, decisions: NodeRoleDecision[]): Recon
     // 决策 #5：quarantined 期间账号留在原地（"故障路径不触发漂移"），只有 evicted/不存在 才算 dead
     const proxyAlive =
       proxyId !== null &&
-      !world.evictedProxyIds.has(proxyId) &&
-      (world.servingProxyIds.has(proxyId) || world.quarantinedProxyIds.has(proxyId));
+      !roleSets.evicted.has(proxyId) &&
+      (roleSets.serving.has(proxyId) || roleSets.quarantined.has(proxyId));
 
     if (!proxyAlive) {
       const target = pickTargetProxy(account, servingProxies, world.spec.stickiness.strategy);
@@ -406,9 +509,9 @@ function buildNodeIntents(world: ObservedWorld, decisions: NodeRoleDecision[]): 
         hash: local.hash,
         proxyId: d.proxyId,
         intentRole: d.role,
-        healthScore: local.healthScore ?? null,
-        backoffUntil: local.backoffUntil ?? null,
-        backoffAttempts: local.backoffAttempts ?? 0,
+        healthScore: d.healthScore,
+        backoffUntil: d.backoffUntilIso,
+        backoffAttempts: d.backoffAttempts,
         currentLoad: d.currentLoad,
         targetLoad: d.targetLoad,
         nextAction: d.nextAction

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   createSub2ApiClient,
   reconcile,
+  type ProxyHealthSignal,
   type ReconcileSkippedReason,
   type Sub2ApiClient
 } from "@mihomo-hive/core";
@@ -10,10 +11,12 @@ import {
   reconcileObservedSummarySchema,
   reconcileTickSchema,
   sub2ApiAccountFiltersSchema,
+  type OrchestrationSpec,
   type ProxyNode,
   type ReconcileNodeIntent,
   type ReconcileTick,
-  type RuntimeConfig
+  type RuntimeConfig,
+  type Sub2ApiAccountRecord
 } from "@mihomo-hive/schemas";
 
 // 关闭 idempotent 调度的安全句柄。
@@ -70,6 +73,10 @@ export function startReconcileScheduler(input: {
         client.listAllProxies(),
         client.listAllAccounts(sub2ApiAccountFiltersSchema.parse({ status: "" }))
       ]);
+      const healthSignals = await fetchHealthSignals(client, accounts, spec).catch((err) => {
+        console.warn("upstream-errors fetch failed; reconcile will proceed without health signals:", err);
+        return new Map<number, ProxyHealthSignal>();
+      });
       const localNodes = repo.listNodes();
 
       const result = reconcile({
@@ -78,7 +85,8 @@ export function startReconcileScheduler(input: {
         localNodes,
         remoteProxies: proxies,
         remoteAccounts: accounts,
-        managedProxyPrefix: connection.managedProxyPrefix
+        managedProxyPrefix: connection.managedProxyPrefix,
+        healthSignals
       });
 
       let executedTotal = 0;
@@ -249,14 +257,67 @@ function writeBackNodeIntents(
   if (intents.length === 0) return;
   const byHash = new Map(localNodes.map((node) => [node.hash, node]));
   const updates: ProxyNode[] = [];
+  const nowIso = new Date().toISOString();
   for (const intent of intents) {
     const node = byHash.get(intent.hash);
     if (!node) continue;
-    if (node.intentRole === intent.intentRole) continue; // 无变化跳过
+    const changed =
+      node.intentRole !== intent.intentRole ||
+      (node.backoffUntil ?? null) !== (intent.backoffUntil ?? null) ||
+      (node.backoffAttempts ?? 0) !== intent.backoffAttempts ||
+      (node.healthScore ?? null) !== intent.healthScore;
+    if (!changed) continue;
     updates.push({
       ...node,
-      intentRole: intent.intentRole
+      intentRole: intent.intentRole,
+      backoffUntil: intent.backoffUntil ?? null,
+      backoffAttempts: intent.backoffAttempts,
+      healthScore: intent.healthScore,
+      lastHealthCheck: nowIso
     });
   }
   if (updates.length > 0) repo.saveNodes(updates);
+}
+
+/**
+ * 把 Sub2API 上游错误日志聚合成"按 proxy 的窗口错误数"信号源（ADR 0003 阶段 B）。
+ *
+ * Sub2API 没有"账号总请求数"接口，所以我们用**绝对错误数**当判定信号。
+ * 错误窗口长度由 spec.health.windowMs 决定，转成 listAllUpstreamErrors 的 timeRange 字符串。
+ */
+async function fetchHealthSignals(
+  client: Sub2ApiClient,
+  accounts: Sub2ApiAccountRecord[],
+  spec: OrchestrationSpec
+): Promise<Map<number, ProxyHealthSignal>> {
+  const timeRange = msToTimeRange(spec.health.windowMs);
+  const errors = await client.listAllUpstreamErrors({ timeRange, view: "errors", phase: "upstream" });
+
+  // 当前账号 → 当前 proxy_id 映射（用现在的视角归因，不查历史绑定）
+  const accountToProxy = new Map<number, number>();
+  for (const account of accounts) {
+    if (account.proxy_id) accountToProxy.set(account.id, account.proxy_id);
+  }
+
+  const signals = new Map<number, ProxyHealthSignal>();
+  // 先把所有当前有账号绑定的 proxy 都初始化为 0 错误（让"无错"也是有效信号）
+  for (const proxyId of new Set(accountToProxy.values())) {
+    signals.set(proxyId, { errorsInWindow: 0 });
+  }
+  for (const error of errors) {
+    if (!error.account_id) continue;
+    const proxyId = accountToProxy.get(error.account_id);
+    if (!proxyId) continue;
+    const current = signals.get(proxyId) ?? { errorsInWindow: 0 };
+    signals.set(proxyId, { errorsInWindow: current.errorsInWindow + 1 });
+  }
+  return signals;
+}
+
+function msToTimeRange(ms: number): string {
+  if (ms <= 0) return "5m";
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.round(ms / 3_600_000);
+  return `${Math.max(1, hours)}h`;
 }

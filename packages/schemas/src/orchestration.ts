@@ -46,11 +46,18 @@ export const stickinessPolicySchema = z.object({
 export type StickinessPolicy = z.infer<typeof stickinessPolicySchema>;
 
 // 故障自愈策略 —— "故障能否自动调整"
+//
+// 现实约束：Sub2API 的 /ops/upstream-errors 接口只返回错误条目，没有"该账号总请求数"。
+// 因此我们用"窗口内绝对错误条数"作为判定信号，而不是错误率百分比。
+//
+//   窗口内错误数 ≥ errorBudgetPerWindow → 进入退避
+//   窗口内错误数 = 0 → 健康
+//
+// healthScore 用 max(0, 100 - errors * 5) 衰减计算（每条错误扣 5 分），仅用于 UI 展示。
 export const healthPolicySchema = z.object({
   signalSource: z.literal("upstream-errors").default("upstream-errors"),
   windowMs: z.number().int().min(60_000).default(5 * 60 * 1000),       // 5min 滑动窗口
-  errorRateThreshold: z.number().min(0).max(1).default(0.05),           // 错误率 ≥ 5% 触发退避
-  minRequestsForJudgement: z.number().int().min(1).default(10),         // 窗口内 < 10 次请求不判定
+  errorBudgetPerWindow: z.number().int().min(1).default(5),             // 5min 内 ≥5 条错误 → 退避
   backoffSequenceMs: z.array(z.number().int().min(1000))
     .min(1)
     .default([60_000, 300_000, 900_000, 3_600_000, 21_600_000]),        // 1m / 5m / 15m / 1h / 6h

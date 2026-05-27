@@ -310,27 +310,21 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel title="故障自愈">
         <p className="muted small">
-          仅依赖 Sub2API 的 upstream-errors 信号。错误率破阈值 → 进入退避（账号留在原地）；连续 N 次失败 → 永久驱逐。
+          仅依赖 Sub2API 的 upstream-errors 信号。窗口内错误条数超过预算 → 进入退避（账号留在原地）；连续 N 次失败 → 永久驱逐。
+          上游接口只返回错误条目（没有"总请求数"），所以阈值是绝对错误数而不是百分比。
         </p>
         <div className="form-grid">
           <NumberInput
-            label="错误率阈值 (%)"
-            value={Math.round(draft.health.errorRateThreshold * 100)}
-            min={0}
-            max={100}
-            onChange={(v) => patchNested("health", (c) => ({ ...c, errorRateThreshold: v / 100 }))}
+            label="错误预算 (条/窗口)"
+            value={draft.health.errorBudgetPerWindow}
+            min={1}
+            onChange={(v) => patchNested("health", (c) => ({ ...c, errorBudgetPerWindow: v }))}
           />
           <NumberInput
             label="窗口长度 (分钟)"
             value={Math.round(draft.health.windowMs / 60_000)}
             min={1}
             onChange={(v) => patchNested("health", (c) => ({ ...c, windowMs: v * 60_000 }))}
-          />
-          <NumberInput
-            label="最小请求样本量"
-            value={draft.health.minRequestsForJudgement}
-            min={1}
-            onChange={(v) => patchNested("health", (c) => ({ ...c, minRequestsForJudgement: v }))}
           />
           <NumberInput
             label="连续失败几次后永久驱逐"

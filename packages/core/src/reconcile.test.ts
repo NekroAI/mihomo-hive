@@ -283,6 +283,141 @@ describe("reconcile", () => {
   });
 });
 
+describe("reconcile health state machine", () => {
+  it("serving node with errors over budget enters quarantined + records backoff", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 100, proxy_id: 1 })];
+    const healthSignals = new Map([[1, { errorsInWindow: 8 }]]); // 8 ≥ 5 (default budget)
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX,
+      healthSignals
+    });
+    const node1 = result.nodeIntents.find((n) => n.proxyId === 1);
+    expect(node1?.intentRole).toBe("quarantined");
+    expect(node1?.backoffAttempts).toBe(1);
+    expect(node1?.backoffUntil).not.toBeNull();
+    expect(new Date(node1!.backoffUntil!).getTime()).toBeGreaterThan(NOW.getTime());
+  });
+
+  it("quarantined node with active backoff stays put even with new signal", () => {
+    const proxies = [buildProxy({ id: 1 })];
+    const localNodes = [
+      buildNode({
+        hash: "n1xxxxxx",
+        sub2apiProxyId: 1,
+        intentRole: "quarantined",
+        backoffUntil: new Date(NOW.getTime() + 5 * 60_000).toISOString(),
+        backoffAttempts: 1
+      })
+    ];
+    const accounts = [buildAccount({ id: 100, proxy_id: 1 })];
+    const healthSignals = new Map([[1, { errorsInWindow: 25 }]]); // 大量错误也无所谓
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX,
+      healthSignals
+    });
+    const node1 = result.nodeIntents.find((n) => n.proxyId === 1);
+    expect(node1?.intentRole).toBe("quarantined");
+    expect(node1?.backoffAttempts).toBe(1); // 不变
+  });
+
+  it("quarantined node with expired backoff returns to serving when no new errors", () => {
+    const proxies = [buildProxy({ id: 1 })];
+    const localNodes = [
+      buildNode({
+        hash: "n1xxxxxx",
+        sub2apiProxyId: 1,
+        intentRole: "quarantined",
+        backoffUntil: new Date(NOW.getTime() - 1_000).toISOString(),
+        backoffAttempts: 2
+      })
+    ];
+    const accounts = [buildAccount({ id: 100, proxy_id: 1 })];
+    const healthSignals = new Map([[1, { errorsInWindow: 0 }]]);
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX,
+      healthSignals
+    });
+    const node1 = result.nodeIntents.find((n) => n.proxyId === 1);
+    expect(node1?.intentRole).toBe("serving");
+    expect(node1?.backoffUntil).toBeNull();
+    expect(node1?.healthScore).toBe(100);
+  });
+
+  it("evicted when consecutive backoff attempts exceed evictAfterBackoffs", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      buildNode({
+        hash: "n1xxxxxx",
+        sub2apiProxyId: 1,
+        intentRole: "quarantined",
+        backoffUntil: new Date(NOW.getTime() - 1_000).toISOString(),
+        backoffAttempts: 5
+      }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 100, proxy_id: 1 })];
+    const healthSignals = new Map([[1, { errorsInWindow: 12 }]]);
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX,
+      healthSignals
+    });
+    const node1 = result.nodeIntents.find((n) => n.proxyId === 1);
+    expect(node1?.intentRole).toBe("evicted");
+    expect(node1?.backoffAttempts).toBe(6);
+    const moved = result.plannedChanges.find((c) => c.accountId === 100);
+    expect(moved?.kind).toBe("rebind_dead");
+    expect(moved?.toProxyId).toBe(2);
+  });
+
+  it("errors below budget do NOT trigger backoff", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 100, proxy_id: 1 })];
+    const healthSignals = new Map([[1, { errorsInWindow: 3 }]]); // 3 < 5
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX,
+      healthSignals
+    });
+    const node1 = result.nodeIntents.find((n) => n.proxyId === 1);
+    expect(node1?.intentRole).toBe("serving");
+    expect(node1?.backoffAttempts).toBe(0);
+    expect(node1?.healthScore).toBe(85); // 100 - 3*5
+  });
+});
+
 describe("validateIntakeAgainstSpec", () => {
   it("returns null when proxy is plain (not managed, not protected)", () => {
     const proxies = [buildProxy({ id: 50, name: "handoff" })];
