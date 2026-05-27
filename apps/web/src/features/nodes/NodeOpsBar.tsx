@@ -37,6 +37,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<PlayCircle size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onEnableSelected}
+            title="把所选节点的生命周期标记为 schedulable，纳入 Mihomo 发布和 Sub2API 自动化分配范围。"
           >
             启用调度
           </Button>
@@ -46,6 +47,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<PauseCircle size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onDisableSelected}
+            title="把所选节点的生命周期标记为 disabled，从 Mihomo 配置和 Sub2API 自动化分配中暂时移除（保留本地记录与端口号）。"
           >
             暂停调度
           </Button>
@@ -55,6 +57,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             icon={<Trash2 size={14} />}
             disabled={props.busy || !hasSelection}
             onClick={props.onPreviewDeleteSelected}
+            title="对所选节点：先在 Sub2API 解绑账号、删远端代理，再删除本地记录。整个流程作为一个 OperationJob 可在自动化页查看。"
           >
             排空/删除
           </Button>
@@ -68,6 +71,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             loading={props.testing}
             disabled={props.busy || props.totalNodes === 0}
             onClick={props.onTest}
+            title="对所有已分配端口、非 retired 节点跑 OpenAI / Claude 连通性测试。通过的节点保持 schedulable，失败的转入 cooling_down 并取消调度。"
           >
             测试节点池
           </Button>
@@ -77,6 +81,7 @@ export function NodeOpsBar(props: NodeOpsBarProps) {
             loading={props.publishing}
             disabled={props.busy || props.schedulableCount === 0}
             onClick={props.onPublish}
+            title="一键发布：稳定分配端口、生成 Mihomo 配置、启动或 reload Mihomo。仅 schedulable + active + 已分配端口的节点会被渲染成 listener。"
           >
             发布出口池
           </Button>

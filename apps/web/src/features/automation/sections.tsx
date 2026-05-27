@@ -65,6 +65,7 @@ export function ConnectionSection(props: {
           loading={props.saving}
           disabled={!props.baseUrl || (!props.apiKey && !props.config?.apiKeyConfigured)}
           onClick={props.onSave}
+          title="把上方填写的连接信息（含 API Key）保存到服务端数据库。下次启动会读取这些配置，无需重新输入。"
         >
           保存配置
         </Button>
@@ -74,6 +75,7 @@ export function ConnectionSection(props: {
           loading={props.testing}
           disabled={!configured}
           onClick={props.onTest}
+          title="向 Sub2API 发一次试探请求，验证 baseUrl + adminApiKey 可用，并回报代理与账号总数。"
         >
           测试连接
         </Button>
@@ -113,10 +115,17 @@ export function AccountScopeSection(props: {
       </div>
       <Checkbox checked={props.overwriteExisting} onChange={props.setOverwriteExisting} label="覆盖现有非保护代理绑定" />
       <p className="muted small">
-        系统默认只调整未绑定 / 绑定到失效代理的账号。勾选"覆盖"后已绑定到可用代理的账号也会重新分配。变更前服务端会重新读取 live 数据。
+        系统默认只调整未绑定 / 绑定到失效代理的账号。勾选"覆盖"后已绑定到可用代理的账号也会重新分配。
+        受保护账号在任何情况下都不会被修改。变更前服务端会重新读取 live 数据。
       </p>
       <div className="button-row">
-        <Button icon={<Wand2 size={16} />} loading={props.applying} disabled={!props.canApply} onClick={props.onApply}>
+        <Button
+          icon={<Wand2 size={16} />}
+          loading={props.applying}
+          disabled={!props.canApply}
+          onClick={props.onApply}
+          title="按 hash(account.id) 稳定选择目标代理，把账号批量绑定到可分配代理（保护代理不参与分配，受保护账号不被修改）。服务端会重读 live 数据后再执行，不依赖前端预览。"
+        >
           应用自动绑定
         </Button>
       </div>
@@ -162,7 +171,10 @@ export function ProtectionSection(props: {
       actions={<ShieldCheck size={16} className="muted" />}
     >
       <p className="muted small">
-        保护代理不会被排空或被重新分配；账号当前 proxy_id 命中保护规则会自动成为"受保护账号"。
+        命中保护规则的代理在自动化里被双向锁定：
+        <strong>① 不会被自动化分配新账号</strong>（自动化绑定时从可分配代理池里排除）；
+        <strong>② 当前已绑定到保护代理的账号也不会被迁走</strong>（被识别为"受保护账号"，跳过排空、调度、应用绑定等操作）。
+        所以保护规则用来圈定"由人工维护、不交给系统接管的代理及其账号范围"。
       </p>
       <div className="sub2api-filter-grid">
         <TextInput
@@ -290,6 +302,7 @@ export function ManagedOpsSection(props: {
             loading={props.pushing}
             disabled={!props.configured}
             onClick={props.onPush}
+            title="上行同步：把本地 schedulable + active 节点通过 Sub2API importProxyData 接口推到远端，代理名自动加托管前缀。Sub2API 按 proxy_key 去重，重复推送幂等。"
           >
             推送本地节点
           </Button>
@@ -300,6 +313,7 @@ export function ManagedOpsSection(props: {
             loading={props.syncing}
             disabled={!props.configured}
             onClick={props.onSync}
+            title="下行同步：从 Sub2API 拉取最新代理/账号，并把匹配到的 Sub2API proxy_id 写回本地节点。不会改远端任何数据。"
           >
             回填映射
           </Button>
@@ -310,6 +324,7 @@ export function ManagedOpsSection(props: {
             loading={props.refreshing}
             disabled={!props.configured}
             onClick={props.onRefresh}
+            title="重新拉取代理/账号/维护计划展示数据；不写入本地、不修改远端。"
           >
             刷新计划
           </Button>
@@ -323,6 +338,7 @@ export function ManagedOpsSection(props: {
             loading={props.checkingQuality}
             disabled={!props.configured || !props.maintenance || props.maintenance.summary.managedProxies === 0}
             onClick={props.onQualityCheck}
+            title="对每个 Hive 托管代理调用 Sub2API quality-check 接口，让 Sub2API 真实出站测一次，返回的分数回写本地节点 qualityScore（仅托管代理参与）。"
           >
             质量检查
           </Button>
@@ -333,6 +349,7 @@ export function ManagedOpsSection(props: {
             loading={props.draining}
             disabled={!props.configured || !props.maintenance || props.maintenance.summary.drainChanges === 0}
             onClick={props.onDrain}
+            title="排空：把绑定到 Hive 托管代理的账号迁移到非保护非托管的 active 代理上（least-loaded 优先）；保护代理及其账号不动。常用于下线 Hive 代理前的腾挪。"
           >
             排空托管代理
           </Button>
@@ -343,6 +360,7 @@ export function ManagedOpsSection(props: {
             loading={props.cleaning}
             disabled={!props.configured || !props.maintenance || props.maintenance.summary.emptyManagedProxies === 0}
             onClick={props.onCleanup}
+            title="删除所有名称带托管前缀、且当前没有任何账号使用的 Sub2API 代理。只删空壳，不动有账号绑定的代理；保护代理不会被识别为托管代理。"
           >
             清理空代理
           </Button>
