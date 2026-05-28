@@ -1,6 +1,7 @@
 import type {
   OrchestrationSpec,
   OrchestrationStatusSnapshot,
+  Sub2ApiMaintenancePreview,
   Sub2ApiProxyRecord,
   Sub2ApiSafeConnectionConfig
 } from "@mihomo-hive/schemas";
@@ -22,6 +23,7 @@ export interface AutomationRouteProps {
   connection: Sub2ApiSafeConnectionConfig | undefined;
   connectionLoading: boolean;
   proxies: Sub2ApiProxyRecord[];
+  maintenance: Sub2ApiMaintenancePreview | undefined;
   connectionDraft: ConnectionDraft;
   setConnectionDraft: (draft: ConnectionDraft) => void;
   mutations: {
@@ -44,6 +46,9 @@ export interface AutomationRouteProps {
     applyStrategySwitch: PendingMutation & {
       mutateAsync: (input: { target: "stable-hash" | "rendezvous-hash" }) => Promise<unknown>;
     };
+    cleanupEmpty: PendingMutation & { mutate: () => void };
+    drainManaged: PendingMutation & { mutate: () => void };
+    qualityCheck: PendingMutation & { mutate: () => void };
   };
 }
 
@@ -87,6 +92,13 @@ export function AutomationRoute(props: AutomationRouteProps) {
         onApplyStrategySwitch={async (target) => {
           await m.applyStrategySwitch.mutateAsync({ target });
         }}
+        maintenance={props.maintenance}
+        cleaningEmpty={m.cleanupEmpty.isPending}
+        draining={m.drainManaged.isPending}
+        checkingQuality={m.qualityCheck.isPending}
+        onCleanupEmpty={() => m.cleanupEmpty.mutate()}
+        onDrainManaged={() => m.drainManaged.mutate()}
+        onQualityCheck={() => m.qualityCheck.mutate()}
       />
       <OrchestrationStatusPanel
         snapshot={props.status}

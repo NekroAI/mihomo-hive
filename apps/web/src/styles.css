@@ -289,6 +289,20 @@ select {
   white-space: nowrap;
 }
 
+/* Sub2API 维护工具 panel 内部布局 */
+.maintenance-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.maintenance-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 /* badge 内部含图标 + 文本（账号数 Badge 等） */
 .badge-icon-text {
   display: inline-flex;

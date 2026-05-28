@@ -1,7 +1,8 @@
 import React from "react";
-import { Activity, AlertTriangle, ArrowRightLeft, Pause, Play, Save, Shield, Wand2, Zap } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRightLeft, Pause, Play, Save, Shield, Trash2, Unlink, Wand2, Zap } from "lucide-react";
 import type {
   OrchestrationSpec,
+  Sub2ApiMaintenancePreview,
   Sub2ApiProtectedProxyRule,
   Sub2ApiProxyRecord,
   Sub2ApiSafeConnectionConfig
@@ -59,6 +60,14 @@ export function OrchestrationSpecPanel(props: {
   onPreviewStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<StrategySwitchPreview | undefined>;
   onApplyStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<void>;
   switchingStrategy?: boolean;
+  // Sub2API 维护工具：低频救援动作，默认折叠
+  maintenance?: Sub2ApiMaintenancePreview | undefined;
+  cleaningEmpty?: boolean | undefined;
+  draining?: boolean | undefined;
+  checkingQuality?: boolean | undefined;
+  onCleanupEmpty?: (() => void) | undefined;
+  onDrainManaged?: (() => void) | undefined;
+  onQualityCheck?: (() => void) | undefined;
 }) {
   const [strategyPreview, setStrategyPreview] = React.useState<StrategySwitchPreview | undefined>();
   const [previewing, setPreviewing] = React.useState(false);
@@ -426,6 +435,67 @@ export function OrchestrationSpecPanel(props: {
             onChange={(v) => patchProtected("regionIncludes", v)}
             placeholder="东京"
           />
+        </div>
+      </CollapsiblePanel>
+
+      <CollapsiblePanel
+        title="Sub2API 维护工具"
+        storageKey="spec-maintenance"
+        hint="低频救援动作。日常 reconcile 自动完成大部分维护；只有处理'孤儿代理 / 节点下线 / 验证代理质量'等特殊场景时才用这里。"
+      >
+        <div className="maintenance-row">
+          <div className="maintenance-summary">
+            {props.maintenance ? (
+              <>
+                <span className="muted small">
+                  托管代理 <strong>{props.maintenance.summary.managedProxies}</strong>
+                </span>
+                <span className="muted small">
+                  待迁账号 <strong>{props.maintenance.summary.drainChanges}</strong>
+                </span>
+                <span className="muted small">
+                  空代理 <strong>{props.maintenance.summary.emptyManagedProxies}</strong>
+                </span>
+              </>
+            ) : (
+              <span className="muted small">{connected ? "正在加载维护数据..." : "请先配置 Sub2API 连接"}</span>
+            )}
+          </div>
+          <div className="button-row wrap">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Activity size={14} />}
+              loading={Boolean(props.checkingQuality)}
+              disabled={!connected || !props.maintenance || props.maintenance.summary.managedProxies === 0}
+              onClick={props.onQualityCheck}
+              title="对每个 Hive 托管代理调用 Sub2API quality-check：让 Sub2API 真实出站测一次，分数回写本地节点 qualityScore。开销大，按需用。"
+            >
+              质量检查
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Unlink size={14} />}
+              loading={Boolean(props.draining)}
+              disabled={!connected || !props.maintenance || props.maintenance.summary.drainChanges === 0}
+              onClick={props.onDrainManaged}
+              title="把绑定到 Hive 托管代理的账号迁移到非保护非托管的 active 代理上（least-loaded 优先）；保护代理及其账号不动。常用于下线 Hive 代理前的腾挪。"
+            >
+              排空托管
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<Trash2 size={14} />}
+              loading={Boolean(props.cleaningEmpty)}
+              disabled={!connected || !props.maintenance || props.maintenance.summary.emptyManagedProxies === 0}
+              onClick={props.onCleanupEmpty}
+              title="删除所有名称带托管前缀、且当前没有任何账号使用的 Sub2API 代理。只删空壳；保护代理永不被识别为托管代理。"
+            >
+              清理空代理
+            </Button>
+          </div>
         </div>
       </CollapsiblePanel>
 

@@ -740,6 +740,7 @@ function Dashboard(props: { onLogout: () => void }) {
           connection={sub2apiConfig.data}
           connectionLoading={sub2apiConfig.isLoading}
           proxies={sub2apiProxies.data ?? []}
+          maintenance={sub2apiMaintenance.data}
           connectionDraft={{
             baseUrl: sub2apiBaseUrl,
             apiKey: sub2apiApiKey,
@@ -760,7 +761,10 @@ function Dashboard(props: { onLogout: () => void }) {
             saveConnection: saveSub2apiConfig,
             testConnection: testSub2apiConnection,
             previewStrategySwitch,
-            applyStrategySwitch
+            applyStrategySwitch,
+            cleanupEmpty: cleanupManagedSub2api,
+            drainManaged: drainManagedSub2api,
+            qualityCheck: qualityCheckManaged
           }}
         />
       ) : null}
