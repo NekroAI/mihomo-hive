@@ -20,6 +20,7 @@ export interface AutomationRouteProps {
   status: OrchestrationStatusSnapshot | undefined;
   statusLoading: boolean;
   connection: Sub2ApiSafeConnectionConfig | undefined;
+  connectionLoading: boolean;
   proxies: Sub2ApiProxyRecord[];
   connectionDraft: ConnectionDraft;
   setConnectionDraft: (draft: ConnectionDraft) => void;
@@ -87,7 +88,12 @@ export function AutomationRoute(props: AutomationRouteProps) {
           await m.applyStrategySwitch.mutateAsync({ target });
         }}
       />
-      <OrchestrationStatusPanel snapshot={props.status} configured={configured} loading={props.statusLoading} />
+      <OrchestrationStatusPanel
+        snapshot={props.status}
+        configured={configured}
+        connectionLoading={props.connectionLoading}
+        loading={props.statusLoading}
+      />
     </section>
   );
 }

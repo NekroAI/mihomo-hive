@@ -58,11 +58,14 @@ function App() {
 
 function Dashboard(props: { onLogout: () => void }) {
   const utils = trpc.useUtils();
-  const config = trpc.runtime.config.useQuery();
+  // 配置类 query 用 staleTime: Infinity 永不过期，只在 mutation invalidate 时才更新。
+  // 这些数据"用户改了才会变"，不需要任何周期刷新；之前 staleTime=0 + 组件重挂载导致
+  // 每次切 tab 都重 fetch、data 短暂 undefined 让 UI 误判"未配置"。
+  const config = trpc.runtime.config.useQuery(undefined, { staleTime: Infinity });
   const runtimeStatus = trpc.runtime.status.useQuery(undefined, { refetchInterval: 5000 });
   const subscriptions = trpc.subscriptions.list.useQuery();
-  const sub2apiConfig = trpc.sub2api.config.get.useQuery();
-  const sub2apiProtectedRule = trpc.sub2api.proxies.protectedRule.useQuery();
+  const sub2apiConfig = trpc.sub2api.config.get.useQuery(undefined, { staleTime: Infinity });
+  const sub2apiProtectedRule = trpc.sub2api.proxies.protectedRule.useQuery(undefined, { staleTime: Infinity });
 
   const [subscriptionName, setSubscriptionName] = React.useState("");
   const [subscriptionUrl, setSubscriptionUrl] = React.useState("");
@@ -191,7 +194,7 @@ function Dashboard(props: { onLogout: () => void }) {
     { timeRange: errorSummaryTimeRange },
     { enabled: workspace === "automation" && Boolean(sub2apiConfig.data?.configured), refetchInterval: 30000 }
   );
-  const orchestrationSpec = trpc.sub2api.spec.get.useQuery();
+  const orchestrationSpec = trpc.sub2api.spec.get.useQuery(undefined, { staleTime: Infinity });
   const orchestrationStatus = trpc.sub2api.orchestrator.statusSnapshot.useQuery(undefined, {
     enabled: workspace === "automation",
     refetchInterval: 5000
@@ -714,6 +717,7 @@ function Dashboard(props: { onLogout: () => void }) {
           status={orchestrationStatus.data}
           statusLoading={orchestrationStatus.isLoading}
           connection={sub2apiConfig.data}
+          connectionLoading={sub2apiConfig.isLoading}
           proxies={sub2apiProxies.data ?? []}
           connectionDraft={{
             baseUrl: sub2apiBaseUrl,

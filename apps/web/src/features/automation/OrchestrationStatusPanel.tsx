@@ -18,9 +18,22 @@ import { Badge, EmptyState, Panel } from "../../components/ui.js";
 export function OrchestrationStatusPanel(props: {
   snapshot: OrchestrationStatusSnapshot | undefined;
   configured: boolean;
-  /** 标识 query 是否处于 fetching / pending 状态。区分 "data 还没回来" 和 "data 回来了但 scheduler 还没跑过 tick"。 */
+  /** 配置 query 是否还在首次加载。loading 时 configured 可能还没确定下来，避免假阳性"未配置"。 */
+  connectionLoading: boolean;
+  /** statusSnapshot query 是否在 isLoading 状态。区分 "data 还没回来" 和 "data 回来了但 scheduler 还没跑过 tick"。 */
   loading: boolean;
 }) {
+  // 优先：配置还在加载时不要急着判断 "未配置"，否则每次重挂载都闪一下假阳性
+  if (props.connectionLoading && !props.configured) {
+    return (
+      <div className="orchestration-status-panel">
+        <Panel title="编排状态">
+          <EmptyState title="加载中…" description="正在确认 Sub2API 配置。" />
+        </Panel>
+      </div>
+    );
+  }
+
   if (!props.configured) {
     return (
       <div className="orchestration-status-panel">
