@@ -331,13 +331,18 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const resetIntent = trpc.nodes.resetIntent.useMutation({
     onMutate: () =>
-      startTask(setTask, "正在重置编排状态", "清掉所选节点的 intent_role / 退避 / 健康分，让 reconcile 重新评估。"),
+      startTask(
+        setTask,
+        "正在重置编排状态",
+        "清掉所选节点的 intent_role / 退避 / 健康分 / Sub2API 映射，让 reconcile 重新评估。"
+      ),
     onSuccess: async (result) => {
+      const liftMsg = result.liftedFromRetired > 0 ? `，${result.liftedFromRetired} 个从 retired 恢复` : "";
       await finishTask(
         setTask,
         pushToast,
         "编排状态已重置",
-        `${result.reset} 个节点 intent 已清空${result.liftedFromRetired > 0 ? `，其中 ${result.liftedFromRetired} 个从 retired 恢复为 schedulable` : ""}。下次 reconcile (30s 内) 会重新评估。`
+        `${result.reset} 个节点已重置${liftMsg}。后续：点【分配端口】重分配 → 点【启用调度】重新推送到 Sub2API；Sub2API 端的孤儿代理走账号编排页"清理空托管代理"。`
       );
       await refreshOperationalData();
     },

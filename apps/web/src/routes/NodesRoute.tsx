@@ -218,15 +218,19 @@ export function NodesRoute(props: NodesRouteProps) {
             const evictedCount = selectedNodes.filter((n) => n.intentRole === "evicted").length;
             const quarantinedCount = selectedNodes.filter((n) => n.intentRole === "quarantined").length;
             const retiredCount = selectedNodes.filter((n) => n.lifecycleStatus === "retired").length;
+            const withSub2api = selectedNodes.filter((n) => n.sub2apiProxyId).length;
             const total = selectedNodes.length;
             props.requestConfirmation({
               title: "重置编排状态",
               description:
-                `${total} 个所选节点的编排意图将被清空：${evictedCount} 个已驱逐 / ${quarantinedCount} 个退避中 / ${retiredCount} 个已退役。` +
-                ` 系统会清掉 intent_role、退避计数、健康分，让 reconcile 下次重新评估。`,
+                `${total} 个所选节点将被重置：${evictedCount} 个已驱逐 / ${quarantinedCount} 个退避中 / ${retiredCount} 个已退役。` +
+                ` 同时会清掉 ${withSub2api} 个节点的 Sub2API 映射（旧代理可能已是孤儿）。`,
               detail:
-                "如果含 retired 节点，会同时把 lifecycle 改回 schedulable 让它们重新接活。" +
-                " 用于：健康信号误归因导致节点被错误驱逐时的人工救援。",
+                "重置内容：intent_role / 退避计数 / 健康分 / Sub2API 映射 (sub2apiProxyId)。" +
+                " 如果含 retired，会同时把 lifecycle 改回 schedulable。" +
+                " 后续标准动作：① 工具栏【分配端口】重新分配 → ② 【启用调度】重新推 Sub2API。" +
+                " Sub2API 端可能残留孤儿代理（host:port 指向已不存在的本地 listener），" +
+                " 走账号编排页的'清理空托管代理'动作收尾。",
               confirmLabel: "重置",
               run: async () => m.resetIntent.mutate({ hashes: props.selectedHashesList, liftFromRetired: true })
             });

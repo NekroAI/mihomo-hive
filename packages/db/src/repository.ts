@@ -329,9 +329,14 @@ export class HiveRepository {
    * 重置节点的编排意图状态：清掉 intent_role / backoff / health_score / last_health_check，
    * 让下次 reconcile 重新评估。
    *
+   * 同时清掉 `sub2api_proxy_id`：被驱逐过的节点端口已被 assignStablePorts 收回，
+   * 但 sub2api_proxy_id 留着会指向 Sub2API 端的"孤儿代理"（host:port 还指向一个
+   * 已经不存在的本地 listener）。清掉映射让节点跟孤儿脱钩；用户后续走"分配端口
+   * + 启用调度"会触发 importProxyData 建新代理 + 重建映射。Sub2API 端的孤儿
+   * 代理由 sub2api.maintenance.cleanupEmpty 清。
+   *
    * 主要用途：把因为健康信号误归因被 quarantined / evicted 的节点恢复回评估池。
-   * **不**改 lifecycle_status —— 调用方需要单独把 retired 节点改回 schedulable 才会被推送
-   * 到 Sub2API 接活。
+   * **不**改 lifecycle_status —— 调用方需要单独把 retired 节点改回 schedulable。
    */
   resetNodeIntent(hashes: string[]): ProxyNode[] {
     if (hashes.length === 0) {
@@ -344,6 +349,7 @@ export class HiveRepository {
         backoff_attempts = 0,
         health_score = NULL,
         last_health_check = NULL,
+        sub2api_proxy_id = NULL,
         updated_at = @updatedAt
       WHERE hash = @hash
     `);
