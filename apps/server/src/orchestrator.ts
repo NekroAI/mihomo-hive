@@ -419,10 +419,13 @@ export function isNodeSideError(error: { status_code?: number | null | undefined
  * Sub2API 没有"账号总请求数"接口，所以我们用**绝对错误数**当判定信号。
  * 错误窗口长度由 spec.health.windowMs 决定，转成 listAllUpstreamErrors 的 timeRange 字符串。
  *
- * P5-V 改造：
- *   1. status_code 白名单（isNodeSideError）：过滤掉账号侧 (401/429/400 等) 误归因，
- *      避免一个客户端 bug 在几分钟内把健康节点驱逐掉。
- *   2. 同 (account, proxy) 在窗口内只算 1 次：防客户端死循环刷错误的单点放大效应。
+ * P5-V → P5-AC 演进：
+ *   1. status_code 白名单 isNodeSideError：过滤掉账号侧 (400/401/403/404/429)，
+ *      只让 EOF/408/5xx 这些"真节点级"错误进入计数。
+ *   2. **同 (account, proxy) cap 至 errorBudgetPerWindow**：单账号最多算 N 次。
+ *      P5-V 时是完全去重，但配合 (1) 的过滤后客户端侧错误已经被排除，单账号
+ *      狂错就是真节点坏了的强信号，完全去重反而屏蔽了关键故障。改成 cap：
+ *      单账号最多触发一次 quarantined，多账号累积无上限。
  */
 async function fetchHealthSignals(
   client: Sub2ApiClient,
@@ -444,22 +447,40 @@ async function fetchHealthSignals(
     signals.set(proxyId, { errorsInWindow: 0 });
   }
 
-  // 同 (account, proxy) 去重：一个账号在窗口内出 N 次错误只算 1 次
-  const countedPairs = new Set<string>();
+  aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, spec.health.errorBudgetPerWindow);
+
+  // P5-AB 信号合并：把主动探测结果叠加到 upstream-errors 信号上
+  mergeProbeIntoSignals(signals, probeStateByProxy, spec.health.activeProbe, spec.health.windowMs, Date.now());
+  return signals;
+}
+
+/**
+ * 把 Sub2API upstream-errors 列表聚合到 health signals（纯函数，方便单测）。
+ *
+ * 双重过滤：
+ *   1. isNodeSideError：仅 EOF/408/5xx 计入，排除 400/401/403/404/429 等账号侧
+ *   2. 同 (account, proxy) cap 至 perPairCap（默认 errorBudgetPerWindow）：
+ *      单账号狂错最多触发一次 quarantined；多账号累积无上限
+ */
+export function aggregateUpstreamErrorsIntoSignals(
+  signals: Map<number, ProxyHealthSignal>,
+  errors: Array<{ account_id?: number | null | undefined; status_code?: number | null | undefined }>,
+  accountToProxy: Map<number, number>,
+  perPairCap: number
+): Map<number, ProxyHealthSignal> {
+  const errorsByPair = new Map<string, number>();
   for (const error of errors) {
     if (!error.account_id) continue;
     if (!isNodeSideError(error)) continue;
     const proxyId = accountToProxy.get(error.account_id);
     if (!proxyId) continue;
     const pairKey = `${error.account_id}:${proxyId}`;
-    if (countedPairs.has(pairKey)) continue;
-    countedPairs.add(pairKey);
+    const pairCount = errorsByPair.get(pairKey) ?? 0;
+    if (pairCount >= perPairCap) continue;
+    errorsByPair.set(pairKey, pairCount + 1);
     const current = signals.get(proxyId) ?? { errorsInWindow: 0 };
     signals.set(proxyId, { errorsInWindow: current.errorsInWindow + 1 });
   }
-
-  // P5-AB 信号合并：把主动探测结果叠加到 upstream-errors 信号上
-  mergeProbeIntoSignals(signals, probeStateByProxy, spec.health.activeProbe, spec.health.windowMs, Date.now());
   return signals;
 }
 

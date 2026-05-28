@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProxyHealthSignal } from "@mihomo-hive/core";
-import { isNodeSideError, mergeProbeIntoSignals } from "./orchestrator.js";
+import { aggregateUpstreamErrorsIntoSignals, isNodeSideError, mergeProbeIntoSignals } from "./orchestrator.js";
 
 describe("isNodeSideError 健康信号过滤（P5-V）", () => {
   describe("算节点的锅（计入 errorsInWindow）", () => {
@@ -42,6 +42,83 @@ describe("isNodeSideError 健康信号过滤（P5-V）", () => {
     it("3xx 也不算节点（重定向不是错误）", () => {
       expect(isNodeSideError({ status_code: 301 })).toBe(false);
     });
+  });
+});
+
+describe("aggregateUpstreamErrorsIntoSignals 同账号 cap（P5-AC）", () => {
+  const CAP = 5;
+  const accountToProxy = new Map([
+    [100, 1], // account 100 绑 proxy 1
+    [101, 1], // account 101 绑 proxy 1
+    [200, 2]  // account 200 绑 proxy 2
+  ]);
+
+  it("单账号狂错（50 次 502）→ cap 在 5（避免一帧 evicted）", () => {
+    const errors = Array.from({ length: 50 }, () => ({ account_id: 100, status_code: 502 }));
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.get(1)?.errorsInWindow).toBe(5);
+  });
+
+  it("两个账号各错 5 次（同一 proxy）→ 累积 10（多账号无 cap）", () => {
+    const errors = [
+      ...Array.from({ length: 5 }, () => ({ account_id: 100, status_code: 502 })),
+      ...Array.from({ length: 5 }, () => ({ account_id: 101, status_code: 502 }))
+    ];
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.get(1)?.errorsInWindow).toBe(10);
+  });
+
+  it("用户实测场景：1 个账号 11 个 502 → cap 在 5（修复无变更 bug）", () => {
+    // 用户 P5-AC 之前：完全去重 → errors=1 < errorBudget=5 → 永远不触发
+    // 修复后：cap=5 → errors=5 = errorBudget → 触发 quarantined
+    const errors = Array.from({ length: 11 }, () => ({ account_id: 369, status_code: 502 }));
+    const signals = new Map<number, ProxyHealthSignal>();
+    const localAccountToProxy = new Map([[369, 42]]);
+    aggregateUpstreamErrorsIntoSignals(signals, errors, localAccountToProxy, CAP);
+    expect(signals.get(42)?.errorsInWindow).toBe(5);
+  });
+
+  it("不同 proxy 各自独立计数", () => {
+    const errors = [
+      ...Array.from({ length: 5 }, () => ({ account_id: 100, status_code: 502 })),
+      ...Array.from({ length: 5 }, () => ({ account_id: 200, status_code: 502 }))
+    ];
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.get(1)?.errorsInWindow).toBe(5);
+    expect(signals.get(2)?.errorsInWindow).toBe(5);
+  });
+
+  it("非节点侧错误（401/429/400）不计入", () => {
+    const errors = [
+      { account_id: 100, status_code: 401 },
+      { account_id: 100, status_code: 429 },
+      { account_id: 100, status_code: 400 },
+      { account_id: 100, status_code: 502 } // 这条才算
+    ];
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.get(1)?.errorsInWindow).toBe(1);
+  });
+
+  it("缺 account_id 的错误跳过", () => {
+    const errors = [
+      { account_id: null, status_code: 502 },
+      { account_id: undefined, status_code: 502 },
+      { account_id: 100, status_code: 502 }
+    ];
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.get(1)?.errorsInWindow).toBe(1);
+  });
+
+  it("account 没绑 proxy → 跳过", () => {
+    const errors = [{ account_id: 999, status_code: 502 }]; // 999 不在 accountToProxy
+    const signals = new Map<number, ProxyHealthSignal>();
+    aggregateUpstreamErrorsIntoSignals(signals, errors, accountToProxy, CAP);
+    expect(signals.size).toBe(0);
   });
 });
 
