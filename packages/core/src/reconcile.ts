@@ -187,23 +187,25 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
     } else if (
       local.lifecycleStatus === "retired" ||
       local.lifecycleStatus === "deleted" ||
-      local.lifecycleStatus === "draining"
+      local.lifecycleStatus === "draining" ||
+      local.lifecycleStatus === "cooling_down"
     ) {
-      // 用户手动标记"下线意图"：retired = 永久退役 / deleted = 删除中 / draining = 排空中
-      // → 强制 evicted role，触发 rebind_dead 把账号迁到健康节点
+      // "下线意图"：账号必须迁走
+      //   • retired       永久退役
+      //   • deleted       删除中
+      //   • draining      排空中
+      //   • cooling_down  冷却（测试失败自动 / 用户判定节点有问题）— 跟 retired 的
+      //                   区别仅在意图持久性，对 reconcile 而言都是"账号别留在这"
       role = "evicted";
       nextAction = `用户标记 ${local.lifecycleStatus}，等待账号全部迁出`;
-    } else if (local.lifecycleStatus === "disabled" || local.lifecycleStatus === "cooling_down") {
-      // 用户手动暂停 / 测试失败冷却：
+    } else if (local.lifecycleStatus === "disabled") {
+      // 用户手动暂停：
       //   • 已绑账号留在原地（不触发 rebind_dead）
       //   • 不接收新账号（不进 servingProxies）
       //   • 不自动恢复（跟 quarantined 的本质区别 — quarantined 到期会重测）
       // 用户要恢复需要主动点"启用调度"。
       role = "paused";
-      nextAction =
-        local.lifecycleStatus === "disabled"
-          ? "用户暂停中，账号留原地不迁、不接新；需要主动启用调度才恢复"
-          : "冷却中，账号留原地不迁、不接新；需要主动启用调度才恢复";
+      nextAction = "用户暂停中，账号留原地不迁、不接新；需要主动启用调度才恢复";
     } else {
       // 状态机入口：根据 local 当前角色 + healthSignals 决定下一态
       const previousRole = local.intentRole ?? (local.lifecycleStatus === "schedulable" ? "serving" : "standby");

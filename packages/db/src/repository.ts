@@ -738,13 +738,12 @@ function intentFromLifecycle(lifecycle: NodeLifecycleStatus): NodeIntentRole {
     case "testing":
       return "standby";
     case "disabled":
+      return "paused";          // 用户暂停 → 账号留原地
     case "cooling_down":
-      return "paused";
     case "draining":
-      return "evicted";
     case "retired":
     case "deleted":
-      return "evicted";
+      return "evicted";          // 下线意图 → 账号迁走
     default:
       return "standby";
   }

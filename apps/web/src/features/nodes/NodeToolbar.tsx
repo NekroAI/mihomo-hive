@@ -209,7 +209,7 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<Snowflake size={14} />}
               disabled={props.busy || !hasSelection}
-              hint="lifecycle → cooling_down：测试失败/错误率破阈也会自动转此。账号留在原地等恢复或被驱逐。"
+              hint="lifecycle → cooling_down：节点有问题暂时下线。reconcile 视为已驱逐 → 把账号迁到健康节点。跟退役的区别仅在意图持久性：冷却预期会恢复（用户主动重新启用调度），退役表示永久下线。"
               onClick={props.onCoolingDownSelected}
             >
               冷却

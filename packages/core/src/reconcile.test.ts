@@ -367,7 +367,9 @@ describe("reconcile", () => {
     expect(newBind?.toProxyId).toBe(2);
   });
 
-  it("cooling_down 节点同样视为 paused（账号留原地、不接新）", () => {
+  it("cooling_down 节点 → role=evicted，账号触发 rebind_dead（P5-AD）", () => {
+    // 区别于 disabled（账号留原地）：cooling_down 语义是"节点有问题需要下线"，
+    // 跟 retired/draining 一样应该触发账号迁出。
     const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
     const localNodes = [
       buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving", lifecycleStatus: "cooling_down" }),
@@ -384,8 +386,8 @@ describe("reconcile", () => {
       managedProxyPrefix: PREFIX
     });
 
-    expect(result.nodeIntents.find((i) => i.hash === "n1xxxxxx")?.intentRole).toBe("paused");
-    expect(result.plannedChanges.find((c) => c.accountId === 10)).toBeUndefined();
+    expect(result.nodeIntents.find((i) => i.hash === "n1xxxxxx")?.intentRole).toBe("evicted");
+    expect(result.plannedChanges.find((c) => c.accountId === 10)?.kind).toBe("rebind_dead");
   });
 });
 
