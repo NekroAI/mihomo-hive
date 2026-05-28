@@ -314,10 +314,36 @@ function writeBackNodeIntents(
 }
 
 /**
+ * status_code 归因策略（P5-V）：
+ *   • 算节点的锅：EOF / 连接断开 (0/null) + 408 超时 + 5xx (含 OpenAI 自身 5xx，
+ *     因为不同地区路由的代理可能避开问题区)
+ *   • 不算节点的锅：400 / 401 / 403 / 404 / 429 (客户端 / 账号配额 / OAuth 失效，
+ *     跟代理网络完全无关)
+ */
+const ACCOUNT_SIDE_STATUS_CODES = new Set([400, 401, 403, 404, 429]);
+
+export function isNodeSideError(error: { status_code?: number | null | undefined }): boolean {
+  const code = error.status_code;
+  // EOF / 无响应：强信号节点不可达
+  if (code === null || code === undefined) return true;
+  if (code === 0) return true;
+  if (typeof code !== "number") return true;
+  // 明确账号 / 客户端侧错误：排除
+  if (ACCOUNT_SIDE_STATUS_CODES.has(code)) return false;
+  // 408 timeout + 5xx：算节点（OpenAI 自身 5xx 也归节点，不同地区路由可能避开）
+  return code === 408 || code >= 500;
+}
+
+/**
  * 把 Sub2API 上游错误日志聚合成"按 proxy 的窗口错误数"信号源（ADR 0003 阶段 B）。
  *
  * Sub2API 没有"账号总请求数"接口，所以我们用**绝对错误数**当判定信号。
  * 错误窗口长度由 spec.health.windowMs 决定，转成 listAllUpstreamErrors 的 timeRange 字符串。
+ *
+ * P5-V 改造：
+ *   1. status_code 白名单（isNodeSideError）：过滤掉账号侧 (401/429/400 等) 误归因，
+ *      避免一个客户端 bug 在几分钟内把健康节点驱逐掉。
+ *   2. 同 (account, proxy) 在窗口内只算 1 次：防客户端死循环刷错误的单点放大效应。
  */
 async function fetchHealthSignals(
   client: Sub2ApiClient,
@@ -338,10 +364,17 @@ async function fetchHealthSignals(
   for (const proxyId of new Set(accountToProxy.values())) {
     signals.set(proxyId, { errorsInWindow: 0 });
   }
+
+  // 同 (account, proxy) 去重：一个账号在窗口内出 N 次错误只算 1 次
+  const countedPairs = new Set<string>();
   for (const error of errors) {
     if (!error.account_id) continue;
+    if (!isNodeSideError(error)) continue;
     const proxyId = accountToProxy.get(error.account_id);
     if (!proxyId) continue;
+    const pairKey = `${error.account_id}:${proxyId}`;
+    if (countedPairs.has(pairKey)) continue;
+    countedPairs.add(pairKey);
     const current = signals.get(proxyId) ?? { errorsInWindow: 0 };
     signals.set(proxyId, { errorsInWindow: current.errorsInWindow + 1 });
   }
