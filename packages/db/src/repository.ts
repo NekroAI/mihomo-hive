@@ -1147,7 +1147,7 @@ export class HiveRepository {
       enabled: Boolean(row.enabled),
       plannedTotal: row.planned_total,
       appliedTotal: row.applied_total,
-      skippedReason: row.skipped_reason,
+      skippedReason: normalizeLegacySkippedReason(row.skipped_reason),
       ...(row.error_message ? { errorMessage: row.error_message } : {})
     }));
   }
@@ -1442,6 +1442,16 @@ function accountJobFromRow(row: AccountJobRow): AccountJob {
   });
 }
 
+/**
+ * 兼容旧 tick 数据：早期实现写过 skipped_reason='dry_run'，新 schema 已删除
+ * 该枚举。把 legacy 'dry_run' 读出来时归一化成 'paused'（语义上等价：scheduler
+ * 没真入队 jobs）。其它值原样透传，让 Zod 抓真正的 schema mismatch。
+ */
+function normalizeLegacySkippedReason(value: string): AccountFleetTick["skippedReason"] {
+  if (value === "dry_run") return "paused";
+  return value as AccountFleetTick["skippedReason"];
+}
+
 function accountFleetTickFromRow(row: AccountFleetTickRow): AccountFleetTick {
   return accountFleetTickSchema.parse({
     id: row.id,
@@ -1449,7 +1459,7 @@ function accountFleetTickFromRow(row: AccountFleetTickRow): AccountFleetTick {
     finishedAt: row.finished_at,
     durationMs: row.duration_ms,
     enabled: Boolean(row.enabled),
-    skippedReason: row.skipped_reason,
+    skippedReason: normalizeLegacySkippedReason(row.skipped_reason),
     ...(row.error_message ? { errorMessage: row.error_message } : {}),
     plannedTotal: row.planned_total,
     appliedTotal: row.applied_total,
