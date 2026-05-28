@@ -12,6 +12,7 @@ import {
   hashPassword,
   loadRuntimeConfig,
   mapWithConcurrency,
+  measureProxyTcpLatency,
   parsePortRange,
   parseSubscription,
   planSub2ApiAssignments,
@@ -178,6 +179,14 @@ nodes
     const host = options.host ?? config.listenHost;
     const candidates = repo.listNodes().filter((node) => node.assignedPort);
     const tested = await mapWithConcurrency(candidates, options.concurrency, async (node) => {
+      // 与 router nodes.test 保持一致：先测 L1（服务→代理直连握手），再测 L2（每个业务目标端到端）
+      const rawHost = typeof node.raw?.server === "string" ? node.raw.server : null;
+      const rawPort = typeof node.raw?.port === "number" ? node.raw.port : null;
+      const l1 =
+        rawHost && rawPort
+          ? await measureProxyTcpLatency({ host: rawHost, port: rawPort, timeoutMs: options.timeoutMs })
+          : { latencyMs: 0, error: "no_raw_endpoint" };
+
       const results = [];
       for (const target of targets) {
         results.push(
@@ -193,13 +202,21 @@ nodes
       const statusText = results
         .map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`)
         .join(",");
-      const latencyMs = Math.max(...results.map((result) => result.latencyMs));
-      console.log(`${node.assignedPort}\t${passed ? "pass" : "fail"}\t${statusText}\t${node.name}`);
+      console.log(`${node.assignedPort}\t${passed ? "pass" : "fail"}\tL1=${l1.latencyMs}ms\t${statusText}\t${node.name}`);
       return {
         ...node,
         status: passed ? ("active" as const) : ("failed" as const),
         lastTestStatus: statusText,
-        lastTestLatencyMs: latencyMs
+        lastTestLatencyMs: l1.latencyMs,
+        lastTestTargets: JSON.stringify(
+          results.map((r) => ({
+            targetId: r.targetId,
+            ok: r.ok,
+            latencyMs: r.latencyMs,
+            ...(r.httpStatus !== undefined ? { httpStatus: r.httpStatus } : {}),
+            message: r.message
+          }))
+        )
       };
     });
     repo.saveNodes(tested);

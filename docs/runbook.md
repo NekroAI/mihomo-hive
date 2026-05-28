@@ -1,6 +1,6 @@
 # 运维手册
 
-本文档记录 Mihomo Hive 的常用运行流程。公开部署建议直接使用预构建镜像，并将运行数据挂载到独立目录。
+公开部署建议直接使用预构建镜像，运行数据挂载到独立目录。
 
 ## 启动服务
 
@@ -8,23 +8,28 @@
 docker compose up -d
 ```
 
-服务启动后会自动创建运行配置，并将数据库、生成配置、导出文件保存在挂载的数据目录中。Web UI 默认监听端口是 `9990`：
+服务启动后会自动：
+- 创建运行配置 `/data/hive.config.json`
+- 启动 Mihomo（基于上次发布的 yaml；首次启动尚无 yaml 时跳过）
+- 启动 ReconcileScheduler（30s 周期；未配 Sub2API 连接时仍跑，只会得到空快照）
+
+Web UI 默认监听 `0.0.0.0:9990`：
 
 ```text
 http://127.0.0.1:9990
 ```
 
-`HIVE_HOST` 控制 Web UI/API 监听地址，默认是 `0.0.0.0`；`HIVE_PORT` 控制监听端口。首次访问需要设置访问密码。
+`HIVE_HOST` / `HIVE_PORT` 通过环境变量改。首次访问要求设置访问密码。
 
 ## 访问密码
 
-密码哈希保存在 SQLite 数据库中。忘记密码时，可以通过容器内 CLI 重置：
+密码哈希保存在 SQLite 数据库中。忘记密码时通过容器内 CLI 重置：
 
 ```bash
 docker exec mihomo-hive node apps/cli/dist/index.js auth reset-password --password "new-strong-password"
 ```
 
-推荐从标准输入传入密码，避免进入 shell 历史：
+推荐从 stdin 传入避免落入 shell 历史：
 
 ```bash
 printf '%s' 'new-strong-password' | docker exec -i mihomo-hive node apps/cli/dist/index.js auth reset-password --password-stdin
@@ -32,71 +37,100 @@ printf '%s' 'new-strong-password' | docker exec -i mihomo-hive node apps/cli/dis
 
 重置密码会撤销所有已登录会话。
 
-## Web UI 流程
+---
 
-控制台左侧是操作流水线，按顺序执行：
+## Web UI 工作流
 
-1. 添加订阅 URL。
-2. 拉取订阅。
-3. 导入节点。
-4. 设置端口段并分配端口。
-5. 生成 Mihomo 配置。
-6. 启动或 reload Mihomo。
-7. 测试 OpenAI / Claude 连通性。
-8. 写出 Sub2API JSON。
+Web UI 顶部 3 个 tab：节点池 / 账号编排 / 导出。
 
-中间表格展示节点、端口、状态和最近测试结果；右侧展示运行配置和 Sub2API 导出预览。
+### 仅订阅转换（不用 Sub2API）
+
+节点池 tab 走 3 步：
+
+1. **左栏添加订阅源** → 拉取 + 预览 → 应用导入。新节点出现在右侧节点表
+2. 在节点表勾选要保留的节点，点工具栏 **【分配端口】**：给所选节点分端口 + 渲染 Mihomo + reload
+3. 点 **【测试所选】** 或 **【测试全部】**：
+   - 代理延迟列显示 L1（服务直连代理握手时间）
+   - 目标延迟列显示 L2（OpenAI / Claude 端到端，秒数 + 颜色编码）
+
+通过测试的节点已在 `127.0.0.1:{port}` 提供 listener，可以直接接到上游脚本。如需打包 JSON 给其他系统使用，切到**导出** tab。
+
+### 启用 Sub2API 自动调度
+
+在上面 3 步基础上：
+
+4. 切到**账号编排** tab，配置 Sub2API 连接（baseUrl + adminApiKey + 托管前缀）
+5. 回到节点池 tab，勾选要纳入调度的节点，点 **【启用调度】**：原子完成 `lifecycle → schedulable` + 推送到 Sub2API + 回填 proxy_id
+6. 切回**账号编排** tab，在左栏 Spec 里配置：
+   - 入站代理（intake.proxyId）：新账号默认挂的代理
+   - 保护规则（protectedRule）：哪些代理不应被自动化触碰
+   - 容量 / 健康 / 灰度 等策略
+
+完成后 ReconcileScheduler 每 30s 一个 tick 自动调节绑定。右栏实时展示 KPI / 节点矩阵 / 最近调和日志。
+
+### 节点池工具栏低频操作（`⋯` dropdown）
+
+| 分组 | 项 | 说明 |
+|---|---|---|
+| 诊断 | 重建 Mihomo | yaml 损坏 / 进程挂掉时强制重渲染 + reload。不动端口、不改 lifecycle、不推 Sub2API |
+| 生命周期（所选） | 暂停 / 冷却 / 退役 / 删除 | lifecycle 状态过渡 |
+| 筛选 | 选择 status=active 的节点 | 快速勾选可用节点 |
+
+---
 
 ## CLI 自动化
 
-CLI 与 Web UI 使用同一套数据库和核心逻辑，适合脚本化任务和排障。
+CLI 与 Web UI 使用同一套数据库和核心逻辑。
 
-订阅导入：
+### 订阅与节点
 
 ```bash
 hive sub add --name demo --url "https://example.com/sub"
 hive sub fetch
+hive sub list                       # 只输出订阅摘要，不打印订阅正文
 hive nodes import
+hive nodes list
 ```
 
-`sub list` 只展示订阅摘要，不输出订阅正文。
-
-端口分配与配置生成：
+### 端口与 Mihomo
 
 ```bash
 hive ports assign --range 10001-10300
 hive mihomo render
-hive mihomo start
+hive mihomo start                   # 首次启动；后续改动用 reload
+hive mihomo reload
+hive mihomo status
 ```
 
-端口分配基于节点 hash 尽量保持稳定。订阅更新后，同一个节点会优先复用原端口。
+端口分配基于节点 hash 尽量保持稳定。订阅更新后同一节点会优先复用原端口。
 
-节点连通性测试：
+### 测试
 
 ```bash
 hive nodes test --targets openai,claude --timeout-ms 15000 --concurrency 8
 ```
 
+每个节点先测 L1（服务直连代理握手），再测每个 L2 目标（经 Mihomo 走代理到目标 URL）。
+
 内置测试目标：
 
-- `ip`：访问 `https://api.ipify.org`，期望 HTTP 200。
-- `openai`：访问 `https://api.openai.com/v1/models`，无 token 时期望 HTTP 401。
-- `claude`：访问 `https://api.anthropic.com/v1/messages`，GET 请求期望 HTTP 405。
+| ID | URL | 期望状态 |
+|---|---|---|
+| `ip` | `https://api.ipify.org` | 200 |
+| `openai` | `https://api.openai.com/v1/models` | 401（无 token） |
+| `claude` | `https://api.anthropic.com/v1/messages` | 405（GET 请求） |
 
-测试通过的节点保持 `active`，失败节点标记为 `failed`。测试完成后重新渲染并热加载配置：
+测试通过的节点 status 标 `active`，失败标 `failed`。CLI 输出包含 L1 延迟和每个目标的 status code。
 
-```bash
-hive mihomo render
-hive mihomo reload
-```
-
-Sub2API 导出：
+### 导出
 
 ```bash
 hive export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.json
 ```
 
-导出文件只包含 `active` 且已分配端口的节点；Web UI 中可先筛选并选择目标节点，再下载或写出 Sub2API JSON。
+导出文件只包含 `status=active` 且已分配端口的节点。Web UI 中可先筛选/勾选目标节点再下载或写出。
+
+---
 
 ## 开发模式
 
@@ -107,3 +141,10 @@ pnpm test
 pnpm build
 pnpm --filter @mihomo-hive/server dev
 ```
+
+更多技术文档：
+
+- [架构总览](architecture.md)
+- [数据模型](data-model.md)
+- [ADR 0003 声明式编排](decisions/0003-declarative-orchestration.md)
+- [CI/CD](cicd.md)
