@@ -10,6 +10,10 @@ export interface AccountFleetRouteProps {
   spec: AccountFleetSpec;
   status: AccountFleetStatusSnapshot | undefined;
   statusLoading: boolean;
+  /** 来自后端 ENV：是否在 apply 模式（影响 UI 提示但不直接控制是否入队 jobs）。 */
+  mode?: "dry_run" | "apply";
+  /** Sub2API 是否已连接 —— 决定"立即调和"按钮是否可点。 */
+  sub2apiConnected: boolean;
   mutations: {
     saveSpec: PendingMutation & { mutate: (next: AccountFleetSpec) => void };
     triggerNow: PendingMutation & { mutate: () => void };
@@ -17,18 +21,18 @@ export interface AccountFleetRouteProps {
 }
 
 /**
- * 账号编排页 —— 账号生命周期自动维护。
- *
- * 跟代理编排页（AutomationRoute）同结构：左 SpecPanel + 右 StatusPanel。
- * 详细设计见 notes/account-fleet-design.md §10。
+ * 账号编排页 —— 跟代理编排页同结构：380px 左 Spec / 1fr 右 Status。
+ * 设计：notes/account-fleet-design.md §10
  */
 export function AccountFleetRoute(props: AccountFleetRouteProps) {
   return (
-    <section className="workspace-grid account-fleet-grid">
+    <section className="workspace-grid automation-grid">
       <AccountFleetSpecPanel
         spec={props.spec}
         saving={props.mutations.saveSpec.isPending}
         triggering={props.mutations.triggerNow.isPending}
+        canTrigger={props.sub2apiConnected}
+        {...(props.mode ? { mode: props.mode } : {})}
         onSaveSpec={(next) => props.mutations.saveSpec.mutate(next)}
         onTriggerNow={() => props.mutations.triggerNow.mutate()}
       />

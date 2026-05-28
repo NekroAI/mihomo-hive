@@ -767,6 +767,7 @@ function Dashboard(props: { onLogout: () => void }) {
           spec={accountFleetSpec.data ?? defaultAccountFleetSpec}
           status={accountFleetStatus.data}
           statusLoading={accountFleetStatus.isLoading}
+          sub2apiConnected={Boolean(sub2apiConfig.data?.configured)}
           mutations={{
             saveSpec: saveAccountFleetSpec,
             triggerNow: triggerAccountFleetTick

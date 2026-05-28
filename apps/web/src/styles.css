@@ -1117,6 +1117,39 @@ select {
   overflow-x: auto;
 }
 
+/* 账号编排页（沿用 orchestration-* 容器规则，仅小补丁）
+   设计：notes/account-fleet-design.md §10 */
+.checkbox-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+
+.config-subgroup-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 4px;
+}
+
+.kpi-meta-totals {
+  margin-left: auto;
+}
+
+.account-matrix-table .cell-name {
+  max-width: 260px;
+}
+
+.text-warning {
+  color: #d97706;
+}
+
+.text-danger {
+  color: var(--danger, #dc2626);
+}
+
 .node-matrix-table {
   width: 100%;
   border-collapse: collapse;
