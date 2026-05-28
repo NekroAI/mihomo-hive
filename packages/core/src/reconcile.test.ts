@@ -281,6 +281,56 @@ describe("reconcile", () => {
     expect(moved?.kind).toBe("rebind_dead");
     expect(moved?.toProxyId).toBe(2);
   });
+
+  it("用户手动 retired lifecycle 的节点 → role=evicted，账号触发 rebind_dead（P5-Z 修复）", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      // 关键：intent_role 是 serving（没被 reconcile 改过）但 lifecycle=retired（用户手动设的）
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving", lifecycleStatus: "retired" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 10, proxy_id: 1 })];
+
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX
+    });
+
+    // 节点角色应该被强制 evicted
+    const retiredIntent = result.nodeIntents.find((i) => i.hash === "n1xxxxxx");
+    expect(retiredIntent?.intentRole).toBe("evicted");
+    expect(retiredIntent?.nextAction).toContain("retired");
+
+    // 账号应该 rebind 到节点 2
+    const moved = result.plannedChanges.find((c) => c.accountId === 10);
+    expect(moved?.kind).toBe("rebind_dead");
+    expect(moved?.toProxyId).toBe(2);
+  });
+
+  it("lifecycle=draining 的节点同样强制 evicted（账号排空中）", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving", lifecycleStatus: "draining" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 10, proxy_id: 1 })];
+
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX
+    });
+
+    expect(result.nodeIntents.find((i) => i.hash === "n1xxxxxx")?.intentRole).toBe("evicted");
+    expect(result.plannedChanges.find((c) => c.accountId === 10)?.kind).toBe("rebind_dead");
+  });
 });
 
 describe("reconcile health state machine", () => {

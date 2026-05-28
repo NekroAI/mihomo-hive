@@ -178,6 +178,15 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
     } else if (!world.managedProxyIds.has(proxy.id) || !local) {
       // 非托管代理或本地无对应节点 → 不参与编排
       nextAction = "非托管代理或本地未记录，不参与编排";
+    } else if (
+      local.lifecycleStatus === "retired" ||
+      local.lifecycleStatus === "deleted" ||
+      local.lifecycleStatus === "draining"
+    ) {
+      // 用户手动标记"下线意图"：retired = 永久退役 / deleted = 删除中 / draining = 排空中
+      // → 强制 evicted role，触发 rebind_dead 把账号迁到健康节点
+      role = "evicted";
+      nextAction = `用户标记 ${local.lifecycleStatus}，等待账号全部迁出`;
     } else {
       // 状态机入口：根据 local 当前角色 + healthSignals 决定下一态
       const previousRole = local.intentRole ?? (local.lifecycleStatus === "schedulable" ? "serving" : "standby");
