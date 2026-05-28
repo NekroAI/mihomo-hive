@@ -61,7 +61,6 @@ function Dashboard(props: { onLogout: () => void }) {
   const config = trpc.runtime.config.useQuery();
   const runtimeStatus = trpc.runtime.status.useQuery(undefined, { refetchInterval: 5000 });
   const subscriptions = trpc.subscriptions.list.useQuery();
-  const nodes = trpc.nodes.list.useQuery();
   const sub2apiConfig = trpc.sub2api.config.get.useQuery();
   const sub2apiProtectedRule = trpc.sub2api.proxies.protectedRule.useQuery();
 
@@ -104,6 +103,11 @@ function Dashboard(props: { onLogout: () => void }) {
   // 兼容旧 localStorage 值 "sub2api" / "tasks"，统一映射到 "automation"
   const workspace: "nodes" | "automation" | "runtime" =
     (workspaceRaw as string) === "sub2api" || (workspaceRaw as string) === "tasks" ? "automation" : workspaceRaw;
+  // 节点池页 30s 自动刷新：后台编排器会更新 sub2apiProxyId / qualityScore / intentRole 等字段，
+  // 不刷的话表格内容会跟实际状态脱节。
+  const nodes = trpc.nodes.list.useQuery(undefined, {
+    refetchInterval: workspace === "nodes" ? 30_000 : false
+  });
   const [filters, setFilters] = useLocalStorageState<NodeFilters>("mihomo-hive.node-filters", defaultNodeFilters);
   const [selectedHashesList, setSelectedHashesList] = useLocalStorageState<string[]>("mihomo-hive.selected-hashes", []);
   const selectedHashes = React.useMemo(() => new Set(selectedHashesList), [selectedHashesList]);

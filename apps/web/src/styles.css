@@ -969,13 +969,15 @@ select {
 }
 
 /* 带鱼屏：CSS columns 瀑布流，避免 grid 行高对齐导致的空白。
-   panels 按高度自动落到最短列；spec-save-bar 跨两列保留底部 sticky 行为。 */
+   panels 按高度自动落到最短列；spec-save-bar 跨两列保留底部 sticky 行为。
+   overflow: auto 保留局部滚动以容纳超长 spec。 */
 @media (min-width: 1700px) {
   .orchestration-spec-panel {
     display: block;
     column-count: 2;
     column-gap: 12px;
     column-fill: balance;
+    overflow: auto;
   }
   .orchestration-spec-panel > .panel,
   .orchestration-spec-panel > .collapsible-panel {
@@ -991,6 +993,7 @@ select {
   }
 }
 
+/* 默认（窄/中宽屏）：单列纵向堆叠，整个右栏可滚动 */
 .orchestration-status-panel {
   display: flex;
   flex-direction: column;
@@ -998,6 +1001,33 @@ select {
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+/* 宽屏：2×2 网格 —— KPI 跨两列，下方左 NodeMatrix / 右 RecentReconcileCard。
+   外层不再滚动；两个 panel 内部各自局部滚动，避免下半部分留白和整页滚动。 */
+@media (min-width: 1400px) {
+  .orchestration-status-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+    overflow: hidden;
+    padding-right: 0;
+  }
+  .orchestration-status-panel > .kpi-grid {
+    grid-column: 1 / -1;
+  }
+  .orchestration-status-panel > .panel {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .orchestration-status-panel > .panel > .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
 }
 
 .spec-save-bar {
