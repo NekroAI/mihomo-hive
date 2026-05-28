@@ -3,10 +3,12 @@ import { sub2ApiProtectedProxyRuleSchema } from "./sub2api.js";
 
 // 节点意图角色 —— 系统判定节点当前应该做什么
 // serving      = 健康，参与调度，承载账号
-// standby      = 入池后等待启用 / 暂停状态（disabled 同义）
-// quarantined  = 退避中：错误率破阈值，暂停接收新账号，账号留在原地
-// evicted      = 永久驱逐（多次 backoff 仍失败），等待人工 reset 或退役
-export const nodeIntentRoleSchema = z.enum(["serving", "standby", "quarantined", "evicted"]);
+// standby      = 入池后等待启用 / 未配置完整
+// quarantined  = 退避中：错误率破阈值，暂停接收新账号，账号留在原地，到期自动重测
+// evicted      = 永久驱逐（多次 backoff 仍失败 / 用户手动 retired），等待人工 reset
+// paused       = 用户手动暂停（disabled / cooling_down lifecycle）：账号留原地不迁、
+//                不接新账号、不自动恢复。跟 quarantined 的区别：没有自动到期重测
+export const nodeIntentRoleSchema = z.enum(["serving", "standby", "quarantined", "evicted", "paused"]);
 export type NodeIntentRole = z.infer<typeof nodeIntentRoleSchema>;
 
 // 节点供给策略 —— "我有哪些节点能用"

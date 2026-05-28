@@ -35,7 +35,7 @@ export const nodes = sqliteTable("nodes", {
   lastTestLatencyMs: integer("last_test_latency_ms"),
   lastTestTargets: text("last_test_targets"),
   // 编排意图（ADR 0003）
-  intentRole: text("intent_role", { enum: ["serving", "standby", "quarantined", "evicted"] })
+  intentRole: text("intent_role", { enum: ["serving", "standby", "quarantined", "evicted", "paused"] })
     .notNull()
     .default("standby"),
   backoffUntil: text("backoff_until"),

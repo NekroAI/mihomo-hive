@@ -331,6 +331,62 @@ describe("reconcile", () => {
     expect(result.nodeIntents.find((i) => i.hash === "n1xxxxxx")?.intentRole).toBe("evicted");
     expect(result.plannedChanges.find((c) => c.accountId === 10)?.kind).toBe("rebind_dead");
   });
+
+  it("用户暂停 disabled 节点 → role=paused：账号留原地不迁、不接新账号（P5-AA）", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      // 1 号节点用户暂停
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving", lifecycleStatus: "disabled" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [
+      buildAccount({ id: 10, proxy_id: 1 }), // 已绑暂停节点
+      buildAccount({ id: 20, proxy_id: null }) // 未绑，应该绑到 2 号（serving）
+    ];
+
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX
+    });
+
+    // 暂停节点角色 = paused
+    const pausedIntent = result.nodeIntents.find((i) => i.hash === "n1xxxxxx");
+    expect(pausedIntent?.intentRole).toBe("paused");
+    expect(pausedIntent?.nextAction).toContain("暂停");
+
+    // 已绑账号 10 不应该被迁走
+    expect(result.plannedChanges.find((c) => c.accountId === 10)).toBeUndefined();
+
+    // 未绑账号 20 应该绑到节点 2 (serving)，不会绑到暂停的节点 1
+    const newBind = result.plannedChanges.find((c) => c.accountId === 20);
+    expect(newBind?.kind).toBe("bind_missing");
+    expect(newBind?.toProxyId).toBe(2);
+  });
+
+  it("cooling_down 节点同样视为 paused（账号留原地、不接新）", () => {
+    const proxies = [buildProxy({ id: 1 }), buildProxy({ id: 2 })];
+    const localNodes = [
+      buildNode({ hash: "n1xxxxxx", sub2apiProxyId: 1, intentRole: "serving", lifecycleStatus: "cooling_down" }),
+      buildNode({ hash: "n2xxxxxx", sub2apiProxyId: 2, intentRole: "serving" })
+    ];
+    const accounts = [buildAccount({ id: 10, proxy_id: 1 })];
+
+    const result = reconcile({
+      now: NOW,
+      spec: defaultOrchestrationSpec,
+      localNodes,
+      remoteProxies: proxies,
+      remoteAccounts: accounts,
+      managedProxyPrefix: PREFIX
+    });
+
+    expect(result.nodeIntents.find((i) => i.hash === "n1xxxxxx")?.intentRole).toBe("paused");
+    expect(result.plannedChanges.find((c) => c.accountId === 10)).toBeUndefined();
+  });
 });
 
 describe("reconcile health state machine", () => {

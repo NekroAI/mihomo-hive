@@ -58,7 +58,7 @@ interface NodeRoleDecision {
   proxyId: number;
   proxy: Sub2ApiProxyRecord;
   localNode: ProxyNode | undefined;
-  role: "serving" | "standby" | "quarantined" | "evicted";
+  role: "serving" | "standby" | "quarantined" | "evicted" | "paused";
   currentLoad: number;
   targetLoad: number;
   nextAction: string;
@@ -91,6 +91,7 @@ interface RoleSets {
   serving: Set<number>;
   quarantined: Set<number>;
   evicted: Set<number>;
+  paused: Set<number>;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -158,7 +159,12 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
       : world.spec.capacity.targetPerNode;
 
   const decisions: NodeRoleDecision[] = [];
-  const roleSets: RoleSets = { serving: new Set(), quarantined: new Set(), evicted: new Set() };
+  const roleSets: RoleSets = {
+    serving: new Set(),
+    quarantined: new Set(),
+    evicted: new Set(),
+    paused: new Set()
+  };
 
   for (const proxy of world.proxies) {
     const local = world.localByProxyId.get(proxy.id);
@@ -187,6 +193,17 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
       // → 强制 evicted role，触发 rebind_dead 把账号迁到健康节点
       role = "evicted";
       nextAction = `用户标记 ${local.lifecycleStatus}，等待账号全部迁出`;
+    } else if (local.lifecycleStatus === "disabled" || local.lifecycleStatus === "cooling_down") {
+      // 用户手动暂停 / 测试失败冷却：
+      //   • 已绑账号留在原地（不触发 rebind_dead）
+      //   • 不接收新账号（不进 servingProxies）
+      //   • 不自动恢复（跟 quarantined 的本质区别 — quarantined 到期会重测）
+      // 用户要恢复需要主动点"启用调度"。
+      role = "paused";
+      nextAction =
+        local.lifecycleStatus === "disabled"
+          ? "用户暂停中，账号留原地不迁、不接新；需要主动启用调度才恢复"
+          : "冷却中，账号留原地不迁、不接新；需要主动启用调度才恢复";
     } else {
       // 状态机入口：根据 local 当前角色 + healthSignals 决定下一态
       const previousRole = local.intentRole ?? (local.lifecycleStatus === "schedulable" ? "serving" : "standby");
@@ -272,6 +289,7 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
     if (role === "serving") roleSets.serving.add(proxy.id);
     else if (role === "quarantined") roleSets.quarantined.add(proxy.id);
     else if (role === "evicted") roleSets.evicted.add(proxy.id);
+    else if (role === "paused") roleSets.paused.add(proxy.id);
 
     decisions.push({
       proxyId: proxy.id,
@@ -299,6 +317,16 @@ function countCandidateServing(world: ObservedWorld): number {
     const local = world.localByProxyId.get(proxy.id);
     if (!local) continue;
     if (local.intentRole === "evicted") continue;
+    if (local.intentRole === "paused") continue;
+    // 排除手动下线 lifecycle（这些节点 reconcile 会判 evicted/paused，但 intent_role 可能还没刷新）
+    if (
+      local.lifecycleStatus === "retired" ||
+      local.lifecycleStatus === "deleted" ||
+      local.lifecycleStatus === "draining" ||
+      local.lifecycleStatus === "disabled" ||
+      local.lifecycleStatus === "cooling_down"
+    )
+      continue;
     count += 1;
   }
   return count;
@@ -365,11 +393,15 @@ function planChanges(
     if (world.intakeProxyId !== null && account.proxy_id === world.intakeProxyId) continue;
 
     const proxyId = account.proxy_id ?? null;
-    // 决策 #5：quarantined 期间账号留在原地（"故障路径不触发漂移"），只有 evicted/不存在 才算 dead
+    // 决策 #5 + paused 扩展：account 视为 alive 不触发 rebind_dead 的代理角色：
+    //   • serving      = 健康正常
+    //   • quarantined  = 自动退避中，到期会重测恢复
+    //   • paused       = 用户手动暂停，账号留原地直到用户启用回来
+    // 只有 evicted 或代理完全不存在才算 dead 触发 rebind。
     const proxyAlive =
       proxyId !== null &&
       !roleSets.evicted.has(proxyId) &&
-      (roleSets.serving.has(proxyId) || roleSets.quarantined.has(proxyId));
+      (roleSets.serving.has(proxyId) || roleSets.quarantined.has(proxyId) || roleSets.paused.has(proxyId));
 
     if (!proxyAlive) {
       const target = pickTargetProxy(account, servingProxies, world.spec.stickiness.strategy);

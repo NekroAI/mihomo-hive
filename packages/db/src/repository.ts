@@ -736,11 +736,12 @@ function intentFromLifecycle(lifecycle: NodeLifecycleStatus): NodeIntentRole {
       return "serving";
     case "candidate":
     case "testing":
-    case "disabled":
       return "standby";
-    case "draining":
+    case "disabled":
     case "cooling_down":
-      return "quarantined";
+      return "paused";
+    case "draining":
+      return "evicted";
     case "retired":
     case "deleted":
       return "evicted";

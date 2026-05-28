@@ -56,7 +56,7 @@ export const proxyNodeSchema = z.object({
   /** 每个测试目标（openai / claude / ...）的独立结果，JSON 字符串。优先于 lastTestStatus 显示。 */
   lastTestTargets: z.string().optional(),
   // ADR 0003 orchestration intent
-  intentRole: z.enum(["serving", "standby", "quarantined", "evicted"]).optional(),
+  intentRole: z.enum(["serving", "standby", "quarantined", "evicted", "paused"]).optional(),
   backoffUntil: z.string().optional().nullable(),
   backoffAttempts: z.number().int().min(0).optional(),
   healthScore: z.number().int().min(0).max(100).optional().nullable(),

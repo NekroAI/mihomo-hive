@@ -397,17 +397,19 @@ function TickDetailBody(props: { tickId: string }) {
 }
 
 function RoleBadge(props: { role: NodeIntentRole }) {
-  const tone: Record<NodeIntentRole, "success" | "warning" | "danger" | "neutral"> = {
+  const tone: Record<NodeIntentRole, "success" | "warning" | "danger" | "neutral" | "info"> = {
     serving: "success",
     quarantined: "warning",
     evicted: "danger",
-    standby: "neutral"
+    standby: "neutral",
+    paused: "info"
   };
   const label: Record<NodeIntentRole, string> = {
     serving: "服务中",
     quarantined: "退避中",
     evicted: "已驱逐",
-    standby: "待命"
+    standby: "待命",
+    paused: "已暂停"
   };
   return <Badge tone={tone[props.role]}>{label[props.role]}</Badge>;
 }
