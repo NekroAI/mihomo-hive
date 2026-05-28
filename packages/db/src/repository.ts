@@ -325,6 +325,39 @@ export class HiveRepository {
     return transaction(hashes) as number;
   }
 
+  /**
+   * 重置节点的编排意图状态：清掉 intent_role / backoff / health_score / last_health_check，
+   * 让下次 reconcile 重新评估。
+   *
+   * 主要用途：把因为健康信号误归因被 quarantined / evicted 的节点恢复回评估池。
+   * **不**改 lifecycle_status —— 调用方需要单独把 retired 节点改回 schedulable 才会被推送
+   * 到 Sub2API 接活。
+   */
+  resetNodeIntent(hashes: string[]): ProxyNode[] {
+    if (hashes.length === 0) {
+      return [];
+    }
+    const statement = this.sqlite.prepare(`
+      UPDATE nodes SET
+        intent_role = 'standby',
+        backoff_until = NULL,
+        backoff_attempts = 0,
+        health_score = NULL,
+        last_health_check = NULL,
+        updated_at = @updatedAt
+      WHERE hash = @hash
+    `);
+    const now = new Date().toISOString();
+    const transaction = this.sqlite.transaction((items: string[]) => {
+      for (const hash of items) {
+        statement.run({ hash, updatedAt: now });
+      }
+    });
+    transaction(hashes);
+    const wanted = new Set(hashes);
+    return this.listNodes().filter((node) => wanted.has(node.hash));
+  }
+
   markNodesLifecycle(hashes: string[], lifecycleStatus: NodeLifecycleStatus): ProxyNode[] {
     if (hashes.length === 0) {
       return [];

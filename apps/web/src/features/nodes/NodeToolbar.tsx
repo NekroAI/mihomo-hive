@@ -10,6 +10,7 @@ import {
   Plug,
   RefreshCw,
   Replace,
+  RotateCcw,
   Snowflake,
   Trash2,
   XSquare
@@ -29,12 +30,16 @@ export interface NodeToolbarProps {
   attaching: boolean;
   testing: boolean;
   rebuilding: boolean;
+  resetting: boolean;
   onAttach: () => void;
   onTestSelected: () => void;
   onTestAll: () => void;
   onEnableSelected: () => void;
   /** 紧急兜底：用当前 DB 状态强制重新渲染 mihomo.yaml + reload。不动端口、不推 Sub2API。 */
   onRebuildMihomo: () => void;
+  /** 重置所选节点的编排意图（清 intent_role / backoff / health_score），让 reconcile 重新评估。
+   *  用于恢复被误判 quarantined / evicted 的节点。 */
+  onResetIntent: () => void;
   onDisableSelected: () => void;
   onCoolingDownSelected: () => void;
   onRetireSelected: () => void;
@@ -182,6 +187,14 @@ export function NodeToolbar(props: NodeToolbarProps) {
               onClick={props.onRebuildMihomo}
             >
               重建 Mihomo
+            </DropdownItem>
+            <DropdownItem
+              icon={<RotateCcw size={14} />}
+              disabled={props.busy || props.resetting || !hasSelection}
+              hint="重置所选节点的编排意图（清掉 quarantined / evicted 状态 + 退避计数 + 健康分），让 reconcile 重新评估；如果节点是 retired 会自动恢复为 schedulable。用于因健康信号误归因被错误驱逐时的人工救援。"
+              onClick={props.onResetIntent}
+            >
+              重置编排状态
             </DropdownItem>
           </DropdownGroup>
           <DropdownGroup label="生命周期（所选）">

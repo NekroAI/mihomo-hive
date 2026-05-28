@@ -208,6 +208,37 @@ export const appRouter = t.router({
         return { updated: nodes.length, nodes };
       }),
     /**
+     * 重置编排意图状态：清 intent_role / backoff_until / backoff_attempts /
+     * health_score / last_health_check，让 reconcile 下次重新评估。
+     *
+     * 主要用途：被健康信号误判 quarantined / evicted 的节点恢复入池。
+     * 可选 `liftFromRetired`：如果节点 lifecycle 是 retired，同时改回 schedulable
+     * （否则只重置 intent，retired 节点不会被推送 / 接活）。
+     */
+    resetIntent: protectedProcedure
+      .input(
+        z.object({
+          hashes: z.array(z.string().min(8)).min(1),
+          liftFromRetired: z.boolean().default(true)
+        })
+      )
+      .mutation(({ ctx, input }) => {
+        // 先看一下哪些节点是 retired，决定是否要 lift
+        const before = ctx.repo.listNodes().filter((node) => input.hashes.includes(node.hash));
+        const retiredHashes = before
+          .filter((node) => node.lifecycleStatus === "retired")
+          .map((node) => node.hash);
+        if (input.liftFromRetired && retiredHashes.length > 0) {
+          ctx.repo.markNodesLifecycle(retiredHashes, "schedulable");
+        }
+        const reset = ctx.repo.resetNodeIntent(input.hashes);
+        return {
+          reset: reset.length,
+          liftedFromRetired: input.liftFromRetired ? retiredHashes.length : 0,
+          nodes: reset
+        };
+      }),
+    /**
      * "启用调度" 按钮的语义：原子地把所选节点设为 schedulable，并同时推送到 Sub2API
      * （importProxyData + 回填 sub2apiProxyId）。这样节点立刻出现在编排器视野里，
      * 不再需要用户额外去高级运维页找"推送"按钮。

@@ -329,6 +329,20 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "重建 Mihomo 失败", error.message)
   });
+  const resetIntent = trpc.nodes.resetIntent.useMutation({
+    onMutate: () =>
+      startTask(setTask, "正在重置编排状态", "清掉所选节点的 intent_role / 退避 / 健康分，让 reconcile 重新评估。"),
+    onSuccess: async (result) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "编排状态已重置",
+        `${result.reset} 个节点 intent 已清空${result.liftedFromRetired > 0 ? `，其中 ${result.liftedFromRetired} 个从 retired 恢复为 schedulable` : ""}。下次 reconcile (30s 内) 会重新评估。`
+      );
+      await refreshOperationalData();
+    },
+    onError: (error) => failTask(setTask, pushToast, "重置编排状态失败", error.message)
+  });
   const attachToMihomo = trpc.nodes.attachToMihomo.useMutation({
     onMutate: () =>
       startTask(setTask, "正在接入 Mihomo", "给所选节点分配端口并刷新 Mihomo listener；不会推送到 Sub2API。"),
@@ -568,6 +582,7 @@ function Dashboard(props: { onLogout: () => void }) {
     rebuildMihomo.isPending ||
     attachToMihomo.isPending ||
     enableScheduling.isPending ||
+    resetIntent.isPending ||
     startMihomo.isPending ||
     reloadMihomo.isPending ||
     stopMihomo.isPending ||
@@ -706,6 +721,7 @@ function Dashboard(props: { onLogout: () => void }) {
             testNodes,
             attachToMihomo,
             rebuildMihomo,
+            resetIntent,
             deleteSubscription
           }}
         />

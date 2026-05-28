@@ -70,6 +70,7 @@ export interface NodesRouteProps {
     };
     attachToMihomo: PendingMutation & { mutate: (input: { hashes: string[] }) => void };
     rebuildMihomo: PendingMutation & { mutate: () => void };
+    resetIntent: PendingMutation & { mutate: (input: { hashes: string[]; liftFromRetired?: boolean }) => void };
     deleteSubscription: PendingMutation & { mutate: (input: { id: string }) => void };
   };
 }
@@ -170,6 +171,7 @@ export function NodesRoute(props: NodesRouteProps) {
           attaching={m.attachToMihomo.isPending}
           testing={m.testNodes.isPending}
           rebuilding={m.rebuildMihomo.isPending}
+          resetting={m.resetIntent.isPending}
           onAttach={() => m.attachToMihomo.mutate({ hashes: props.selectedHashesList })}
           onTestSelected={() =>
             m.testNodes.mutate({
@@ -212,6 +214,23 @@ export function NodesRoute(props: NodesRouteProps) {
               run: async () => m.rebuildMihomo.mutate()
             })
           }
+          onResetIntent={() => {
+            const evictedCount = selectedNodes.filter((n) => n.intentRole === "evicted").length;
+            const quarantinedCount = selectedNodes.filter((n) => n.intentRole === "quarantined").length;
+            const retiredCount = selectedNodes.filter((n) => n.lifecycleStatus === "retired").length;
+            const total = selectedNodes.length;
+            props.requestConfirmation({
+              title: "重置编排状态",
+              description:
+                `${total} 个所选节点的编排意图将被清空：${evictedCount} 个已驱逐 / ${quarantinedCount} 个退避中 / ${retiredCount} 个已退役。` +
+                ` 系统会清掉 intent_role、退避计数、健康分，让 reconcile 下次重新评估。`,
+              detail:
+                "如果含 retired 节点，会同时把 lifecycle 改回 schedulable 让它们重新接活。" +
+                " 用于：健康信号误归因导致节点被错误驱逐时的人工救援。",
+              confirmLabel: "重置",
+              run: async () => m.resetIntent.mutate({ hashes: props.selectedHashesList, liftFromRetired: true })
+            });
+          }}
           onDisableSelected={() =>
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
           }

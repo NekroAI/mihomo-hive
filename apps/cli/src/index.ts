@@ -262,6 +262,46 @@ nodes
     console.log(`Promoted ${promoted} candidate(s) to schedulable. Run 'ports assign' to allocate ports.`);
   });
 
+nodes
+  .command("reset-intent")
+  .description("Reset orchestration intent (clear quarantine/evicted state) so reconcile re-evaluates")
+  .option("--all-evicted", "Target all nodes whose intentRole is evicted/quarantined", false)
+  .option("--all-retired", "Target all nodes whose lifecycleStatus is retired", false)
+  .option("--hash <hash...>", "Specific node hashes to reset")
+  .option("--no-lift-retired", "Do not auto-lift retired nodes back to schedulable")
+  .action(async (options) => {
+    const { repo } = await openRepo();
+    const all = repo.listNodes();
+    const targets = new Set<string>();
+    if (Array.isArray(options.hash)) {
+      for (const h of options.hash as string[]) targets.add(h);
+    }
+    if (options.allEvicted) {
+      for (const n of all) {
+        if (n.intentRole === "evicted" || n.intentRole === "quarantined") targets.add(n.hash);
+      }
+    }
+    if (options.allRetired) {
+      for (const n of all) {
+        if (n.lifecycleStatus === "retired") targets.add(n.hash);
+      }
+    }
+    if (targets.size === 0) {
+      console.log("No targets. Use --hash <hash...> / --all-evicted / --all-retired.");
+      return;
+    }
+    const hashList = Array.from(targets);
+    const liftRetired = options.liftRetired !== false;
+    const retired = all.filter((n) => targets.has(n.hash) && n.lifecycleStatus === "retired").map((n) => n.hash);
+    if (liftRetired && retired.length > 0) {
+      repo.markNodesLifecycle(retired, "schedulable");
+    }
+    const reset = repo.resetNodeIntent(hashList);
+    console.log(
+      `Reset ${reset.length} node(s); lifted ${liftRetired ? retired.length : 0} from retired. Reconcile will re-evaluate within the next tick.`
+    );
+  });
+
 const mihomo = program.command("mihomo").description("Render and control Mihomo");
 
 mihomo
