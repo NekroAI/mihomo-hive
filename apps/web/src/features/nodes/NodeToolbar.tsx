@@ -166,7 +166,7 @@ export function NodeToolbar(props: NodeToolbarProps) {
           icon={<PlayCircle size={14} />}
           disabled={props.busy || !hasSelection}
           onClick={props.onEnableSelected}
-          title="把所选节点生命周期设为可调度 + 推送到 Sub2API + 回填代理 ID。完成后节点出现在账号编排页。建议先测过再启用。"
+          title="把所选节点生命周期设为可调度 + 推送到 Sub2API + 回填代理 ID。完成后节点出现在代理编排页。建议先测过再启用。"
         >
           启用调度
         </Button>

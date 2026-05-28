@@ -21,6 +21,14 @@ import { exportSub2Api } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo } from "@mihomo-hive/mihomo";
 import { sub2ApiExportRequestSchema } from "@mihomo-hive/schemas";
 import { existsSync } from "node:fs";
+import {
+  startAccountFleetScheduler,
+  type AccountFleetSchedulerHandle
+} from "./account-fleet-orchestrator.js";
+import {
+  startAccountJobsWorker,
+  type AccountJobsWorkerHandle
+} from "./account-fleet-worker.js";
 import { startReconcileScheduler, type ReconcileSchedulerHandle } from "./orchestrator.js";
 import { appRouter } from "./router.js";
 
@@ -120,6 +128,21 @@ app.post("/api/mihomo/render", async (c) => {
 const reconcileScheduler: ReconcileSchedulerHandle | undefined =
   process.env.HIVE_DISABLE_RECONCILE === "true" ? undefined : startReconcileScheduler({ repo, config });
 
+// notes/account-fleet-design.md：账号生命周期调度器 + jobs worker。
+//   - HIVE_DISABLE_ACCOUNT_FLEET=true 完全关闭
+//   - HIVE_ACCOUNT_FLEET_MODE='dry_run'（默认）/ 'apply' 控制是否真入队 jobs
+//   - apply 模式需 HIVE_ACCOUNT_KEY env（AES-256-GCM 密钥）才能跑 codex_login / codex_register
+const accountFleetMode: "dry_run" | "apply" =
+  process.env.HIVE_ACCOUNT_FLEET_MODE === "apply" ? "apply" : "dry_run";
+const accountFleetScheduler: AccountFleetSchedulerHandle | undefined =
+  process.env.HIVE_DISABLE_ACCOUNT_FLEET === "true" || process.env.HIVE_DISABLE_RECONCILE === "true"
+    ? undefined
+    : startAccountFleetScheduler({ repo, mode: accountFleetMode });
+const accountJobsWorker: AccountJobsWorkerHandle | undefined =
+  process.env.HIVE_DISABLE_ACCOUNT_FLEET === "true" || process.env.HIVE_DISABLE_RECONCILE === "true"
+    ? undefined
+    : startAccountJobsWorker({ repo });
+
 app.use("/trpc/*", async (c) =>
   fetchRequestHandler({
     endpoint: "/trpc",
@@ -129,7 +152,9 @@ app.use("/trpc/*", async (c) =>
       config,
       repo,
       authenticated: await isAuthenticated(c.req.raw),
-      orchestrator: reconcileScheduler
+      orchestrator: reconcileScheduler,
+      accountFleetScheduler,
+      accountJobsWorker
     })
   })
 );

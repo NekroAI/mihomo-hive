@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Mihomo Hive 首次访问 + 主导航", () => {
-  test("首次访问设密码、登录后 3 个 workspace tab 可切换", async ({ page }) => {
+  test("首次访问设密码、登录后 4 个 workspace tab 可切换", async ({ page }) => {
     await page.goto("/");
 
     // 首次访问应当展示"设置访问密码"
@@ -12,9 +12,10 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await passwordFields.nth(1).fill("e2e-test-pass-1234");
     await page.getByRole("button", { name: "设置并进入" }).click();
 
-    // 进入 dashboard，3 个 workspace tab 都出现
+    // 进入 dashboard，4 个 workspace tab 都出现
     const nav = page.getByRole("navigation", { name: "工作区" });
     await expect(nav.getByRole("tab", { name: "节点池" })).toBeVisible();
+    await expect(nav.getByRole("tab", { name: "代理编排" })).toBeVisible();
     await expect(nav.getByRole("tab", { name: "账号编排" })).toBeVisible();
     await expect(nav.getByRole("tab", { name: "导出" })).toBeVisible();
 
@@ -28,14 +29,18 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await expect(page.getByRole("button", { name: "测试全部" })).toBeVisible();
     await expect(page.getByRole("button", { name: "启用调度" })).toBeVisible();
 
-    // 切到账号编排：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
-    await nav.getByRole("tab", { name: "账号编排" }).click();
+    // 切到代理编排：声明式编排（ADR 0003）— spec 编辑左栏 + status 右栏
+    await nav.getByRole("tab", { name: "代理编排" }).click();
     // 左栏顶部：自动协调开关
     await expect(page.getByRole("heading", { name: "自动协调" })).toBeVisible();
     // 未配置 Sub2API 时右栏空态
     await expect(page.getByText("先配置 Sub2API 连接")).toBeVisible();
     // 暂停/恢复按钮（取决于 spec.enabled 默认 true，应该看到"暂停自动协调"）
     await expect(page.getByRole("button", { name: /暂停自动协调|恢复自动协调/ })).toBeVisible();
+
+    // 切到账号编排：账号生命周期管理（占位，分阶段交付）
+    await nav.getByRole("tab", { name: "账号编排" }).click();
+    await expect(page.getByRole("heading", { name: "账号编排" })).toBeVisible();
 
     // 切到导出：纯导出工具，只有导出篮子（Mihomo 控制已下线到节点池页）
     await nav.getByRole("tab", { name: "导出" }).click();

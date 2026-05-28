@@ -30,6 +30,10 @@ import {
 import { exportSub2Api, previewSub2ApiExport } from "@mihomo-hive/exporters";
 import { readMihomoStatus, reloadMihomo, startMihomo, stopMihomo } from "@mihomo-hive/mihomo";
 import {
+  accountFleetSpecSchema,
+  accountFleetStatusSnapshotSchema,
+  accountFleetTickSchema,
+  defaultAccountFleetSpec,
   nodeDeletionPlanSchema,
   orchestrationSpecSchema,
   sub2ApiAccountFiltersSchema,
@@ -41,6 +45,10 @@ import {
 } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import type {
+  AccountFleetSpec,
+  AccountFleetStatusSnapshot,
+  AccountFleetTick,
+  AccountRecordView,
   NodeDeletionPlan,
   OperationJob,
   OperationJobStatus,
@@ -58,6 +66,8 @@ export interface RouterContext {
   repo: HiveRepository;
   authenticated: boolean;
   orchestrator?: { triggerNow: () => Promise<ReconcileTick> } | undefined;
+  accountFleetScheduler?: { triggerNow: () => Promise<AccountFleetTick> } | undefined;
+  accountJobsWorker?: { pump: () => Promise<void> } | undefined;
 }
 
 const t = initTRPC.context<RouterContext>().create();
@@ -1199,8 +1209,263 @@ export const appRouter = t.router({
       list: protectedProcedure.query(() => Array.from(operationJobs.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))),
       get: protectedProcedure.input(z.object({ id: z.string().min(1) })).query(({ input }) => operationJobs.get(input.id))
     })
+  }),
+
+  // ─── Account Fleet (notes/account-fleet-design.md) ────────────
+  accountFleet: t.router({
+    spec: t.router({
+      get: protectedProcedure.query(({ ctx }) => ctx.repo.getAccountFleetSpec()),
+      save: protectedProcedure
+        .input(accountFleetSpecSchema)
+        .mutation(({ ctx, input }) => {
+          const saved = ctx.repo.saveAccountFleetSpec(input);
+          // 立即触发一次 tick，让用户看到新策略下的 plan
+          if (ctx.accountFleetScheduler) {
+            void ctx.accountFleetScheduler.triggerNow().catch(() => undefined);
+          }
+          return saved;
+        }),
+      defaults: protectedProcedure.query(() => defaultAccountFleetSpec)
+    }),
+    status: protectedProcedure.query(({ ctx }): AccountFleetStatusSnapshot => {
+      const spec = ctx.repo.getAccountFleetSpec();
+      const accounts = ctx.repo.listAccounts();
+      const recentTicks = ctx.repo.listRecentAccountFleetTickSummaries(50);
+      const recentJobs = ctx.repo.listAccountJobs(50);
+      const lastTickSummary = recentTicks[0];
+      const lastTick = lastTickSummary ? ctx.repo.getAccountFleetTick(lastTickSummary.id) : undefined;
+      const accountViews: AccountRecordView[] = accounts.map((a) => toAccountView(a));
+      const healthyCount = accountViews.filter((a) => a.health === "healthy").length;
+      const brokenCount = accountViews.filter((a) => a.health === "broken").length;
+      const recoveringCount = accountViews.filter((a) => a.intent === "recovering").length;
+      const pendingCount = accountViews.filter((a) => a.intent === "pending").length;
+      const dayKey = budgetWindowKeyUtc(new Date(), "day");
+      const monthKey = budgetWindowKeyUtc(new Date(), "month");
+      const dayBudget = ctx.repo.getAccountBudget(dayKey);
+      const monthBudget = ctx.repo.getAccountBudget(monthKey);
+      return accountFleetStatusSnapshotSchema.parse({
+        spec,
+        ...(lastTick ? { lastTick } : {}),
+        recentTicks,
+        accounts: accountViews,
+        recentJobs,
+        kpis: {
+          totalAccounts: accountViews.length,
+          healthyCount,
+          target: spec.target.healthyAccountsTarget,
+          brokenCount,
+          recoveringCount,
+          pendingCount,
+          todayRegistrationsUsed: dayBudget?.registrationsUsed ?? 0,
+          todayRegistrationsBudget: spec.registration.dailyBudget,
+          monthlyRegistrationsUsed: monthBudget?.registrationsUsed ?? 0,
+          monthlyRegistrationsBudget: spec.registration.monthlyBudget
+        }
+      });
+    }),
+    tick: t.router({
+      triggerNow: protectedProcedure.mutation(async ({ ctx }) => {
+        if (!ctx.accountFleetScheduler) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Account fleet scheduler is disabled (HIVE_DISABLE_ACCOUNT_FLEET=true)"
+          });
+        }
+        return ctx.accountFleetScheduler.triggerNow();
+      }),
+      get: protectedProcedure
+        .input(z.object({ id: z.string().min(1) }))
+        .query(({ ctx, input }) => ctx.repo.getAccountFleetTick(input.id)),
+      recent: protectedProcedure
+        .input(z.object({ limit: z.number().int().min(1).max(200).default(20) }).optional())
+        .query(({ ctx, input }) => ctx.repo.listRecentAccountFleetTickSummaries(input?.limit ?? 20))
+    }),
+
+    // 手动账号操作 —— 收编工作台 / 单条账号 dropdown 触发
+    actions: t.router({
+      /** 手动入队 codex_login 修复 job。要求账号已有 phone+password。 */
+      enqueueRecoverLogin: protectedProcedure
+        .input(z.object({ accountId: z.string().min(1) }))
+        .mutation(({ ctx, input }) => {
+          const acc = ctx.repo.getAccountById(input.accountId);
+          if (!acc) throw new TRPCError({ code: "NOT_FOUND", message: "account not found" });
+          if (!acc.encPhone || !acc.encPassword) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "account lacks phone/password; cannot run codex_login"
+            });
+          }
+          const now = new Date().toISOString();
+          ctx.repo.enqueueAccountJob({
+            id: randomUUID(),
+            kind: "codex_login",
+            accountId: acc.id,
+            status: "queued",
+            attempt: 0,
+            maxAttempts: 1,
+            priority: 50,
+            scheduledAt: now,
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+            payloadJson: JSON.stringify({ reason: "manual" }),
+            resultJson: null,
+            errorMessage: null,
+            triggeredBy: "manual",
+            triggeredTickId: null,
+            createdAt: now,
+            updatedAt: now
+          });
+          // 立刻 pump 让 worker 尽快消费
+          if (ctx.accountJobsWorker) {
+            void ctx.accountJobsWorker.pump().catch(() => undefined);
+          }
+          return { enqueued: true };
+        }),
+      /** 手动入队 codex_register 注册一个新账号（不绑定某个旧账号）。 */
+      enqueueRegisterNew: protectedProcedure.mutation(({ ctx }) => {
+        const now = new Date().toISOString();
+        ctx.repo.enqueueAccountJob({
+          id: randomUUID(),
+          kind: "codex_register",
+          accountId: null,
+          status: "queued",
+          attempt: 0,
+          maxAttempts: 1,
+          priority: 80,
+          scheduledAt: now,
+          startedAt: null,
+          finishedAt: null,
+          durationMs: null,
+          payloadJson: JSON.stringify({ reason: "manual" }),
+          resultJson: null,
+          errorMessage: null,
+          triggeredBy: "manual",
+          triggeredTickId: null,
+          createdAt: now,
+          updatedAt: now
+        });
+        if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+        return { enqueued: true };
+      }),
+      /** 试探导入：用户提供 refresh_token，看是否还能复活账号。 */
+      enqueueImportRefreshToken: protectedProcedure
+        .input(z.object({ refreshToken: z.string().min(1), existingAccountId: z.string().optional() }))
+        .mutation(({ ctx, input }) => {
+          const now = new Date().toISOString();
+          ctx.repo.enqueueAccountJob({
+            id: randomUUID(),
+            kind: "import_to_sub2api",
+            accountId: input.existingAccountId ?? null,
+            status: "queued",
+            attempt: 0,
+            maxAttempts: 1,
+            priority: 60,
+            scheduledAt: now,
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+            payloadJson: JSON.stringify({
+              refreshToken: input.refreshToken,
+              existingAccountId: input.existingAccountId
+            }),
+            resultJson: null,
+            errorMessage: null,
+            triggeredBy: "adopter",
+            triggeredTickId: null,
+            createdAt: now,
+            updatedAt: now
+          });
+          if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+          return { enqueued: true };
+        }),
+      /** 手动删除 Sub2API 账号记录（不可逆）。 */
+      enqueueDeleteSub2api: protectedProcedure
+        .input(z.object({ accountId: z.string().min(1) }))
+        .mutation(({ ctx, input }) => {
+          const acc = ctx.repo.getAccountById(input.accountId);
+          if (!acc) throw new TRPCError({ code: "NOT_FOUND", message: "account not found" });
+          if (!acc.externalId) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "account has no external_id; nothing to delete on Sub2API"
+            });
+          }
+          const now = new Date().toISOString();
+          ctx.repo.enqueueAccountJob({
+            id: randomUUID(),
+            kind: "delete_sub2api",
+            accountId: acc.id,
+            status: "queued",
+            attempt: 0,
+            maxAttempts: 1,
+            priority: 40,
+            scheduledAt: now,
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+            payloadJson: JSON.stringify({}),
+            resultJson: null,
+            errorMessage: null,
+            triggeredBy: "manual",
+            triggeredTickId: null,
+            createdAt: now,
+            updatedAt: now
+          });
+          if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+          return { enqueued: true };
+        }),
+      /** 标记账号永久弃用（origin=retired_legacy），仅本地不动 Sub2API。 */
+      markRetiredLegacy: protectedProcedure
+        .input(z.object({ accountId: z.string().min(1) }))
+        .mutation(({ ctx, input }) => {
+          const acc = ctx.repo.getAccountById(input.accountId);
+          if (!acc) throw new TRPCError({ code: "NOT_FOUND", message: "account not found" });
+          ctx.repo.patchAccount(acc.id, { origin: "retired_legacy", intent: "retired" });
+          return { ok: true };
+        })
+    })
   })
 });
+
+function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal): AccountRecordView {
+  return {
+    id: a.id,
+    externalId: a.externalId,
+    origin: a.origin,
+    intent: a.intent,
+    health: a.health,
+    email: a.email,
+    organizationId: a.organizationId,
+    platform: a.platform,
+    hasPhonePassword: Boolean(a.encPhone && a.encPassword),
+    hasRefreshToken: Boolean(a.encRefreshToken),
+    lastObservedAt: a.lastObservedAt,
+    lastUsedAt: a.lastUsedAt,
+    rateLimitedAt: a.rateLimitedAt,
+    rateLimitResetAt: a.rateLimitResetAt,
+    quota5hPercent: a.quota5hPercent,
+    quota7dPercent: a.quota7dPercent,
+    errorsInWindow: a.errorsInWindow,
+    recoveryAttempts: a.recoveryAttempts,
+    nextRecoveryAfter: a.nextRecoveryAfter,
+    lastRecoveryError: a.lastRecoveryError,
+    lastRecoveryPath: a.lastRecoveryPath,
+    batchId: a.batchId,
+    registeredAt: a.registeredAt,
+    egressNodeHash: a.egressNodeHash,
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt
+  };
+}
+
+function budgetWindowKeyUtc(at: Date, kind: "day" | "month"): string {
+  const y = at.getUTCFullYear();
+  const m = String(at.getUTCMonth() + 1).padStart(2, "0");
+  if (kind === "month") return `${y}-${m}-month`;
+  const d = String(at.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}-day`;
+}
 
 export type AppRouter = typeof appRouter;
 

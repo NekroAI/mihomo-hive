@@ -198,7 +198,7 @@ export function NodesRoute(props: NodesRouteProps) {
               title: "确认启用调度",
               description,
               detail:
-                "启用调度的三步动作：把节点生命周期改为可调度 → 调用 Sub2API 上行同步把节点推送过去 → 回填代理 ID。完成后节点会出现在账号编排页的节点矩阵，参与账号自动绑定 / 漂移 / 故障自愈。可在下拉菜单里随时'锁定调度'回退。",
+                "启用调度的三步动作：把节点生命周期改为可调度 → 调用 Sub2API 上行同步把节点推送过去 → 回填代理 ID。完成后节点会出现在代理编排页的节点矩阵，参与账号自动绑定 / 漂移 / 故障自愈。可在下拉菜单里随时'锁定调度'回退。",
               confirmLabel: "启用调度",
               run: async () => m.enableScheduling.mutate({ hashes: props.selectedHashesList })
             });
@@ -230,7 +230,7 @@ export function NodesRoute(props: NodesRouteProps) {
                 " 如果含已退役节点，会同时把生命周期改回可调度。" +
                 " 后续标准动作：① 工具栏【分配端口】重新分配 → ② 【启用调度】重新推送 Sub2API。" +
                 " Sub2API 端可能残留孤儿代理（地址指向已不存在的本地监听端口），" +
-                " 走账号编排页底部的'Sub2API 维护工具 → 清理空代理'收尾。",
+                " 走代理编排页底部的'Sub2API 维护工具 → 清理空代理'收尾。",
               confirmLabel: "重置",
               run: async () => m.resetIntent.mutate({ hashes: props.selectedHashesList, liftFromRetired: true })
             });

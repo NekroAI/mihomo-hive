@@ -1,0 +1,33 @@
+# Docker Compose override for Mihomo Hive + codex-tool
+#
+# 用法：把本文件复制为 `docker-compose.override.yml`（同级 docker-compose.yml），
+#       Compose 会自动合并。本仓库的 `.gitignore` 不含 override.yml，**请勿提交真实
+#       的 SkyMail / HeroSMS 凭据到任何 git 历史**——建议把 secrets 抽到 `.env` 或
+#       外部密钥管理。
+#
+# 本文件示范的是"私有衍生镜像"接入路径（推荐）：
+#   1. 你先用 examples/Dockerfile.codex-tool.example 构建一个 mihomo-hive 衍生镜像，
+#      里面预装了 codex-tool + Python + Playwright Chromium。
+#   2. 这里 override 把主 image 指向你的私有衍生镜像 tag。
+#
+# 备选：volume mount codex-tool 不可行，因为 codex-tool 需要 Python + Playwright +
+#       系统依赖；只挂个二进制是跑不起来的。
+
+services:
+  mihomo-hive:
+    # ① 换成你的私有衍生镜像 tag（用 examples/Dockerfile.codex-tool.example 构建）
+    image: registry.example.com/private/mihomo-hive-with-codex:latest
+
+    environment:
+      # ② AES-256-GCM 主密钥：openssl rand -base64 32
+      HIVE_ACCOUNT_KEY: "${HIVE_ACCOUNT_KEY}"
+
+      # ③ 切换账号编排到 apply 模式（默认 dry_run 不入队 jobs）
+      HIVE_ACCOUNT_FLEET_MODE: "apply"
+
+      # ④ 私有 codex-tool 二进制路径。Dockerfile.codex-tool.example 默认装在
+      #    /usr/local/bin/codex-tool，可省略本变量；如改装到别处再覆盖。
+      CODEX_TOOL_BIN: "/usr/local/bin/codex-tool"
+
+      # ⑤ （可选）想完全关闭账号编排：HIVE_DISABLE_ACCOUNT_FLEET=true
+      # HIVE_DISABLE_ACCOUNT_FLEET: "true"

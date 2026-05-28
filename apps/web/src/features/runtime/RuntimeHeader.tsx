@@ -3,7 +3,7 @@ import { Activity, LogOut, Monitor, Moon, Network, Server, ShieldCheck, Sun } fr
 import { Badge, Button } from "../../components/ui.js";
 import type { Theme } from "../../hooks/useTheme.js";
 
-export type WorkspaceId = "nodes" | "automation" | "runtime";
+export type WorkspaceId = "nodes" | "automation" | "account_fleet" | "runtime";
 
 interface WorkspaceTab {
   id: WorkspaceId;
@@ -12,7 +12,8 @@ interface WorkspaceTab {
 
 const tabs: WorkspaceTab[] = [
   { id: "nodes", label: "节点池" },
-  { id: "automation", label: "账号编排" },
+  { id: "automation", label: "代理编排" },
+  { id: "account_fleet", label: "账号编排" },
   { id: "runtime", label: "导出" }
 ];
 

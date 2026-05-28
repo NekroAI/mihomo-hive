@@ -4,6 +4,7 @@ import { ConfirmDialog, ToastStack, type ToastMessage } from "./components/ui.js
 import { AuthScreen } from "./features/auth/AuthScreen.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
+import { AccountFleetRoute } from "./routes/AccountFleetRoute.js";
 import { AdminRoute } from "./routes/AdminRoute.js";
 import { AutomationRoute } from "./routes/AutomationRoute.js";
 import { NodesRoute } from "./routes/NodesRoute.js";
@@ -13,7 +14,7 @@ import { useTheme } from "./hooks/useTheme.js";
 import { fetchAuthStatus, logout, type AuthStatus } from "./lib/auth.js";
 import { useLocalStorageState } from "./lib/persistence.js";
 import { queryClient, trpc, trpcClient } from "./lib/trpc.js";
-import { defaultOrchestrationSpec, type NodeDeletionPlan, type OrchestrationSpec, type Sub2ApiAccountFilters, type Sub2ApiProtectedProxyRule, type Sub2ApiProxyRecord, type SubscriptionImportPreview } from "@mihomo-hive/schemas";
+import { defaultAccountFleetSpec, defaultOrchestrationSpec, type AccountFleetSpec, type NodeDeletionPlan, type OrchestrationSpec, type Sub2ApiAccountFilters, type Sub2ApiProtectedProxyRule, type Sub2ApiProxyRecord, type SubscriptionImportPreview } from "@mihomo-hive/schemas";
 
 export function AppRoot() {
   return (
@@ -99,12 +100,12 @@ function Dashboard(props: { onLogout: () => void }) {
     "mihomo-hive.upstream-error-window",
     "1h"
   );
-  const [workspaceRaw, setWorkspace] = useLocalStorageState<"nodes" | "automation" | "runtime">(
+  const [workspaceRaw, setWorkspace] = useLocalStorageState<"nodes" | "automation" | "account_fleet" | "runtime">(
     "mihomo-hive.workspace",
     "nodes"
   );
-  // 兼容旧 localStorage 值 "sub2api" / "tasks"，统一映射到 "automation"
-  const workspace: "nodes" | "automation" | "runtime" =
+  // 兼容旧 localStorage 值 "sub2api" / "tasks" → 现 "automation"（代理编排）
+  const workspace: "nodes" | "automation" | "account_fleet" | "runtime" =
     (workspaceRaw as string) === "sub2api" || (workspaceRaw as string) === "tasks" ? "automation" : workspaceRaw;
   // 节点池页 30s 自动刷新：后台编排器会更新 sub2apiProxyId / qualityScore / intentRole 等字段，
   // 不刷的话表格内容会跟实际状态脱节。
@@ -197,6 +198,12 @@ function Dashboard(props: { onLogout: () => void }) {
   const orchestrationSpec = trpc.sub2api.spec.get.useQuery(undefined, { staleTime: Infinity });
   const orchestrationStatus = trpc.sub2api.orchestrator.statusSnapshot.useQuery(undefined, {
     enabled: workspace === "automation",
+    refetchInterval: 5000
+  });
+  // 账号编排（notes/account-fleet-design.md）
+  const accountFleetSpec = trpc.accountFleet.spec.get.useQuery(undefined, { staleTime: Infinity });
+  const accountFleetStatus = trpc.accountFleet.status.useQuery(undefined, {
+    enabled: workspace === "account_fleet",
     refetchInterval: 5000
   });
 
@@ -342,7 +349,7 @@ function Dashboard(props: { onLogout: () => void }) {
         setTask,
         pushToast,
         "编排状态已重置",
-        `${result.reset} 个节点已重置${liftMsg}。后续：点【分配端口】重分配 → 点【启用调度】重新推送到 Sub2API；Sub2API 端的孤儿代理走账号编排页"清理空托管代理"。`
+        `${result.reset} 个节点已重置${liftMsg}。后续：点【分配端口】重分配 → 点【启用调度】重新推送到 Sub2API；Sub2API 端的孤儿代理走代理编排页"清理空托管代理"。`
       );
       await refreshOperationalData();
     },
@@ -378,7 +385,7 @@ function Dashboard(props: { onLogout: () => void }) {
           setTask,
           pushToast,
           "调度已启用（未推送）",
-          `${result.updated} 个节点标记为可调度，但 Sub2API 未连接。请先在账号编排页配置连接，再到节点池重新启用以触发推送。`
+          `${result.updated} 个节点标记为可调度，但 Sub2API 未连接。请先在代理编排页配置连接，再到节点池重新启用以触发推送。`
         );
       } else {
         await finishTask(
@@ -550,6 +557,29 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const previewStrategySwitch = trpc.sub2api.orchestrator.previewStrategySwitch.useMutation({
     onError: (error) => pushToast("danger", "预览切换失败", error.message)
+  });
+  // Account Fleet mutations (P5)
+  const saveAccountFleetSpec = trpc.accountFleet.spec.save.useMutation({
+    onMutate: () => startTask(setTask, "正在保存账号编排策略", "服务端会重读并立即触发一次调和。"),
+    onSuccess: async () => {
+      await finishTask(setTask, pushToast, "策略已保存", "下一次调和按新策略生效。");
+      await utils.accountFleet.spec.get.invalidate();
+      await utils.accountFleet.status.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "策略保存失败", error.message)
+  });
+  const triggerAccountFleetTick = trpc.accountFleet.tick.triggerNow.useMutation({
+    onMutate: () => startTask(setTask, "正在调和账号池", "观察 → 判定 → 计划 → 限速。当前 P4 阶段为 dry-run。"),
+    onSuccess: async (tick) => {
+      await finishTask(
+        setTask,
+        pushToast,
+        "调和完成",
+        `planned ${tick.plannedTotal} / applied ${tick.appliedTotal} (${tick.skippedReason})`
+      );
+      await utils.accountFleet.status.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "调和失败", error.message)
   });
   const applyStrategySwitch = trpc.sub2api.orchestrator.applyStrategySwitch.useMutation({
     onMutate: () =>
@@ -728,6 +758,18 @@ function Dashboard(props: { onLogout: () => void }) {
             rebuildMihomo,
             resetIntent,
             deleteSubscription
+          }}
+        />
+      ) : null}
+
+      {workspace === "account_fleet" ? (
+        <AccountFleetRoute
+          spec={accountFleetSpec.data ?? defaultAccountFleetSpec}
+          status={accountFleetStatus.data}
+          statusLoading={accountFleetStatus.isLoading}
+          mutations={{
+            saveSpec: saveAccountFleetSpec,
+            triggerNow: triggerAccountFleetTick
           }}
         />
       ) : null}

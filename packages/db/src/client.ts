@@ -91,6 +91,113 @@ function ensureSchema(sqlite: HiveSqlite): void {
 
     CREATE INDEX IF NOT EXISTS idx_reconcile_ticks_started_at
       ON reconcile_ticks(started_at DESC);
+
+    -- ─── Account Fleet (notes/account-fleet-design.md) ───────────
+    CREATE TABLE IF NOT EXISTS accounts (
+      id TEXT PRIMARY KEY,
+      external_id INTEGER,
+      origin TEXT NOT NULL DEFAULT 'adopted_active'
+        CHECK (origin IN ('hive_registered', 'adopted_active', 'adopted_recovered', 'adopted_observing', 'retired_legacy')),
+      intent TEXT NOT NULL DEFAULT 'active'
+        CHECK (intent IN ('pending', 'active', 'recovering', 'retired')),
+      health TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (health IN ('healthy', 'rate_limited', 'quota_exhausted', 'broken', 'unknown')),
+      email TEXT NOT NULL,
+      organization_id TEXT,
+      client_id TEXT,
+      platform TEXT NOT NULL DEFAULT 'openai',
+      type TEXT NOT NULL DEFAULT 'oauth',
+      enc_phone TEXT,
+      enc_password TEXT,
+      enc_refresh_token TEXT,
+      enc_access_token TEXT,
+      enc_id_token TEXT,
+      enc_recovery_input_json TEXT,
+      last_observed_at TEXT,
+      last_used_at TEXT,
+      rate_limited_at TEXT,
+      rate_limit_reset_at TEXT,
+      quota_5h_percent INTEGER,
+      quota_7d_percent INTEGER,
+      errors_in_window INTEGER NOT NULL DEFAULT 0,
+      broken_since_tick TEXT,
+      broken_consecutive_ticks INTEGER NOT NULL DEFAULT 0,
+      recovery_attempts INTEGER NOT NULL DEFAULT 0,
+      next_recovery_after TEXT,
+      last_recovery_error TEXT,
+      last_recovery_path TEXT
+        CHECK (last_recovery_path IS NULL OR last_recovery_path IN ('codex_login', 'codex_register')),
+      batch_id TEXT,
+      registered_at TEXT,
+      egress_node_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_external_id
+      ON accounts(external_id) WHERE external_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_accounts_origin_intent_health
+      ON accounts(origin, intent, health);
+    CREATE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
+    CREATE INDEX IF NOT EXISTS idx_accounts_next_recovery
+      ON accounts(next_recovery_after);
+
+    CREATE TABLE IF NOT EXISTS account_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL
+        CHECK (kind IN ('codex_login', 'codex_register', 'import_to_sub2api',
+                        'delete_sub2api', 'toggle_schedulable', 'observe_usage')),
+      account_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+      attempt INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 100,
+      scheduled_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT,
+      duration_ms INTEGER,
+      payload_json TEXT NOT NULL,
+      result_json TEXT,
+      error_message TEXT,
+      triggered_by TEXT NOT NULL DEFAULT 'scheduler'
+        CHECK (triggered_by IN ('scheduler', 'manual', 'adopter')),
+      triggered_tick_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_dispatch
+      ON account_jobs(status, scheduled_at, priority);
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_account
+      ON account_jobs(account_id);
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_tick
+      ON account_jobs(triggered_tick_id);
+
+    CREATE TABLE IF NOT EXISTS account_fleet_ticks (
+      id TEXT PRIMARY KEY,
+      started_at TEXT NOT NULL,
+      finished_at TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      enabled INTEGER NOT NULL,
+      skipped_reason TEXT NOT NULL,
+      error_message TEXT,
+      planned_total INTEGER NOT NULL DEFAULT 0,
+      applied_total INTEGER NOT NULL DEFAULT 0,
+      observed_json TEXT NOT NULL,
+      planned_actions_json TEXT NOT NULL,
+      applied_actions_json TEXT NOT NULL,
+      triggered_job_ids_json TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE INDEX IF NOT EXISTS idx_account_fleet_ticks_started_at
+      ON account_fleet_ticks(started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS account_budgets (
+      window_key TEXT PRIMARY KEY,
+      registrations_used INTEGER NOT NULL DEFAULT 0,
+      registrations_budget INTEGER NOT NULL,
+      sms_cost_cents INTEGER NOT NULL DEFAULT 0,
+      reset_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   addColumnIfMissing(sqlite, "subscriptions", "exclude_keywords", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(sqlite, "nodes", "lifecycle_status", "TEXT NOT NULL DEFAULT 'candidate'");
@@ -106,6 +213,9 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "last_health_check", "TEXT");
   // P5-R: 每个测试目标（openai / claude / ...）的独立结果，JSON 数组字符串
   addColumnIfMissing(sqlite, "nodes", "last_test_targets", "TEXT");
+  // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：
+  // 旧 accounts 表升级时补 egress_node_hash 字段
+  addColumnIfMissing(sqlite, "accounts", "egress_node_hash", "TEXT");
   // Seed intent_role from lifecycle for nodes that pre-date this column.
   sqlite.exec(`
     UPDATE nodes

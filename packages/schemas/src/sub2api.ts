@@ -310,3 +310,117 @@ export const sub2ApiUpstreamErrorListOptionsSchema = z.object({
 });
 
 export type Sub2ApiUpstreamErrorListOptions = z.infer<typeof sub2ApiUpstreamErrorListOptionsSchema>;
+
+// ─── Account write APIs (notes/account-fleet-design.md §11.4) ──────
+
+/** POST /admin/openai/refresh-token：用 refresh_token 换出完整 token bundle。
+ *  注意：Sub2API 内部已经做 token refresh；如果该 refresh_token 在 Sub2API 端已失效，
+ *  这里也会失败。该端点的"导入新账号"用法是给 codex-tool login/all 刚拿到的 fresh
+ *  refresh_token 落地 Sub2API。 */
+export const sub2ApiRefreshOpenaiTokenResultSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1),
+  id_token: z.string().min(1),
+  expires_in: z.number().int().optional(),
+  expires_at: z.number().int(),
+  client_id: z.string().min(1),
+  email: z.string().min(1),
+  organization_id: z.string().min(1)
+});
+export type Sub2ApiRefreshOpenaiTokenResult = z.infer<typeof sub2ApiRefreshOpenaiTokenResultSchema>;
+
+/** POST /admin/accounts —— 创建账号 */
+export const sub2ApiCreateAccountCredentialsSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1),
+  id_token: z.string().min(1),
+  expires_at: z.number().int(),
+  client_id: z.string().min(1),
+  email: z.string().min(1),
+  organization_id: z.string().min(1),
+  model_mapping: z.record(z.string()).default({})
+});
+export type Sub2ApiCreateAccountCredentials = z.infer<typeof sub2ApiCreateAccountCredentialsSchema>;
+
+export const sub2ApiCreateAccountPayloadSchema = z.object({
+  name: z.string().min(1),
+  notes: z.string().default(""),
+  platform: z.string().default("openai"),
+  type: z.string().default("oauth"),
+  credentials: sub2ApiCreateAccountCredentialsSchema,
+  extra: z.record(z.unknown()).default({}),
+  proxy_id: z.number().int().positive(),
+  concurrency: z.number().int().min(1).default(10),
+  priority: z.number().int().default(1),
+  rate_multiplier: z.number().default(1),
+  group_ids: z.array(z.number().int().positive()).default([]),
+  expires_at: z.union([z.number(), z.null()]).default(null),
+  auto_pause_on_expired: z.boolean().default(true)
+});
+export type Sub2ApiCreateAccountPayload = z.infer<typeof sub2ApiCreateAccountPayloadSchema>;
+
+/** 创建后返回的精简记录（API 返回的完整对象走 sub2ApiAccountRecordSchema）。
+ *  我们只关心 id + email + status 这些"立即可写回本地"的字段。 */
+export const sub2ApiCreateAccountResultSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().min(1),
+    platform: z.string().optional().nullable(),
+    type: z.string().optional().nullable(),
+    status: z.string().optional().nullable(),
+    proxy_id: z.number().int().positive().optional().nullable(),
+    email: z.string().optional().nullable()
+  })
+  .passthrough();
+export type Sub2ApiCreateAccountResult = z.infer<typeof sub2ApiCreateAccountResultSchema>;
+
+/** GET /admin/accounts/{id}/usage —— 5h + 7d 配额窗口 */
+export const sub2ApiAccountUsageWindowSchema = z.object({
+  utilization: z.number().default(0),
+  resets_at: z.union([z.string(), z.number(), z.null()]).optional(),
+  remaining_seconds: z.number().int().default(0),
+  window_stats: z
+    .object({
+      requests: z.number().int().nonnegative().default(0),
+      tokens: z.number().int().nonnegative().default(0),
+      cost: z.number().default(0),
+      standard_cost: z.number().default(0),
+      user_cost: z.number().default(0)
+    })
+    .default({})
+});
+export type Sub2ApiAccountUsageWindow = z.infer<typeof sub2ApiAccountUsageWindowSchema>;
+
+export const sub2ApiAccountUsageResultSchema = z.object({
+  updated_at: z.string().optional(),
+  five_hour: sub2ApiAccountUsageWindowSchema.default({}),
+  seven_day: sub2ApiAccountUsageWindowSchema.default({})
+});
+export type Sub2ApiAccountUsageResult = z.infer<typeof sub2ApiAccountUsageResultSchema>;
+
+/** PUT /admin/accounts/{id}/schedulable —— body: { schedulable: boolean }
+ *  返回包含被更新账号的完整记录；我们这里宽松解析，只取关键字段。 */
+export const sub2ApiSchedulableToggleResultSchema = z
+  .object({
+    id: z.number().int().positive(),
+    schedulable: z.boolean(),
+    status: z.string().optional().nullable()
+  })
+  .passthrough();
+export type Sub2ApiSchedulableToggleResult = z.infer<typeof sub2ApiSchedulableToggleResultSchema>;
+
+/** GET /admin/groups */
+export const sub2ApiGroupRecordSchema = z
+  .object({
+    id: z.number().int().positive(),
+    name: z.string().min(1),
+    platform: z.string().min(1),
+    status: z.string().optional(),
+    sort_order: z.number().int().optional(),
+    description: z.string().optional().nullable(),
+    account_count: z.number().int().nonnegative().optional(),
+    active_account_count: z.number().int().nonnegative().optional(),
+    rate_limited_account_count: z.number().int().nonnegative().optional()
+  })
+  .passthrough();
+export type Sub2ApiGroupRecord = z.infer<typeof sub2ApiGroupRecordSchema>;

@@ -256,7 +256,7 @@ function DeletePlanDialog(props: { plan: NodeDeletionPlan; onClose: () => void; 
         {props.plan.blockingAccounts.length > 0 ? (
           <div className="warning-box">
             <AlertTriangle size={18} />
-            <span>仍有 {props.plan.blockingAccounts.length} 个账号绑定到这些代理。请先在账号编排页应用重绑定计划。</span>
+            <span>仍有 {props.plan.blockingAccounts.length} 个账号绑定到这些代理。请先在代理编排页应用重绑定计划。</span>
           </div>
         ) : (
           <div className="success-box">

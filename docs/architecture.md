@@ -124,18 +124,19 @@ candidate → standby → serving ↔ quarantined → evicted → retired
 2. `importProxyData(Sub2API)` —— 推到 Sub2API
 3. `updateSub2ApiProxyMappings` —— 回填 `sub2apiProxyId` 到本地
 
-完成后节点立即出现在账号编排页节点矩阵，编排器开始把账号往上分。
+完成后节点立即出现在代理编排页节点矩阵，编排器开始把账号往上分。
 
 ---
 
-## Web UI 三个工作区
+## Web UI 工作区
 
 顶部 segmented control 切换：
 
 | Workspace | 对应能力 | 核心组件 |
 |---|---|---|
 | **节点池** | 能力 1 主要操作 | NodeToolbar 工具栏 + NodeTable（含 L1/L2 延迟 + Sub2API 状态 + 账号数列） |
-| **账号编排** | 能力 2 主要操作 | OrchestrationSpecPanel（Spec 编辑） + OrchestrationStatusPanel（KPI / 节点矩阵 / 最近调和） |
+| **代理编排** | 能力 2 主要操作（账号 ↔ 代理绑定调度） | OrchestrationSpecPanel（Spec 编辑） + OrchestrationStatusPanel（KPI / 节点矩阵 / 最近调和） |
+| **账号编排** | 能力 3（账号生命周期自动维护，详见 notes/account-fleet-design.md） | AccountFleetRoute（分阶段交付） |
 | **导出** | 把当前选中节点打包给上游 | ExportPanel |
 
 ---

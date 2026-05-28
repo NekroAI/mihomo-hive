@@ -74,3 +74,102 @@ export const authSessions = sqliteTable("auth_sessions", {
   createdAt: text("created_at").notNull(),
   expiresAt: text("expires_at").notNull()
 });
+
+// ─── Account Fleet (notes/account-fleet-design.md) ──────────────
+
+export const accounts = sqliteTable("accounts", {
+  id: text("id").primaryKey(),
+  externalId: integer("external_id"),
+  origin: text("origin", {
+    enum: ["hive_registered", "adopted_active", "adopted_recovered", "adopted_observing", "retired_legacy"]
+  })
+    .notNull()
+    .default("adopted_active"),
+  intent: text("intent", { enum: ["pending", "active", "recovering", "retired"] })
+    .notNull()
+    .default("active"),
+  health: text("health", { enum: ["healthy", "rate_limited", "quota_exhausted", "broken", "unknown"] })
+    .notNull()
+    .default("unknown"),
+  email: text("email").notNull(),
+  organizationId: text("organization_id"),
+  clientId: text("client_id"),
+  platform: text("platform").notNull().default("openai"),
+  type: text("type").notNull().default("oauth"),
+  encPhone: text("enc_phone"),
+  encPassword: text("enc_password"),
+  encRefreshToken: text("enc_refresh_token"),
+  encAccessToken: text("enc_access_token"),
+  encIdToken: text("enc_id_token"),
+  encRecoveryInputJson: text("enc_recovery_input_json"),
+  lastObservedAt: text("last_observed_at"),
+  lastUsedAt: text("last_used_at"),
+  rateLimitedAt: text("rate_limited_at"),
+  rateLimitResetAt: text("rate_limit_reset_at"),
+  quota5hPercent: integer("quota_5h_percent"),
+  quota7dPercent: integer("quota_7d_percent"),
+  errorsInWindow: integer("errors_in_window").notNull().default(0),
+  brokenSinceTick: text("broken_since_tick"),
+  brokenConsecutiveTicks: integer("broken_consecutive_ticks").notNull().default(0),
+  recoveryAttempts: integer("recovery_attempts").notNull().default(0),
+  nextRecoveryAfter: text("next_recovery_after"),
+  lastRecoveryError: text("last_recovery_error"),
+  lastRecoveryPath: text("last_recovery_path", { enum: ["codex_login", "codex_register"] }),
+  batchId: text("batch_id"),
+  registeredAt: text("registered_at"),
+  egressNodeHash: text("egress_node_hash"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const accountJobs = sqliteTable("account_jobs", {
+  id: text("id").primaryKey(),
+  kind: text("kind", {
+    enum: ["codex_login", "codex_register", "import_to_sub2api", "delete_sub2api", "toggle_schedulable", "observe_usage"]
+  }).notNull(),
+  accountId: text("account_id"),
+  status: text("status", { enum: ["queued", "running", "succeeded", "failed", "cancelled"] })
+    .notNull()
+    .default("queued"),
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(1),
+  priority: integer("priority").notNull().default(100),
+  scheduledAt: text("scheduled_at").notNull(),
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
+  durationMs: integer("duration_ms"),
+  payloadJson: text("payload_json").notNull(),
+  resultJson: text("result_json"),
+  errorMessage: text("error_message"),
+  triggeredBy: text("triggered_by", { enum: ["scheduler", "manual", "adopter"] })
+    .notNull()
+    .default("scheduler"),
+  triggeredTickId: text("triggered_tick_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});
+
+export const accountFleetTicks = sqliteTable("account_fleet_ticks", {
+  id: text("id").primaryKey(),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull(),
+  skippedReason: text("skipped_reason").notNull(),
+  errorMessage: text("error_message"),
+  plannedTotal: integer("planned_total").notNull().default(0),
+  appliedTotal: integer("applied_total").notNull().default(0),
+  observedJson: text("observed_json").notNull(),
+  plannedActionsJson: text("planned_actions_json").notNull(),
+  appliedActionsJson: text("applied_actions_json").notNull(),
+  triggeredJobIdsJson: text("triggered_job_ids_json").notNull().default("[]")
+});
+
+export const accountBudgets = sqliteTable("account_budgets", {
+  windowKey: text("window_key").primaryKey(),
+  registrationsUsed: integer("registrations_used").notNull().default(0),
+  registrationsBudget: integer("registrations_budget").notNull(),
+  smsCostCents: integer("sms_cost_cents").notNull().default(0),
+  resetAt: text("reset_at").notNull(),
+  updatedAt: text("updated_at").notNull()
+});

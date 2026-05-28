@@ -1,0 +1,45 @@
+# 私有衍生镜像示例：在 mihomo-hive 上叠 codex-tool 层
+#
+# 使用：
+#   docker build -f examples/Dockerfile.codex-tool.example \
+#     -t registry.example.com/private/mihomo-hive-with-codex:latest .
+#
+# 然后在 docker-compose.override.yml 里把 image 指向这个 tag。
+#
+# 本文件**不能**提交到公开仓库 / 镜像注册表，因为它会把私有 codex-tool 拷贝进去。
+#
+# 镜像体积大约 1.5–2 GB（含 Chromium）。如果你的部署节点本地有 codex-tool 工作
+# 环境，宁可在宿主机直跑 mihomo-hive（不容器化）也比这种"重容器"轻量。
+
+FROM ghcr.io/nekroai/mihomo-hive:latest
+
+# ① 装 Python 3.11 + 系统依赖（Chromium 跑 headless 需要）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip python3-venv ca-certificates curl \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+      libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+      libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+# ② 安装 codex-tool。两种来源任选其一 —— **必须取消注释其中一个**。
+#
+# 保留下面这行让用户没改文件时 docker build 立刻报错，不会跑到 ③ 才发现没装：
+RUN echo "ERROR: Dockerfile.codex-tool.example —— 请取消注释步骤 ② 中的方案 A 或 B" >&2 && exit 1
+
+#   方案 A：从私有 PyPI / wheel 安装
+#   RUN pip3 install --index-url https://internal-pypi.example.com/simple/ \
+#       --no-cache-dir codex-tool
+
+#   方案 B：把本地 codex-tool 源码 / wheel 拷进镜像（适合 monorepo 共同 build）
+#   COPY codex-tool-0.x.y-py3-none-any.whl /tmp/
+#   RUN pip3 install --no-cache-dir /tmp/codex-tool-0.x.y-py3-none-any.whl
+
+# ③ 安装 Playwright Chromium（codex-tool 依赖 Sentinel）
+RUN pip3 install --no-cache-dir playwright \
+    && playwright install chromium
+
+# ④ 验证 codex-tool 可执行
+RUN codex-tool --help >/dev/null \
+ && echo "codex-tool installed at $(which codex-tool)"
+
+ENV CODEX_TOOL_BIN=/usr/local/bin/codex-tool

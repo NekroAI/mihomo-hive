@@ -41,7 +41,9 @@ printf '%s' 'new-strong-password' | docker exec -i mihomo-hive node apps/cli/dis
 
 ## Web UI 工作流
 
-Web UI 顶部 3 个 tab：节点池 / 账号编排 / 导出。
+Web UI 顶部 4 个 tab：节点池 / 代理编排 / 账号编排 / 导出。
+
+注：原 "账号编排" tab 已重命名为 **代理编排**（管理账号 ↔ 代理绑定调度）；新增的 **账号编排** tab 用于账号生命周期自动维护（注册 / 登录 / 退役），分阶段交付。
 
 ### 仅订阅转换（不用 Sub2API）
 
@@ -59,14 +61,55 @@ Web UI 顶部 3 个 tab：节点池 / 账号编排 / 导出。
 
 在上面 3 步基础上：
 
-4. 切到**账号编排** tab，配置 Sub2API 连接（baseUrl + adminApiKey + 托管前缀）
+4. 切到**代理编排** tab，配置 Sub2API 连接（baseUrl + adminApiKey + 托管前缀）
 5. 回到节点池 tab，勾选要纳入调度的节点，点 **【启用调度】**：原子完成 `lifecycle → schedulable` + 推送到 Sub2API + 回填 proxy_id
-6. 切回**账号编排** tab，在左栏 Spec 里配置：
+6. 切回**代理编排** tab，在左栏 Spec 里配置：
    - 入站代理（intake.proxyId）：新账号默认挂的代理
    - 保护规则（protectedRule）：哪些代理不应被自动化触碰
    - 容量 / 健康 / 灰度 等策略
 
 完成后 ReconcileScheduler 每 30s 一个 tick 自动调节绑定。右栏实时展示 KPI / 节点矩阵 / 最近调和日志。
+
+### 启用账号编排（账号全自动维护）
+
+详细设计见 ADR 0004 / `notes/account-fleet-design.md`。简要工作流：
+
+#### 0. 部署形态选择
+
+codex-tool 是私有闭源 + Playwright/Chromium 重依赖（镜像 1.5 GB+），不能内嵌主镜像。三种接入：
+
+| 方式 | 适用 | 改动 |
+|---|---|---|
+| **A. 私有衍生镜像（推荐）** | 多机部署 / 标准化运维 | 用 `examples/Dockerfile.codex-tool.example` 构建 → `docker-compose.override.yml` 换 image tag |
+| **B. 宿主机直跑 mihomo-hive** | 单机 / 本地开发 | `node apps/server/dist/index.js`，codex-tool 跟 Hive 在同一台机器上的 `PATH` 里 |
+| **C. 暂不接入** | 仅用代理编排 / 只看面板 | 设 `HIVE_DISABLE_ACCOUNT_FLEET=true`，或保持默认 `HIVE_ACCOUNT_FLEET_MODE=dry_run`（spec 编辑可用，jobs 不入队）|
+
+复制 `examples/docker-compose.override.example.yml → docker-compose.override.yml` 是路径 A 的起点。
+
+#### 1. 设置 env
+
+   ```bash
+   HIVE_ACCOUNT_KEY=$(openssl rand -base64 32)   # AES-256-GCM 主密钥
+   HIVE_ACCOUNT_FLEET_MODE=apply                  # 默认 dry_run；切到 apply 才真入队 jobs
+   CODEX_TOOL_BIN=/opt/private/bin/codex-tool     # 私有二进制路径
+   ```
+2. 切到**账号编排** tab → "⑥ codex-tool 连接" 卡填：
+   - codex-tool 路径（如果没用 env）
+   - SkyMail base_url / admin_email / admin_password
+   - ChatGPT mail_domain / chat_web_client_id / codex_client_id
+   - 接码 provider 与 service code
+   - 出口代理模式（默认 managed-node，自动选健康节点）
+3. "① 目标产能" 卡设 `healthyAccountsTarget` / `targetGroupId` / `defaultProxyId`
+4. "④ 出生策略" 卡设三级预算 `perTickCap / dailyBudget / monthlyBudget`
+5. 保存策略 → 点 **【立即调和】** 触发首次
+
+之后 AccountFleetScheduler 每 5min 一个 tick：
+- 观察账号 health（refresh_token / rate_limit / quota / upstream-errors 四路信号）
+- 自动 `codex_login` 修复掉登录账号（phone+password 已知者）
+- 自动 `codex_register` 补充新账号（受预算）
+- 自动退役长期失败 / 死号
+
+用户唯一需要做：充 SMS 余额 + 偶尔看 KPI。
 
 ### 节点池工具栏低频操作（`⋯` dropdown）
 

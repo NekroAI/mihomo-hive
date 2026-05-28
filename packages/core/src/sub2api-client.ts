@@ -1,15 +1,27 @@
 import {
   sub2ApiAccountRecordSchema,
+  sub2ApiAccountUsageResultSchema,
+  sub2ApiCreateAccountPayloadSchema,
+  sub2ApiCreateAccountResultSchema,
+  sub2ApiGroupRecordSchema,
   sub2ApiImportProxyDataResultSchema,
   sub2ApiProxyQualityResultSchema,
   sub2ApiProxyRecordSchema,
+  sub2ApiRefreshOpenaiTokenResultSchema,
+  sub2ApiSchedulableToggleResultSchema,
   sub2ApiUpstreamErrorSchema,
   type Sub2ApiAccountFilters,
   type Sub2ApiAccountRecord,
+  type Sub2ApiAccountUsageResult,
   type Sub2ApiConnectionConfig,
+  type Sub2ApiCreateAccountPayload,
+  type Sub2ApiCreateAccountResult,
+  type Sub2ApiGroupRecord,
   type Sub2ApiImportProxyDataResult,
   type Sub2ApiProxyQualityResult,
   type Sub2ApiProxyRecord,
+  type Sub2ApiRefreshOpenaiTokenResult,
+  type Sub2ApiSchedulableToggleResult,
   type Sub2ApiUpstreamError,
   type Sub2ApiUpstreamErrorListOptions
 } from "@mihomo-hive/schemas";
@@ -133,6 +145,98 @@ export class Sub2ApiClient {
 
   async listAllUpstreamErrors(options: Partial<Sub2ApiUpstreamErrorListOptions> = {}): Promise<Sub2ApiUpstreamError[]> {
     return this.listAllPages((page) => this.listUpstreamErrors({ ...options, page, pageSize: 200 }));
+  }
+
+  // ─── Account write APIs (P2) ────────────────────────────────
+
+  /**
+   * 用一个 refresh_token 换出完整 token bundle。
+   * 主要用于：codex-tool login/all 拿到 fresh refresh_token 后，灌进 Sub2API 拿
+   * Sub2API 标准化后的 token 字段，再调 createAccount 落库。
+   *
+   * **不是恢复路径**：Sub2API broken 的账号意味着它的 refresh_token 已死，
+   * 直接调这里也会失败。
+   */
+  async refreshOpenaiToken(input: {
+    refreshToken: string;
+    proxyId: number;
+  }): Promise<Sub2ApiRefreshOpenaiTokenResult> {
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      "/api/v1/admin/openai/refresh-token",
+      {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: input.refreshToken, proxy_id: input.proxyId })
+      }
+    );
+    assertSuccess(response, "导入 refresh_token 失败");
+    return sub2ApiRefreshOpenaiTokenResultSchema.parse(response.data ?? {});
+  }
+
+  /** POST /admin/accounts —— 创建账号。payload 由 schemas 严格定义。 */
+  async createAccount(payload: Sub2ApiCreateAccountPayload): Promise<Sub2ApiCreateAccountResult> {
+    const parsed = sub2ApiCreateAccountPayloadSchema.parse(payload);
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      "/api/v1/admin/accounts",
+      { method: "POST", body: JSON.stringify(parsed) }
+    );
+    assertSuccess(response, "创建 Sub2API 账号失败");
+    return sub2ApiCreateAccountResultSchema.parse(response.data ?? {});
+  }
+
+  /** GET /admin/accounts/{id}/usage —— 5h + 7d 配额窗口。source/force 用默认值。 */
+  async getAccountUsage(
+    accountId: number,
+    options: { source?: string; force?: boolean } = {}
+  ): Promise<Sub2ApiAccountUsageResult> {
+    const search = new URLSearchParams({
+      source: options.source ?? "active",
+      force: options.force === false ? "false" : "true",
+      timezone: this.config.timezone
+    });
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      `/api/v1/admin/accounts/${accountId}/usage?${search}`
+    );
+    assertSuccess(response, "查询账号配额失败");
+    return sub2ApiAccountUsageResultSchema.parse(response.data ?? {});
+  }
+
+  /** DELETE /admin/accounts/{id} */
+  async deleteAccount(accountId: number): Promise<void> {
+    const response = await this.request<{ code: number; message?: string }>(
+      `/api/v1/admin/accounts/${accountId}`,
+      { method: "DELETE" }
+    );
+    assertSuccess(response, "删除 Sub2API 账号失败");
+  }
+
+  /** PUT /admin/accounts/{id}/schedulable —— body: { schedulable } */
+  async setAccountSchedulable(
+    accountId: number,
+    schedulable: boolean
+  ): Promise<Sub2ApiSchedulableToggleResult> {
+    const response = await this.request<{ code: number; message?: string; data?: unknown }>(
+      `/api/v1/admin/accounts/${accountId}/schedulable`,
+      { method: "PUT", body: JSON.stringify({ schedulable }) }
+    );
+    assertSuccess(response, "切换账号调度状态失败");
+    return sub2ApiSchedulableToggleResultSchema.parse(response.data ?? {});
+  }
+
+  /** GET /admin/groups —— 列所有 group（账号要绑定 group_ids）。 */
+  async listGroups(): Promise<Sub2ApiGroupRecord[]> {
+    const search = new URLSearchParams({
+      page: "1",
+      page_size: "100",
+      sort_by: "sort_order",
+      sort_order: "asc",
+      timezone: this.config.timezone
+    });
+    const response = await this.request<Sub2ApiListResponse<unknown>>(
+      `/api/v1/admin/groups?${search}`
+    );
+    assertSuccess(response, "获取 Sub2API 分组列表失败");
+    const data = response.data ?? {};
+    return (data.items ?? []).map((item) => sub2ApiGroupRecordSchema.parse(item));
   }
 
   async bulkUpdateProxy(accountIds: number[], proxyId: number): Promise<{
