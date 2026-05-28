@@ -302,7 +302,7 @@ export function ManagedOpsSection(props: {
             loading={props.pushing}
             disabled={!props.configured}
             onClick={props.onPush}
-            title="上行同步：把本地 schedulable + active 节点通过 Sub2API importProxyData 接口推到远端，代理名自动加托管前缀。Sub2API 按 proxy_key 去重，重复推送幂等。"
+            title="上行同步：把本地可调度 + 可用的节点推到 Sub2API 远端，代理名自动加托管前缀。Sub2API 按代理标识去重，重复推送幂等。"
           >
             推送本地节点
           </Button>

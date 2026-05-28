@@ -322,7 +322,7 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const rebuildMihomo = trpc.runtime.publish.useMutation({
     onMutate: () =>
-      startTask(setTask, "正在重建 Mihomo", "用当前节点状态重新渲染 mihomo.yaml 并 reload 进程；不动端口、不推 Sub2API。"),
+      startTask(setTask, "正在重建 Mihomo", "用当前节点状态重新渲染 Mihomo 配置并重载进程；不动端口、不推送 Sub2API。"),
     onSuccess: async (result) => {
       await finishTask(setTask, pushToast, "Mihomo 已重建", `当前 ${result.listeners} 个 listener。`);
       await refreshOperationalData();
@@ -334,10 +334,10 @@ function Dashboard(props: { onLogout: () => void }) {
       startTask(
         setTask,
         "正在重置编排状态",
-        "清掉所选节点的 intent_role / 退避 / 健康分 / Sub2API 映射，让 reconcile 重新评估。"
+        "清掉所选节点的编排角色 / 退避计数 / 健康分 / Sub2API 代理映射，让调和器重新评估。"
       ),
     onSuccess: async (result) => {
-      const liftMsg = result.liftedFromRetired > 0 ? `，${result.liftedFromRetired} 个从 retired 恢复` : "";
+      const liftMsg = result.liftedFromRetired > 0 ? `，${result.liftedFromRetired} 个从已退役状态恢复` : "";
       await finishTask(
         setTask,
         pushToast,
@@ -350,7 +350,7 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const attachToMihomo = trpc.nodes.attachToMihomo.useMutation({
     onMutate: () =>
-      startTask(setTask, "正在接入 Mihomo", "给所选节点分配端口并刷新 Mihomo listener；不会推送到 Sub2API。"),
+      startTask(setTask, "正在接入 Mihomo", "给所选节点分配端口并刷新 Mihomo 本地监听；不会推送到 Sub2API。"),
     onSuccess: async (result) => {
       await finishTask(
         setTask,
@@ -364,7 +364,7 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const enableScheduling = trpc.nodes.enableScheduling.useMutation({
     onMutate: () =>
-      startTask(setTask, "正在启用调度", "把所选节点设为 schedulable，并推送到 Sub2API 代理池。"),
+      startTask(setTask, "正在启用调度", "把所选节点设为可调度，并推送到 Sub2API 代理池。"),
     onSuccess: async (result) => {
       if (result.syncedToSub2api && result.summary) {
         await finishTask(
@@ -378,14 +378,14 @@ function Dashboard(props: { onLogout: () => void }) {
           setTask,
           pushToast,
           "调度已启用（未推送）",
-          `${result.updated} 个节点标记为 schedulable，但 Sub2API 未连接。请先在账号编排页配置连接，再到节点池重新启用以触发推送。`
+          `${result.updated} 个节点标记为可调度，但 Sub2API 未连接。请先在账号编排页配置连接，再到节点池重新启用以触发推送。`
         );
       } else {
         await finishTask(
           setTask,
           pushToast,
           "调度已启用（未推送）",
-          `${result.updated} 个节点标记为 schedulable，但没有 active+已分端口的节点可推送。请先"分配端口"并测试通过。`
+          `${result.updated} 个节点标记为可调度，但没有可用且已分端口的节点可推送。请先"分配端口"并测试通过。`
         );
       }
       await refreshOperationalData();
@@ -401,7 +401,7 @@ function Dashboard(props: { onLogout: () => void }) {
     onError: (error) => failTask(setTask, pushToast, "Mihomo 启动失败", error.message)
   });
   const reloadMihomo = trpc.mihomo.reload.useMutation({
-    onMutate: () => startTask(setTask, "正在重载 Mihomo", "会向当前 Mihomo 进程发送 reload 信号。"),
+    onMutate: () => startTask(setTask, "正在重载 Mihomo", "会向当前 Mihomo 进程发送重载信号。"),
     onSuccess: async () => {
       await finishTask(setTask, pushToast, "Mihomo 已重载", "配置变更已提交给运行进程。");
       await refreshOperationalData();
@@ -483,7 +483,7 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const pushManagedSub2api = trpc.sub2api.automation.syncManagedProxies.useMutation({
     onMutate: () =>
-      startTask(setTask, "正在推送本地节点到 Sub2API", "通过 importProxyData 把 Hive 节点上行同步并回填 proxy_id。"),
+      startTask(setTask, "正在推送本地节点到 Sub2API", "把 Hive 节点上行同步并回填代理 ID。"),
     onSuccess: async (result) => {
       await finishTask(
         setTask,
@@ -511,9 +511,9 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   // ADR 0003: orchestration spec + scheduler
   const saveOrchestrationSpec = trpc.sub2api.spec.save.useMutation({
-    onMutate: () => startTask(setTask, "正在保存策略", "服务端会重读 live 数据并立即触发一次 reconcile。"),
+    onMutate: () => startTask(setTask, "正在保存策略", "服务端会重读最新数据并立即触发一次调和。"),
     onSuccess: async () => {
-      await finishTask(setTask, pushToast, "策略已保存", "下次 reconcile 立即按新策略生效。");
+      await finishTask(setTask, pushToast, "策略已保存", "下次调和立即按新策略生效。");
       await utils.sub2api.spec.get.invalidate();
       await utils.sub2api.orchestrator.statusSnapshot.invalidate();
     },
@@ -542,7 +542,7 @@ function Dashboard(props: { onLogout: () => void }) {
   });
   const resumeOrchestrator = trpc.sub2api.orchestrator.resume.useMutation({
     onSuccess: async () => {
-      pushToast("success", "自动协调已恢复", "下一次 reconcile 周期立即生效。");
+      pushToast("success", "自动协调已恢复", "下一次调和周期立即生效。");
       await utils.sub2api.spec.get.invalidate();
       await utils.sub2api.orchestrator.statusSnapshot.invalidate();
     },
@@ -556,7 +556,7 @@ function Dashboard(props: { onLogout: () => void }) {
       startTask(
         setTask,
         "切换日工具：哈希策略迁移",
-        "一次性把所有账号按新策略重排，并更新 Spec。完成后切换的下次 reconcile 会接管常态调度。"
+        "一次性把所有账号按新策略重排，并更新策略。完成后切换的下次调和会接管常态调度。"
       ),
     onSuccess: async (result) => {
       await finishTask(

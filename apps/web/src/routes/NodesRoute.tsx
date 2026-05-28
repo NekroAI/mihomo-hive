@@ -192,13 +192,13 @@ export function NodesRoute(props: NodesRouteProps) {
               untested > 0
                 ? `${untested}/${total} 个所选节点还没测试过。启用调度后系统会立即推送到 Sub2API 并纳入自动化分配，可能会绑账号上去。建议先"分配端口"+"测试所选"，确认可用后再启用。`
                 : withoutPort > 0
-                  ? `${withoutPort}/${total} 个所选节点没有分配端口。这些节点会被标记 schedulable 但不会被推送（Sub2API 只接收 active+已分端口的代理）。`
+                  ? `${withoutPort}/${total} 个所选节点没有分配端口。这些节点会被标记为"可调度"但不会被推送（Sub2API 只接收可用+已分端口的代理）。`
                   : `${total} 个所选节点都测试过且有端口，会一并推送到 Sub2API。`;
             props.requestConfirmation({
               title: "确认启用调度",
               description,
               detail:
-                "启用调度 = 改本地 lifecycle 为 schedulable + 调用 Sub2API importProxyData 把节点上行同步并回填 proxy_id。完成后节点会出现在账号编排页的节点矩阵，参与账号自动绑定 / 漂移 / 故障自愈。可在下拉菜单里随时'暂停'回退。",
+                "启用调度的三步动作：把节点生命周期改为可调度 → 调用 Sub2API 上行同步把节点推送过去 → 回填代理 ID。完成后节点会出现在账号编排页的节点矩阵，参与账号自动绑定 / 漂移 / 故障自愈。可在下拉菜单里随时'锁定调度'回退。",
               confirmLabel: "启用调度",
               run: async () => m.enableScheduling.mutate({ hashes: props.selectedHashesList })
             });
@@ -207,9 +207,9 @@ export function NodesRoute(props: NodesRouteProps) {
             props.requestConfirmation({
               title: "确认重建 Mihomo",
               description:
-                "用当前节点状态强制重新渲染 mihomo.yaml 并 reload 进程。不动端口分配、不改 lifecycle、不会推送到 Sub2API。",
+                "用当前节点状态强制重新渲染 Mihomo 配置并重载进程。不动端口分配、不改生命周期、不会推送到 Sub2API。",
               detail:
-                "用途：yaml 文件被外部改坏 / Mihomo 进程异常退出需要拉起 / 手动校验配置。reload 期间已建立的代理连接可能短暂中断。",
+                "用途：配置文件被外部改坏 / Mihomo 进程异常退出需要拉起 / 手动校验配置。重载期间已建立的代理连接可能短暂中断。",
               confirmLabel: "重建",
               run: async () => m.rebuildMihomo.mutate()
             })
@@ -226,11 +226,11 @@ export function NodesRoute(props: NodesRouteProps) {
                 `${total} 个所选节点将被重置：${evictedCount} 个已驱逐 / ${quarantinedCount} 个退避中 / ${retiredCount} 个已退役。` +
                 ` 同时会清掉 ${withSub2api} 个节点的 Sub2API 映射（旧代理可能已是孤儿）。`,
               detail:
-                "重置内容：intent_role / 退避计数 / 健康分 / Sub2API 映射 (sub2apiProxyId)。" +
-                " 如果含 retired，会同时把 lifecycle 改回 schedulable。" +
-                " 后续标准动作：① 工具栏【分配端口】重新分配 → ② 【启用调度】重新推 Sub2API。" +
-                " Sub2API 端可能残留孤儿代理（host:port 指向已不存在的本地 listener），" +
-                " 走账号编排页的'清理空托管代理'动作收尾。",
+                "重置内容：编排角色 / 退避计数 / 健康分 / Sub2API 代理映射。" +
+                " 如果含已退役节点，会同时把生命周期改回可调度。" +
+                " 后续标准动作：① 工具栏【分配端口】重新分配 → ② 【启用调度】重新推送 Sub2API。" +
+                " Sub2API 端可能残留孤儿代理（地址指向已不存在的本地监听端口），" +
+                " 走账号编排页底部的'Sub2API 维护工具 → 清理空代理'收尾。",
               confirmLabel: "重置",
               run: async () => m.resetIntent.mutate({ hashes: props.selectedHashesList, liftFromRetired: true })
             });

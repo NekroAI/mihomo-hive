@@ -197,15 +197,27 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
       //   • cooling_down  冷却（测试失败自动 / 用户判定节点有问题）— 跟 retired 的
       //                   区别仅在意图持久性，对 reconcile 而言都是"账号别留在这"
       role = "evicted";
-      nextAction = `用户标记 ${local.lifecycleStatus}，等待账号全部迁出`;
+      // UI 显示的 lifecycle 中文映射（reconcile 在 core 包不能引用 web 的 formatter）
+      const lifecycleLabel =
+        local.lifecycleStatus === "retired"
+          ? "已退役"
+          : local.lifecycleStatus === "deleted"
+            ? "已删除"
+            : local.lifecycleStatus === "draining"
+              ? "排空中"
+              : local.lifecycleStatus === "cooling_down"
+                ? "冷却中"
+                : local.lifecycleStatus;
+      nextAction = `用户标记${lifecycleLabel}，等待账号全部迁出`;
     } else if (local.lifecycleStatus === "disabled") {
-      // 用户手动暂停：
+      // 用户手动锁定（disabled lifecycle，UI 显示"已锁定"，P5-AE 术语统一）：
       //   • 已绑账号留在原地（不触发 rebind_dead）
       //   • 不接收新账号（不进 servingProxies）
       //   • 不自动恢复（跟 quarantined 的本质区别 — quarantined 到期会重测）
-      // 用户要恢复需要主动点"启用调度"。
+      //   • 用户要恢复需要主动点"启用调度"
+      // role 仍叫 "paused" 保持 schema 稳定；UI 通过 RoleBadge 映射显示"已锁定"
       role = "paused";
-      nextAction = "用户暂停中，账号留原地不迁、不接新；需要主动启用调度才恢复";
+      nextAction = "已锁定，账号留原地不迁、不接新；需要主动启用调度才恢复";
     } else {
       // 状态机入口：根据 local 当前角色 + healthSignals 决定下一态
       const previousRole = local.intentRole ?? (local.lifecycleStatus === "schedulable" ? "serving" : "standby");
@@ -233,7 +245,7 @@ function decideNodeRoles(world: ObservedWorld): { decisions: NodeRoleDecision[];
         // 退避到期，依据 health 决定恢复或加深退避
         if (!haveSignal) {
           role = "quarantined";
-          nextAction = "退避到期但暂无 upstream-errors 信号，再等一个周期";
+          nextAction = "退避到期但暂无上游错误信号，再等一个周期";
         } else if (errorOverThreshold) {
           backoffAttempts += 1;
           if (backoffAttempts > world.spec.health.evictAfterBackoffs) {

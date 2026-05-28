@@ -74,17 +74,17 @@ export function OrchestrationStatusPanel(props: {
     );
   }
 
-  // 状态 2：snapshot 已返回但 scheduler 还没完成第一次 tick（重启后头 ~10s 常见）
+  // 状态 2：snapshot 已返回但调和器还没完成第一轮（重启后头 ~10s 常见）
   if (!snapshot.lastTick) {
     return (
       <div className="orchestration-status-panel">
         <Panel
           title="编排状态"
-          hint="编排器（reconcile scheduler）在服务启动时自动开始运行，按 reconcileIntervalMs（默认 30s）周期工作。这里展示的是它最近一次跑的快照。"
+          hint="调和器在服务启动时自动开始运行，按设定的调和周期（默认 30 秒）工作。这里展示的是它最近一轮跑的快照。"
         >
           <EmptyState
-            title="Scheduler 正在跑首次 reconcile"
-            description="服务刚启动，编排器自动开始第一次 tick（需要拉 Sub2API 代理 / 账号 / 错误信号）。一般 5–15 秒内出第一份数据，本页面 5 秒一次自动刷新。"
+            title="调和器正在跑首次调和"
+            description="服务刚启动，调和器自动开始第一轮工作（需要拉 Sub2API 代理 / 账号 / 错误信号）。一般 5–15 秒内出第一份数据，本页面 5 秒一次自动刷新。"
           />
         </Panel>
       </div>
@@ -153,13 +153,13 @@ function KpiCards(props: { snapshot: OrchestrationStatusSnapshot }) {
         <Badge tone={spec.enabled ? "success" : "warning"}>{spec.enabled ? "自动协调运行中" : "已暂停"}</Badge>
         {lastTick ? (
           <span className="muted small">
-            上次 reconcile {new Date(lastTick.startedAt).toLocaleTimeString()} · 计划 {lastTick.plannedTotal} · 执行 {lastTick.appliedTotal}
+            上次调和 {new Date(lastTick.startedAt).toLocaleTimeString()} · 计划 {lastTick.plannedTotal} · 执行 {lastTick.appliedTotal}
             {lastTick.skippedReason !== "applied" && lastTick.skippedReason !== "no_change"
               ? ` · ${formatSkipReason(lastTick.skippedReason)}`
               : ""}
           </span>
         ) : (
-          <span className="muted small">尚未跑过 reconcile</span>
+          <span className="muted small">尚未跑过调和</span>
         )}
       </div>
     </section>
@@ -282,7 +282,7 @@ function RecentReconcileCard(props: { ticks: ReconcileTickSummary[] }) {
   if (props.ticks.length === 0) {
     return (
       <Panel title="最近调和">
-        <EmptyState title="尚未跑过 reconcile" description="服务启动后 30 秒内会跑第一次。" />
+        <EmptyState title="尚未跑过调和" description="服务启动后 30 秒内会跑第一次。" />
       </Panel>
     );
   }
@@ -396,6 +396,16 @@ function TickDetailBody(props: { tickId: string }) {
   );
 }
 
+/**
+ * 节点编排角色徽章。
+ *
+ * 注意 paused 的 UI 显示为「已锁定」（P5-AE 决策）：
+ *   • 内部 enum 仍叫 `paused`（schema/db/CLI 不动，保持兼容性）
+ *   • 但实际语义 = 账号锁死不迁、新账号也不接、不会自动恢复（必须手动启用调度）
+ *   • "暂停" 给人"临时停一下、会自动恢复"的错觉，跟实际行为不符
+ *   • "已锁定" 更准确传达"被冻结在当前状态、需要手动解开"
+ * 所以 UI 层把 paused 统一翻译为「已锁定」，代码层 paused 保留不动。
+ */
 function RoleBadge(props: { role: NodeIntentRole }) {
   const tone: Record<NodeIntentRole, "success" | "warning" | "danger" | "neutral" | "info"> = {
     serving: "success",
@@ -409,7 +419,7 @@ function RoleBadge(props: { role: NodeIntentRole }) {
     quarantined: "退避中",
     evicted: "已驱逐",
     standby: "待命",
-    paused: "已暂停"
+    paused: "已锁定"
   };
   return <Badge tone={tone[props.role]}>{label[props.role]}</Badge>;
 }
@@ -479,7 +489,7 @@ function summarizeTickSummary(tick: ReconcileTickSummary): string {
   if (tick.skippedReason === "error") return tick.errorMessage ?? "执行错误";
   if (tick.skippedReason === "no_change") return "状态符合预期，无变更";
   if (tick.skippedReason === "paused") {
-    return `Dry-run 仅计划 ${tick.plannedTotal} 项（自动协调暂停中）`;
+    return `试运行：仅计划 ${tick.plannedTotal} 项（自动协调暂停中）`;
   }
   if (tick.skippedReason === "batch_capped") {
     return `计划 ${tick.plannedTotal} 项，受灰度限制 0 项执行`;

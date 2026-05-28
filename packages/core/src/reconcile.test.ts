@@ -303,7 +303,7 @@ describe("reconcile", () => {
     // 节点角色应该被强制 evicted
     const retiredIntent = result.nodeIntents.find((i) => i.hash === "n1xxxxxx");
     expect(retiredIntent?.intentRole).toBe("evicted");
-    expect(retiredIntent?.nextAction).toContain("retired");
+    expect(retiredIntent?.nextAction).toContain("已退役");
 
     // 账号应该 rebind 到节点 2
     const moved = result.plannedChanges.find((c) => c.accountId === 10);
@@ -356,7 +356,7 @@ describe("reconcile", () => {
     // 暂停节点角色 = paused
     const pausedIntent = result.nodeIntents.find((i) => i.hash === "n1xxxxxx");
     expect(pausedIntent?.intentRole).toBe("paused");
-    expect(pausedIntent?.nextAction).toContain("暂停");
+    expect(pausedIntent?.nextAction).toContain("已锁定");
 
     // 已绑账号 10 不应该被迁走
     expect(result.plannedChanges.find((c) => c.accountId === 10)).toBeUndefined();

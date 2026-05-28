@@ -120,7 +120,7 @@ export function OrchestrationSpecPanel(props: {
               variant="secondary"
               icon={<Pause size={16} />}
               onClick={props.onPause}
-              title="火警开关：按下后不再修改 Sub2API 数据，但 reconcile 仍跑前 4 步（dry-run）写入审计日志，便于排查。"
+              title="火警开关：按下后不再修改 Sub2API 数据，但调和器仍跑前 4 步（试运行）写入审计日志，便于排查。"
             >
               暂停自动协调
             </Button>
@@ -128,7 +128,7 @@ export function OrchestrationSpecPanel(props: {
             <Button
               icon={<Play size={16} />}
               onClick={props.onResume}
-              title="恢复自动协调。下次 reconcile 周期立刻生效。"
+              title="恢复自动协调。下次调和周期立刻生效。"
             >
               恢复自动协调
             </Button>
@@ -139,7 +139,7 @@ export function OrchestrationSpecPanel(props: {
             loading={props.applying}
             disabled={!connected}
             onClick={props.onApplyOnce}
-            title="立即触发一次完整 reconcile：拉远端 → 计算计划 → 灰度执行。等同于不等下一个周期。"
+            title="立即触发一次完整调和：拉远端 → 计算计划 → 灰度执行。等同于不等下一个周期。"
           >
             立即调和一次
           </Button>
@@ -211,7 +211,7 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="入站代理"
-        hint="新账号在 Sub2API 创建时默认挂到这里；系统每个 reconcile 周期把它上面的账号引流到合适的 Hive 节点。建议选手动配置的兜底代理（不能是托管代理或保护代理）。"
+        hint="新账号在 Sub2API 创建时默认挂到这里；系统每个调和周期把它上面的账号引流到合适的 Hive 节点。建议选手动配置的兜底代理（不能是托管代理或保护代理）。"
       >
         {props.proxies.length === 0 ? (
           <EmptyState title="未拉取 Sub2API 代理" description="保存 + 测试连接后系统会自动拉取代理列表，再来此处选择入站代理。" />
@@ -312,7 +312,7 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="灰度与稳定性"
-        hint="灰度阀：单次 reconcile 最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。"
+        hint="灰度阀：单次调和最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW，集合哈希) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。"
       >
         <div className="form-grid">
           <SelectInput
@@ -320,8 +320,8 @@ export function OrchestrationSpecPanel(props: {
             value={draft.stickiness.strategy}
             onChange={(v) => patchNested("stickiness", (c) => ({ ...c, strategy: v as "stable-hash" | "rendezvous-hash" }))}
             options={[
-              { label: "稳定哈希 (sha256 % N，默认)", value: "stable-hash" },
-              { label: "Rendezvous Hashing (HRW)", value: "rendezvous-hash" }
+              { label: "稳定哈希（sha256 % N，默认）", value: "stable-hash" },
+              { label: "集合哈希 Rendezvous (HRW)", value: "rendezvous-hash" }
             ]}
           />
           <NumberInput
@@ -338,13 +338,13 @@ export function OrchestrationSpecPanel(props: {
             onChange={(v) => patch("graceBatchAbs", v)}
           />
           <NumberInput
-            label="单 tick 迁移上限"
+            label="单轮迁移上限"
             value={draft.stickiness.perTickMigrationCap}
             min={0}
             onChange={(v) => patchNested("stickiness", (c) => ({ ...c, perTickMigrationCap: v }))}
           />
           <NumberInput
-            label="Reconcile 周期 (秒)"
+            label="调和周期（秒）"
             value={Math.round(draft.reconcileIntervalMs / 1000)}
             min={5}
             onChange={(v) => patch("reconcileIntervalMs", v * 1000)}
@@ -379,7 +379,7 @@ export function OrchestrationSpecPanel(props: {
       <CollapsiblePanel
         title="故障自愈"
         storageKey="spec-health"
-        hint="仅依赖 Sub2API upstream-errors 信号；窗口内错误条数超过预算 → 退避（账号留在原地）→ 连续 N 次失败 → 永久驱逐。上游接口只返回错误条目，所以阈值是绝对错误数而不是百分比。"
+        hint="依赖 Sub2API 上游错误信号 + 主动 TCP 探测兜底；窗口内错误条数超过预算 → 退避（账号留在原地）→ 连续 N 次失败 → 永久驱逐。上游接口只返回错误条目，所以阈值是绝对错误数而不是百分比。"
       >
         <div className="form-grid">
           <NumberInput
@@ -441,7 +441,7 @@ export function OrchestrationSpecPanel(props: {
       <CollapsiblePanel
         title="Sub2API 维护工具"
         storageKey="spec-maintenance"
-        hint="低频救援动作。日常 reconcile 自动完成大部分维护；只有处理'孤儿代理 / 节点下线 / 验证代理质量'等特殊场景时才用这里。"
+        hint="低频救援动作。日常调和器会自动完成大部分维护；只有处理'孤儿代理 / 节点下线 / 验证代理质量'等特殊场景时才用这里。"
       >
         <div className="maintenance-row">
           <div className="maintenance-summary">
@@ -545,15 +545,17 @@ function StrategySwitchTool(props: {
   onCancel: () => void;
 }) {
   const other = props.currentStrategy === "stable-hash" ? "rendezvous-hash" : "stable-hash";
-  const otherLabel = other === "rendezvous-hash" ? "Rendezvous Hashing" : "稳定哈希";
+  // 内部 enum 保留英文（schema 字段名），UI 显示用中译
+  const otherLabel = other === "rendezvous-hash" ? "集合哈希（HRW）" : "稳定哈希";
+  const currentLabel = props.currentStrategy === "rendezvous-hash" ? "集合哈希（HRW）" : "稳定哈希";
   return (
     <div className="strategy-switch-tool">
       <div className="strategy-switch-head">
         <ArrowRightLeft size={14} className="muted" />
         <strong>切换日工具</strong>
         <span className="muted small">
-          当前 <span className="font-mono">{props.currentStrategy}</span>，切到{" "}
-          <span className="font-mono">{other}</span> 会触发一次性大规模迁移。
+          当前 <strong>{currentLabel}</strong>，切到{" "}
+          <strong>{otherLabel}</strong> 会触发一次性大规模迁移。
         </span>
       </div>
       {!props.preview ? (
@@ -573,8 +575,8 @@ function StrategySwitchTool(props: {
             <AlertTriangle size={14} />
             <span>
               将影响 <strong>{props.preview.affectedAccounts}</strong> / {props.preview.totalConsidered} 个账号，
-              从 <span className="font-mono">{props.preview.fromStrategy}</span> 切到{" "}
-              <span className="font-mono">{props.preview.toStrategy}</span>。
+              从 <strong>{props.preview.fromStrategy === "rendezvous-hash" ? "集合哈希（HRW）" : "稳定哈希"}</strong> 切到{" "}
+              <strong>{props.preview.toStrategy === "rendezvous-hash" ? "集合哈希（HRW）" : "稳定哈希"}</strong>。
             </span>
           </div>
           {props.preview.changes.length > 0 ? (

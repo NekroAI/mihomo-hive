@@ -87,12 +87,21 @@ export function formatNodeStatus(status: ProxyNode["status"]): string {
   }
 }
 
+/**
+ * 节点生命周期中文映射。
+ *
+ * 关于 disabled："锁定"的语义演进（P5-AE）：
+ *   原来叫"已暂停"，但实际行为是"账号锁死、新账号不接、不自动恢复"——更接近"锁定"语义。
+ *   "暂停"会让人误以为账号会暂时被处理 / 一段时间后自动恢复。
+ *   内部 lifecycle enum 仍叫 `disabled`（不动 schema），UI 显示统一改"已锁定"。
+ * 同样 disabled → intent_role=paused → UI badge 也是"已锁定"。两个维度对齐。
+ */
 export function formatLifecycleStatus(status: ProxyNode["lifecycleStatus"]): string {
   const labels: Record<ProxyNode["lifecycleStatus"], string> = {
     candidate: "候选",
     testing: "测试中",
     schedulable: "可调度",
-    disabled: "已暂停",
+    disabled: "已锁定",
     draining: "排空中",
     cooling_down: "冷却中",
     retired: "已退役",
