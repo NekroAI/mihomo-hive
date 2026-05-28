@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isNodeSideError } from "./orchestrator.js";
+import type { ProxyHealthSignal } from "@mihomo-hive/core";
+import { isNodeSideError, mergeProbeIntoSignals } from "./orchestrator.js";
 
 describe("isNodeSideError 健康信号过滤（P5-V）", () => {
   describe("算节点的锅（计入 errorsInWindow）", () => {
@@ -41,5 +42,59 @@ describe("isNodeSideError 健康信号过滤（P5-V）", () => {
     it("3xx 也不算节点（重定向不是错误）", () => {
       expect(isNodeSideError({ status_code: 301 })).toBe(false);
     });
+  });
+});
+
+describe("mergeProbeIntoSignals 主动探测信号合并（P5-AB）", () => {
+  const NOW = 1_700_000_000_000;
+  const WINDOW_MS = 5 * 60 * 1000;
+  const POLICY = { enabled: true, failureCountsAsErrors: 5 };
+
+  it("policy.enabled=false → 不改 signals", () => {
+    const signals = new Map<number, ProxyHealthSignal>([[1, { errorsInWindow: 2 }]]);
+    const probes = new Map([[1, { at: NOW, ok: false, detail: "timeout" }]]);
+    mergeProbeIntoSignals(signals, probes, { enabled: false, failureCountsAsErrors: 5 }, WINDOW_MS, NOW);
+    expect(signals.get(1)?.errorsInWindow).toBe(2);
+  });
+
+  it("探测窗口内失败 → 加 failureCountsAsErrors 条虚拟错误", () => {
+    const signals = new Map<number, ProxyHealthSignal>([[1, { errorsInWindow: 0 }]]);
+    const probes = new Map([[1, { at: NOW - 60_000, ok: false, detail: "ECONNREFUSED" }]]);
+    mergeProbeIntoSignals(signals, probes, POLICY, WINDOW_MS, NOW);
+    expect(signals.get(1)?.errorsInWindow).toBe(5);
+  });
+
+  it("探测窗口内失败 + upstream-errors 已有计数 → 累加", () => {
+    const signals = new Map<number, ProxyHealthSignal>([[1, { errorsInWindow: 3 }]]);
+    const probes = new Map([[1, { at: NOW, ok: false, detail: "timeout" }]]);
+    mergeProbeIntoSignals(signals, probes, POLICY, WINDOW_MS, NOW);
+    expect(signals.get(1)?.errorsInWindow).toBe(8); // 3 + 5
+  });
+
+  it("探测成功 → 初始化 0 错误信号（覆盖盲区，让 reconcile 看到该节点）", () => {
+    const signals = new Map<number, ProxyHealthSignal>();
+    const probes = new Map([[1, { at: NOW, ok: true, detail: "32ms" }]]);
+    mergeProbeIntoSignals(signals, probes, POLICY, WINDOW_MS, NOW);
+    expect(signals.get(1)?.errorsInWindow).toBe(0);
+  });
+
+  it("过期探测（超出 windowMs）→ 忽略", () => {
+    const signals = new Map<number, ProxyHealthSignal>();
+    const probes = new Map([[1, { at: NOW - WINDOW_MS - 1000, ok: false, detail: "old" }]]);
+    mergeProbeIntoSignals(signals, probes, POLICY, WINDOW_MS, NOW);
+    expect(signals.has(1)).toBe(false);
+  });
+
+  it("多个节点：成功 / 失败 / 过期混合", () => {
+    const signals = new Map<number, ProxyHealthSignal>();
+    const probes = new Map([
+      [1, { at: NOW, ok: false, detail: "timeout" }],
+      [2, { at: NOW - 30_000, ok: true, detail: "12ms" }],
+      [3, { at: NOW - WINDOW_MS - 5000, ok: false, detail: "old" }]
+    ]);
+    mergeProbeIntoSignals(signals, probes, POLICY, WINDOW_MS, NOW);
+    expect(signals.get(1)?.errorsInWindow).toBe(5);
+    expect(signals.get(2)?.errorsInWindow).toBe(0);
+    expect(signals.has(3)).toBe(false);
   });
 });

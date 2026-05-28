@@ -3,6 +3,8 @@ import {
   createSub2ApiClient,
   filterPreviewImportableNodes,
   filteredExistingNodeHashes,
+  mapWithConcurrency,
+  measureProxyTcpLatency,
   reconcile,
   type ProxyHealthSignal,
   type ReconcileSkippedReason,
@@ -255,12 +257,16 @@ export function startReconcileScheduler(input: {
   }
   scheduleSubscriptionRefresh();
 
+  // 主动探测 prober 子循环：兜底"长期没流量节点"的健康信号盲区
+  const stopProber = startProberLoop(repo, () => repo.getOrchestrationSpec());
+
   return {
     triggerNow: () => tick(),
     stop: () => {
       stopped = true;
       if (nextTimer) clearTimeout(nextTimer);
       if (subscriptionTimer) clearTimeout(subscriptionTimer);
+      stopProber();
     }
   };
 }
@@ -311,6 +317,79 @@ function writeBackNodeIntents(
     });
   }
   if (updates.length > 0) repo.saveNodes(updates);
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// 主动探测（P5-AB）：兜底"长期没流量节点没信号"盲区
+// ────────────────────────────────────────────────────────────────────────────────
+
+/** 单个节点最近一次主动探测结果。进程内存，prober loop 写、fetchHealthSignals 读。 */
+interface ProbeState {
+  /** 最近探测时间 */
+  at: number;
+  /** 探测是否成功（TCP connect OK） */
+  ok: boolean;
+  /** 失败原因 / 延迟（仅用于日志，不参与决策） */
+  detail: string;
+}
+
+/** key = sub2apiProxyId（reconcile 用这个 id 关联） */
+const probeStateByProxy = new Map<number, ProbeState>();
+
+/**
+ * 跑一轮主动探测：对所有有 raw.server:port + 有 sub2apiProxyId 的节点做 L1 TCP 探测。
+ * 把结果写入内存 probeStateByProxy 供下次 reconcile 合并到 healthSignals。
+ */
+async function runActiveProbeRound(repo: HiveRepository, spec: OrchestrationSpec): Promise<void> {
+  const policy = spec.health.activeProbe;
+  if (!policy.enabled) return;
+  const nodes = repo.listNodes().filter((n) => {
+    if (!n.sub2apiProxyId) return false;
+    if (typeof n.raw?.server !== "string" || typeof n.raw?.port !== "number") return false;
+    const lc = n.lifecycleStatus ?? "candidate";
+    // 探测 schedulable + 用户暂停状态的节点：前者关心健康，后者用户可能恢复要看是不是还活着
+    return lc === "schedulable" || lc === "disabled" || lc === "cooling_down";
+  });
+  if (nodes.length === 0) return;
+
+  await mapWithConcurrency(nodes, policy.concurrency, async (node) => {
+    const host = node.raw.server as string;
+    const port = node.raw.port as number;
+    const probeResult = await measureProxyTcpLatency({ host, port, timeoutMs: policy.timeoutMs });
+    probeStateByProxy.set(node.sub2apiProxyId!, {
+      at: Date.now(),
+      ok: probeResult.error === null,
+      detail: probeResult.error ?? `${probeResult.latencyMs}ms`
+    });
+  });
+}
+
+/** prober 的全局调度：fire-and-forget；进程退出自然停止。 */
+function startProberLoop(repo: HiveRepository, getSpec: () => OrchestrationSpec): () => void {
+  let stopped = false;
+  let timer: NodeJS.Timeout | undefined;
+
+  async function tickAndSchedule(): Promise<void> {
+    if (stopped) return;
+    const spec = getSpec();
+    const interval = Math.max(30_000, spec.health.activeProbe.intervalMs);
+    try {
+      await runActiveProbeRound(repo, spec);
+    } catch (err) {
+      console.warn("active probe round failed:", err);
+    }
+    if (stopped) return;
+    timer = setTimeout(() => void tickAndSchedule(), interval);
+    timer.unref?.();
+  }
+
+  // 启动后立即跑一次
+  void tickAndSchedule();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 /**
@@ -377,6 +456,35 @@ async function fetchHealthSignals(
     countedPairs.add(pairKey);
     const current = signals.get(proxyId) ?? { errorsInWindow: 0 };
     signals.set(proxyId, { errorsInWindow: current.errorsInWindow + 1 });
+  }
+
+  // P5-AB 信号合并：把主动探测结果叠加到 upstream-errors 信号上
+  mergeProbeIntoSignals(signals, probeStateByProxy, spec.health.activeProbe, spec.health.windowMs, Date.now());
+  return signals;
+}
+
+/**
+ * 把主动探测结果合并到 health signals（纯函数，方便单测）。
+ *
+ *   • 探测窗口内成功：保证该 proxy 至少有 0 错误的 signal（覆盖 upstream-errors 盲区）
+ *   • 探测窗口内失败：每次失败 += failureCountsAsErrors 个虚拟错误
+ *   • 过期探测（>windowMs）忽略
+ */
+export function mergeProbeIntoSignals(
+  signals: Map<number, ProxyHealthSignal>,
+  probeStates: Map<number, ProbeState>,
+  policy: { enabled: boolean; failureCountsAsErrors: number },
+  windowMs: number,
+  now: number
+): Map<number, ProxyHealthSignal> {
+  if (!policy.enabled) return signals;
+  const windowStart = now - windowMs;
+  for (const [proxyId, state] of probeStates) {
+    if (state.at < windowStart) continue;
+    if (!signals.has(proxyId)) signals.set(proxyId, { errorsInWindow: 0 });
+    if (state.ok) continue;
+    const current = signals.get(proxyId)!;
+    signals.set(proxyId, { errorsInWindow: current.errorsInWindow + policy.failureCountsAsErrors });
   }
   return signals;
 }

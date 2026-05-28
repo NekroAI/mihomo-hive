@@ -50,6 +50,26 @@ export const stickinessPolicySchema = z.object({
 
 export type StickinessPolicy = z.infer<typeof stickinessPolicySchema>;
 
+// 主动探测策略 —— 兜底"长期没流量节点没信号"盲区
+//
+// 没账号绑定 / 低峰期没请求的节点，upstream-errors 信号源完全没有数据 → reconcile
+// 默认认为它健康 → 把账号迁过来 → 立刻触发错误。
+// 解决：独立 prober 子循环按 intervalMs 周期对所有 serving + paused 节点做 L1 TCP 探测，
+// 失败的节点产生 N 条"虚拟错误"注入到 errorsInWindow，让节点在被分配账号前先暴露问题。
+export const activeProbePolicySchema = z.object({
+  enabled: z.boolean().default(true),
+  /** 探测周期（默认 5min；不应小于 reconcileIntervalMs） */
+  intervalMs: z.number().int().min(30_000).default(5 * 60 * 1000),
+  /** 单次 TCP connect 超时（默认 8s） */
+  timeoutMs: z.number().int().min(1000).default(8_000),
+  /** 并发数（默认 8） */
+  concurrency: z.number().int().min(1).max(32).default(8),
+  /** 单次主动探测失败 = 几条 upstream errors 等价（默认 5，刚好触发默认 errorBudget） */
+  failureCountsAsErrors: z.number().int().min(1).default(5)
+});
+
+export type ActiveProbePolicy = z.infer<typeof activeProbePolicySchema>;
+
 // 故障自愈策略 —— "故障能否自动调整"
 //
 // 现实约束：Sub2API 的 /ops/upstream-errors 接口只返回错误条目，没有"该账号总请求数"。
@@ -57,6 +77,9 @@ export type StickinessPolicy = z.infer<typeof stickinessPolicySchema>;
 //
 //   窗口内错误数 ≥ errorBudgetPerWindow → 进入退避
 //   窗口内错误数 = 0 → 健康
+//
+// 信号源（P5-AB 起）双路：
+//   upstream-errors（被动）+ activeProbe（主动 L1 TCP）→ 在 fetchHealthSignals 合并
 //
 // healthScore 用 max(0, 100 - errors * 5) 衰减计算（每条错误扣 5 分），仅用于 UI 展示。
 export const healthPolicySchema = z.object({
@@ -66,7 +89,8 @@ export const healthPolicySchema = z.object({
   backoffSequenceMs: z.array(z.number().int().min(1000))
     .min(1)
     .default([60_000, 300_000, 900_000, 3_600_000, 21_600_000]),        // 1m / 5m / 15m / 1h / 6h
-  evictAfterBackoffs: z.number().int().min(1).default(5)
+  evictAfterBackoffs: z.number().int().min(1).default(5),
+  activeProbe: activeProbePolicySchema.default({})
 });
 
 export type HealthPolicy = z.infer<typeof healthPolicySchema>;
