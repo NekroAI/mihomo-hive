@@ -88,6 +88,38 @@ export const sub2ApiProxyRecordSchema = z.object({
 
 export type Sub2ApiProxyRecord = z.infer<typeof sub2ApiProxyRecordSchema>;
 
+/** Sub2API account 真实结构里的 credentials 块（GET /admin/accounts 不返回原文 token，
+ *  只返回 email / client_id / organization_id 等标识性字段）。 */
+export const sub2ApiAccountCredentialsViewSchema = z
+  .object({
+    email: z.string().optional().nullable(),
+    client_id: z.string().optional().nullable(),
+    organization_id: z.string().optional().nullable(),
+    expires_at: z.union([z.number(), z.string()]).optional().nullable()
+  })
+  .passthrough();
+
+/** credentials_status 三个布尔信号 —— 区分账号"理论上有 token" 还是"没 token"。 */
+export const sub2ApiAccountCredentialsStatusSchema = z
+  .object({
+    has_access_token: z.boolean().optional(),
+    has_id_token: z.boolean().optional(),
+    has_refresh_token: z.boolean().optional()
+  })
+  .passthrough();
+
+/** extra 块的 codex 配额字段。Hive sense 用 codex_7d_used_percent 判定 quota_exhausted。 */
+export const sub2ApiAccountExtraSchema = z
+  .object({
+    email: z.string().optional().nullable(),
+    codex_5h_used_percent: z.number().optional().nullable(),
+    codex_7d_used_percent: z.number().optional().nullable(),
+    codex_primary_used_percent: z.number().optional().nullable(),
+    codex_usage_updated_at: z.string().optional().nullable(),
+    privacy_mode: z.string().optional().nullable()
+  })
+  .passthrough();
+
 export const sub2ApiAccountRecordSchema = z.object({
   id: z.number().int().positive(),
   name: z.string().min(1),
@@ -97,7 +129,19 @@ export const sub2ApiAccountRecordSchema = z.object({
   group_ids: z.array(z.number().int()).optional(),
   proxy_id: z.number().int().positive().optional().nullable(),
   proxy: sub2ApiProxyRecordSchema.partial().optional().nullable(),
-  email: z.string().optional().nullable()
+  /** 顶层 email 在抓包里不存在；这里保留兼容字段，真实值在 credentials.email */
+  email: z.string().optional().nullable(),
+  credentials: sub2ApiAccountCredentialsViewSchema.optional().nullable(),
+  credentials_status: sub2ApiAccountCredentialsStatusSchema.optional().nullable(),
+  extra: sub2ApiAccountExtraSchema.optional().nullable(),
+  /** 调度信号字段（抓包 §"获取账号列表" 中的实际命名）*/
+  schedulable: z.boolean().optional(),
+  last_used_at: z.string().optional().nullable(),
+  rate_limited_at: z.string().optional().nullable(),
+  rate_limit_reset_at: z.string().optional().nullable(),
+  temp_unschedulable_until: z.string().optional().nullable(),
+  temp_unschedulable_reason: z.string().optional().nullable(),
+  error_message: z.string().optional().nullable()
 });
 
 export type Sub2ApiAccountRecord = z.infer<typeof sub2ApiAccountRecordSchema>;

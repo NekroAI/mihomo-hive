@@ -55,7 +55,7 @@ function makeAccount(overrides: Partial<AccountRecordInternal> = {}): AccountRec
   });
 }
 
-describe("AccountFleetScheduler (dry-run)", () => {
+describe("AccountFleetScheduler (default disabled)", () => {
   let tmpDir: string;
   let repo: HiveRepository;
   let handle: AccountFleetSchedulerHandle | undefined;
@@ -77,29 +77,32 @@ describe("AccountFleetScheduler (dry-run)", () => {
       ...defaultAccountFleetSpec,
       reconcileIntervalMs: 60 * 60 * 1000 // 1h, 防止间隔太短重复触发
     });
-    handle = startAccountFleetScheduler({ repo, mode: "dry_run" });
+    handle = startAccountFleetScheduler({ repo });
     // boot tick is async; wait for it
     await handle.triggerNow(); // 再触发一次确保有数据
     const ticks = repo.listRecentAccountFleetTickSummaries(10);
     expect(ticks.length).toBeGreaterThanOrEqual(1);
-    expect(ticks[0]?.skippedReason).toBe("dry_run");
+    expect(ticks[0]?.skippedReason).toBe("paused");
   });
 
-  it("dry-run tick: planned > 0 but applied = 0, skippedReason='dry_run'", async () => {
+  it("paused tick: planned > 0 but applied = 0, skippedReason='paused'", async () => {
+    // 顶层 enabled=false（默认）→ gate 返回空，paused
+    // 但 registration.enabled=true 让 plan 阶段产出 register_new actions
     repo.saveAccountFleetSpec({
       ...defaultAccountFleetSpec,
       reconcileIntervalMs: 60 * 60 * 1000,
       target: { ...defaultAccountFleetSpec.target, healthyAccountsTarget: 10, minHealthyRatio: 0 },
       registration: {
         ...defaultAccountFleetSpec.registration,
+        enabled: true,
         emergencyMode: { ...defaultAccountFleetSpec.registration.emergencyMode, enabled: false }
       }
     });
-    handle = startAccountFleetScheduler({ repo, mode: "dry_run" });
+    handle = startAccountFleetScheduler({ repo });
     const tick = await handle.triggerNow();
     expect(tick.plannedTotal).toBeGreaterThan(0);
     expect(tick.appliedTotal).toBe(0);
-    expect(tick.skippedReason).toBe("dry_run");
+    expect(tick.skippedReason).toBe("paused");
     expect(tick.appliedActions).toHaveLength(0);
   });
 
@@ -110,7 +113,7 @@ describe("AccountFleetScheduler (dry-run)", () => {
       ...defaultAccountFleetSpec,
       reconcileIntervalMs: 60 * 60 * 1000
     });
-    handle = startAccountFleetScheduler({ repo, mode: "dry_run" });
+    handle = startAccountFleetScheduler({ repo });
     await handle.triggerNow();
     const updated = repo.getAccountById(acc.id);
     // 在 local-only 模式（无 Sub2API 连接）下 errorsInWindow 应被 diagnose 重置为 0（无 upstream errors signal）
@@ -121,9 +124,9 @@ describe("AccountFleetScheduler (dry-run)", () => {
   it("adopts new remote-only accounts (when remote fetch fails gracefully, none added)", async () => {
     // 没配置 Sub2API connection → remoteAccounts undefined → 不应崩
     repo.saveAccountFleetSpec({ ...defaultAccountFleetSpec, reconcileIntervalMs: 60 * 60 * 1000 });
-    handle = startAccountFleetScheduler({ repo, mode: "dry_run" });
+    handle = startAccountFleetScheduler({ repo });
     const tick = await handle.triggerNow();
-    expect(tick.skippedReason).toBe("dry_run");
+    expect(tick.skippedReason).toBe("paused");
     expect(repo.listAccounts()).toHaveLength(0);
   });
 
@@ -141,7 +144,7 @@ describe("AccountFleetScheduler (dry-run)", () => {
       ...defaultAccountFleetSpec,
       reconcileIntervalMs: 60 * 60 * 1000
     });
-    handle = startAccountFleetScheduler({ repo, mode: "dry_run" });
+    handle = startAccountFleetScheduler({ repo });
     const tick = await handle.triggerNow();
     expect(tick.observed.dailyRegistrationsUsed).toBe(7);
     expect(tick.observed.dailyRegistrationsBudget).toBe(defaultAccountFleetSpec.registration.dailyBudget);

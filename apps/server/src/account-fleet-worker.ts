@@ -225,7 +225,6 @@ async function runCodexRegister(
   const egress = resolveEgressForRegister(repo, spec);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
   const outcome = await adapter.registerOne({
-    smsCountry: spec.registration.smsCountry,
     timeoutMs: spec.codexTool.timeouts.registerMs
   });
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
@@ -289,14 +288,17 @@ async function runImportToSub2api(
   // 服务端走自己的网络发 OpenAI 请求，本地节点根本没参与。所以这里不选 egress，
   // 也不回填 egressNodeHash —— 保持 null，让后续真正用 codex-tool 的 login/register
   // 第一次跑时再选 + 回填。
+  // proxy_id 用代理编排 intake 作为 fallback（没 egress 节点信息）。
+  const proxyId = resolveCreationProxyId(repo, null);
   const sub2api = requireSub2apiClient(repo);
   const refreshed = await sub2api.refreshOpenaiToken({
     refreshToken: payload.refreshToken,
-    proxyId: _spec.registration.autoAssignProxyId
+    proxyId
   });
   const created = await sub2api.createAccount(
     makeCreatePayload({
       spec: _spec,
+      proxyId,
       tokens: {
         accessToken: refreshed.access_token,
         refreshToken: refreshed.refresh_token,
@@ -409,20 +411,24 @@ interface LandOnSub2apiInput {
 async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
   const { repo, crypto, spec, account, tokens, email } = input;
   const sub2api = requireSub2apiClient(repo);
-  // 1. 灌 token 到 Sub2API → 拿标准化 token bundle（含 client_id / org_id / expires_at）
-  //
-  // 严格解耦：新账号统一用 spec.registration.autoAssignProxyId 作为 intake，
-  // 后续由代理编排（ReconcileScheduler）按 stickiness 策略迁到合适节点。账号编排
-  // 永远不主动设 / 改 proxy_id 绑定 —— 那是代理编排的领地。
+  // 1. 推导 Sub2API 端的 proxy_id ——
+  //    优先用本次 codex-tool 实际走的节点对应的 Sub2API proxy_id（egress 节点必须先
+  //    "启用调度"推到 Sub2API 才有此映射）。这样账号 IP 出生地跟 Sub2API 看到的
+  //    binding 一致，省一次后续 reconcile 漂移。
+  //    fallback：代理编排 Spec.intake.proxyId（如果配过 intake 兜底代理）。
+  //    两者都没 → 抛错，让用户感知问题（而不是硬编码到某个不知名 proxy_id=1）。
+  const proxyId = resolveCreationProxyId(repo, input.egressNodeHash ?? null);
+  // 2. 灌 token 到 Sub2API → 拿标准化 token bundle（含 client_id / org_id / expires_at）
   const refreshed = await sub2api.refreshOpenaiToken({
     refreshToken: tokens.refreshToken,
-    proxyId: spec.registration.autoAssignProxyId
+    proxyId
   });
-  // 2. POST /admin/accounts
+  // 3. POST /admin/accounts
   const name = synthesizeName(spec, email);
   const created = await sub2api.createAccount(
     makeCreatePayload({
       spec,
+      proxyId,
       tokens: { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token, idToken: refreshed.id_token },
       email: refreshed.email,
       organizationId: refreshed.organization_id,
@@ -485,6 +491,7 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
 
 function makeCreatePayload(input: {
   spec: AccountFleetSpec;
+  proxyId: number;
   tokens: { accessToken: string; refreshToken: string; idToken: string };
   email: string;
   organizationId: string;
@@ -508,7 +515,7 @@ function makeCreatePayload(input: {
       model_mapping: {}
     },
     extra: { email: input.email },
-    proxy_id: input.spec.registration.autoAssignProxyId,
+    proxy_id: input.proxyId,
     concurrency: 10,
     priority: 1,
     rate_multiplier: 1,
@@ -516,6 +523,33 @@ function makeCreatePayload(input: {
     expires_at: null,
     auto_pause_on_expired: true
   };
+}
+
+/**
+ * 推导 Sub2API 端 createAccount 用的 proxy_id。
+ *
+ * 优先级（高 → 低）：
+ *   1. egress 节点对应的 Sub2API proxy_id（node.sub2apiProxyId）
+ *      —— 账号编排走的本地代理跟新账号在 Sub2API 端的初始 binding 一致
+ *   2. 代理编排 Spec.intake.proxyId （OrchestrationSpec 的 intake 配置）
+ *      —— 用户在代理编排页配过的"新账号兜底入口"
+ *   3. 都没有 → 抛错。**不再硬编码 default proxy_id**。
+ *
+ * 没有兜底是设计选择：用户必须有一个明确的"账号该绑哪个 proxy"的源头，
+ * 要么是节点池里的健康节点（推过 Sub2API），要么是代理编排里手动选的 intake。
+ * 不允许"凭空数字 id"——避免新账号被绑到一个用户压根不知道的代理上。
+ */
+function resolveCreationProxyId(repo: HiveRepository, egressNodeHash: string | null): number {
+  if (egressNodeHash) {
+    const node = repo.listNodes().find((n) => n.hash === egressNodeHash);
+    if (node?.sub2apiProxyId) return node.sub2apiProxyId;
+  }
+  const orch = repo.getOrchestrationSpec();
+  if (orch.intake.proxyId) return orch.intake.proxyId;
+  throw new Error(
+    "无法确定新账号 Sub2API proxy_id：" +
+      "egress 节点未推到 Sub2API（先在节点池启用调度），且代理编排页 intake.proxyId 也未配置。"
+  );
 }
 
 function makeFreshAccount(overrides: Partial<AccountRecordInternal>): AccountRecordInternal {
@@ -648,7 +682,7 @@ async function buildCodexToolAdapter(
       provider: spec.codexTool.phoneSms.provider,
       apiKey: smsApiKey,
       service: spec.codexTool.phoneSms.service,
-      country: spec.registration.smsCountry
+      maxCostPerAccountUsd: spec.registration.maxCostPerAccountUsd
     },
     httpUserAgentChrome: spec.codexTool.httpUserAgentChrome,
     proxyDefault

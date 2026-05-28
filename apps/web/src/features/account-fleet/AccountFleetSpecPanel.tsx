@@ -27,8 +27,6 @@ export function AccountFleetSpecPanel(props: {
   triggering: boolean;
   /** 决定"立即调和"是否可点（无 codex-tool / Sub2API 连接时禁用并提示）。 */
   canTrigger?: boolean;
-  /** dry_run / apply —— 从后端 status snapshot 读，UI 用来显示模式 badge */
-  mode?: "dry_run" | "apply";
   onSaveSpec: (next: AccountFleetSpec) => void;
   onTriggerNow: () => void;
 }) {
@@ -71,7 +69,7 @@ export function AccountFleetSpecPanel(props: {
   }
 
   const enabled = draft.enabled;
-  // codex-tool 配置是否完整（用于是否允许触发 apply）
+  // codex-tool 配置是否完整（用于"自动维护可以开吗"的提示）
   const codexConfigured = Boolean(
     draft.codexTool.binPath &&
       draft.codexTool.skymail.baseUrl &&
@@ -79,21 +77,15 @@ export function AccountFleetSpecPanel(props: {
       draft.codexTool.chatgpt.codexClientId &&
       draft.codexTool.phoneSms.apiKeyRef
   );
-  const modeIsApply = props.mode === "apply";
-  const dryRunBadgeTone = modeIsApply ? "success" : "warning";
-  const dryRunBadgeLabel = modeIsApply ? "apply 模式" : "dry-run 模式";
 
   return (
     <aside className="orchestration-spec-panel">
       <Panel
         title="自动维护"
         actions={
-          <div className="button-row">
-            <Badge tone={enabled ? "success" : "warning"}>{enabled ? "运行中" : "已暂停"}</Badge>
-            <Badge tone={dryRunBadgeTone}>{dryRunBadgeLabel}</Badge>
-          </div>
+          <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "已开启" : "未开启"}</Badge>
         }
-        hint="按 Spec 周期性观察账号池：自动注册补给、自动修复掉登录账号、自动退役死号。dry-run 模式只观测/计划不入队 jobs；apply 模式需要环境变量 HIVE_ACCOUNT_FLEET_MODE=apply。"
+        hint="默认所有调度功能都关闭，scheduler 只观察账号池状态、不做任何修改。点'开启自动维护'后，按 Spec 周期性自动注册补给 / 自动修复掉登录账号 / 自动退役死号。注册/修复每个子能力都可单独开关。"
       >
         <div className="button-row wrap">
           {enabled ? (
@@ -106,9 +98,9 @@ export function AccountFleetSpecPanel(props: {
                 setDirty(false);
                 props.onSaveSpec(next);
               }}
-              title="暂停后 scheduler 仍跑前 4 步并写 dry-run tick，便于排查；不入队 jobs。"
+              title="关闭后 scheduler 仍跑 sense + diagnose 刷新账号视图，但不会再产出任何 jobs，也不调用 codex-tool / 不写 Sub2API。"
             >
-              暂停自动维护
+              关闭自动维护
             </Button>
           ) : (
             <Button
@@ -119,9 +111,9 @@ export function AccountFleetSpecPanel(props: {
                 setDirty(false);
                 props.onSaveSpec(next);
               }}
-              title="恢复自动维护。下一次调和周期立即生效。"
+              title="开启自动维护。下一次调和周期立即生效。下面 ③ 修复策略 / ④ 出生策略 各自还有独立开关。"
             >
-              恢复自动维护
+              开启自动维护
             </Button>
           )}
           <Button
@@ -299,7 +291,7 @@ export function AccountFleetSpecPanel(props: {
 
       <Panel
         title="目标产能"
-        hint="目标账号数 = 用户期望维持的健康账号数；target_group_id 是 Sub2API 端创建账号时绑的组（OpenAI=2 / Gemini=3 / default=1）。"
+        hint="目标账号数 = 用户期望维持的健康账号数。新账号的 Sub2API proxy_id 由系统自动推导：codex-tool 走哪个本地节点 → 该节点对应的 Sub2API 代理 → 用作账号 binding；节点池里的代理就是出生地，不需要在这里硬编码。"
       >
         <div className="form-grid">
           <NumberInput
@@ -313,12 +305,6 @@ export function AccountFleetSpecPanel(props: {
             value={draft.target.targetGroupId}
             min={1}
             onChange={(v) => patchTarget((c) => ({ ...c, targetGroupId: v }))}
-          />
-          <NumberInput
-            label="默认代理 proxy_id"
-            value={draft.target.defaultProxyId}
-            min={1}
-            onChange={(v) => patchTarget((c) => ({ ...c, defaultProxyId: v }))}
           />
           <NumberInput
             label="最低健康比 (0–1)"
@@ -465,13 +451,17 @@ export function AccountFleetSpecPanel(props: {
             min={0}
             onChange={(v) => patchRegistration((c) => ({ ...c, monthlyBudget: v }))}
           />
-          <TextInput
-            label="主接码地区 ID"
-            value={draft.registration.smsCountry}
-            onChange={(v) => patchRegistration((c) => ({ ...c, smsCountry: v }))}
-            placeholder="6"
-            mono
+          <NumberInput
+            label="单账号成本上限 (USD)"
+            value={Number(draft.registration.maxCostPerAccountUsd.toFixed(3))}
+            min={0}
+            step={0.01}
+            onChange={(v) => patchRegistration((c) => ({ ...c, maxCostPerAccountUsd: v }))}
           />
+        </div>
+        <div className="muted small" style={{ marginTop: 4 }}>
+          注册地区由 codex-tool 按"成本上限"自行选择 —— 它会按价格升序筛地区，跳过超过上限的，
+          跳过库存为 0 的。默认 0.05 USD/账号，超过此价格的地区不会消耗你的余额。
         </div>
         <div className="config-subgroup-label">紧急补给（健康数跌破比例时启用）</div>
         <div className="checkbox-stack">

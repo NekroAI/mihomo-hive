@@ -31,12 +31,17 @@ export interface CodexToolConfig {
   skymail: { baseUrl: string; adminEmail: string; adminPassword: string };
   /** ChatGPT OAuth 配置（client_id 等）。 */
   chatgpt: { mailDomain: string; chatWebClientId: string; codexClientId: string };
-  /** 接码平台配置。 */
+  /** 接码平台配置。地区由 codex-tool 按 maxCostPerAccountUsd 自行选择，Hive 不传 country。 */
   phoneSms: {
     provider: "herosms" | "fivesim" | "nexsms";
     apiKey: string;
     service: string;
-    country: string;
+    /**
+     * 单账号注册成本上限（USD）。codex-tool 据此筛选可用地区，超过这个价格的地区
+     * 直接跳过。**未设置就发起注册** 是配置错误，codex-tool 应拒绝执行。
+     * 详细约定见 mihomo-hive 仓库的 notes/codex-tool-needs.md。
+     */
+    maxCostPerAccountUsd: number;
   };
   httpUserAgentChrome: string;
   /** 出口代理 URL（e.g. "socks5://127.0.0.1:10001"），codex-tool 通过它访问外部服务。 */
@@ -72,7 +77,7 @@ export function buildCodexToolConfigJson(config: CodexToolConfig): Record<string
       provider: config.phoneSms.provider,
       [phoneSmsKey]: config.phoneSms.apiKey,
       service: config.phoneSms.service,
-      country: config.phoneSms.country
+      max_cost_per_account_usd: config.phoneSms.maxCostPerAccountUsd
     },
     http: {
       user_agent_chrome: config.httpUserAgentChrome
@@ -220,7 +225,6 @@ export interface CodexToolAdapter {
   }): Promise<CodexToolLoginResult>;
 
   registerOne(input?: {
-    smsCountry?: string;
     timeoutMs?: number;
   }): Promise<CodexToolRegisterOutcome>;
 }
@@ -339,9 +343,6 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
         "--reveal-secrets",
         "--config-json-stdin"
       ];
-      if (input.smsCountry) {
-        args.push("--sms-country", input.smsCountry);
-      }
       const timeoutMs = input.timeoutMs ?? opts.defaults.registerMs;
       const env = await runEnvelope(args, timeoutMs, true);
       return parseRegisterEnvelope(env);

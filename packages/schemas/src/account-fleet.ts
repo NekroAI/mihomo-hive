@@ -147,7 +147,6 @@ export type AccountRecordView = z.infer<typeof accountRecordViewSchema>;
 export const accountFleetTargetPolicySchema = z.object({
   healthyAccountsTarget: z.number().int().nonnegative().default(50),
   targetGroupId: z.number().int().positive().default(2),
-  defaultProxyId: z.number().int().positive().default(1),
   minHealthyRatio: z.number().min(0).max(1).default(0.8),
   naming: z
     .object({
@@ -172,7 +171,7 @@ export const accountFleetHealthPolicySchema = z.object({
 export type AccountFleetHealthPolicy = z.infer<typeof accountFleetHealthPolicySchema>;
 
 export const accountFleetRecoveryPolicySchema = z.object({
-  enabled: z.boolean().default(true),
+  enabled: z.boolean().default(false),
   pathPriority: z.array(accountRecoveryPathSchema).min(1).default(["codex_login", "codex_register"]),
   maxConcurrent: z.number().int().min(1).max(10).default(2),
   backoffSequenceMs: z
@@ -187,17 +186,24 @@ export const accountFleetRecoveryPolicySchema = z.object({
 export type AccountFleetRecoveryPolicy = z.infer<typeof accountFleetRecoveryPolicySchema>;
 
 export const accountFleetRegistrationPolicySchema = z.object({
-  enabled: z.boolean().default(true),
+  enabled: z.boolean().default(false),
   perTickCap: z.number().int().min(0).default(5),
   dailyBudget: z.number().int().min(0).default(50),
   monthlyBudget: z.number().int().min(0).default(1000),
-  smsCountry: z.string().min(1).default("6"),
-  smsFallbackCountries: z.array(z.string().min(1)).default([]),
+  /**
+   * 单账号注册成本上限（USD）—— 必须存在才允许触发注册，避免成本失控。
+   * 默认 0.05，codex-tool 侧据此自行选择最便宜的可用接码地区，Hive 不再硬编码地区。
+   *
+   * codex-tool 接入约定：config JSON 中 `phone_sms.max_cost_per_account_usd` 字段，
+   * codex-tool 内部按价格升序遍历地区，跳过超过此上限的，跳过库存为 0 的；
+   * 如果没有任何符合的地区 → 返回 registration_failed 而不是花更高价格强抢。
+   * 详细需求见 notes/codex-tool-needs.md。
+   */
+  maxCostPerAccountUsd: z.number().min(0).default(0.05),
   autoAssignGroupIds: z.array(z.number().int().positive()).default([2]),
-  autoAssignProxyId: z.number().int().positive().default(1),
   emergencyMode: z
     .object({
-      enabled: z.boolean().default(true),
+      enabled: z.boolean().default(false),
       perTickCap: z.number().int().min(0).default(10),
       ignoreDailyBudget: z.boolean().default(false)
     })
@@ -261,7 +267,11 @@ export const accountFleetCodexToolPolicySchema = z.object({
 export type AccountFleetCodexToolPolicy = z.infer<typeof accountFleetCodexToolPolicySchema>;
 
 export const accountFleetSpecSchema = z.object({
-  enabled: z.boolean().default(true),
+  /**
+   * 总开关。默认 false —— 系统启动后只观察（sense + diagnose 刷新账号视图），
+   * 不计划任何修改。用户在 UI 显式打开后才会真触发 register / login / delete 等动作。
+   */
+  enabled: z.boolean().default(false),
   reconcileIntervalMs: z.number().int().min(30_000).default(5 * 60_000),
   graceBatchPercent: z.number().min(0).max(100).default(10),
   graceBatchAbs: z.number().int().min(0).default(50),
@@ -350,8 +360,7 @@ export const accountFleetTickSchema = z.object({
     "paused",
     "batch_capped",
     "budget_exhausted",
-    "error",
-    "dry_run"
+    "error"
   ]),
   errorMessage: z.string().optional(),
   plannedTotal: z.number().int().nonnegative(),

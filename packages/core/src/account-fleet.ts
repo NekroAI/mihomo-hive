@@ -53,7 +53,7 @@ export interface AccountFleetPlanResult {
   plannedActions: AccountFleetPlannedAction[];
   /** Gate 之后保留的动作（实际应该入队的）。 */
   gatedActions: AccountFleetPlannedAction[];
-  /** dry-run / paused / batch_capped / budget_exhausted / no_change / applied —— 由调度器最终决定。 */
+  /** paused / batch_capped / budget_exhausted / no_change / applied —— 由调度器最终决定。 */
   inferredSkippedReason: "paused" | "no_change" | "batch_capped" | "budget_exhausted" | "applied";
 }
 
@@ -120,31 +120,44 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
 
   for (const r of remote) {
     seenExternal.add(r.id);
+    const fields = extractRemoteFields(r);
     const existing = byExternal.get(r.id);
     if (existing) {
-      // 双有：更新远端观察字段
-      existing.email = r.email ?? existing.email;
+      // 双有：更新远端观察字段（一次性把 sense 阶段能拿到的字段都同步）
+      if (fields.email) existing.email = fields.email;
+      if (fields.organizationId) existing.organizationId = fields.organizationId;
+      if (fields.clientId) existing.clientId = fields.clientId;
+      existing.platform = fields.platform;
+      existing.type = fields.type;
       existing.lastObservedAt = nowIso;
+      existing.lastUsedAt = fields.lastUsedAt ?? existing.lastUsedAt;
+      existing.rateLimitedAt = fields.rateLimitedAt;
+      existing.rateLimitResetAt = fields.rateLimitResetAt;
+      existing.quota5hPercent = fields.quota5hPercent;
+      existing.quota7dPercent = fields.quota7dPercent;
+      // 如果原本是 unknown email（旧 bug 数据），现在拿到真实 email 后纠正一次
+      if (existing.email.startsWith("unknown-") && fields.email) {
+        existing.email = fields.email;
+      }
       continue;
     }
     // 远端有 + 本地无 → 自动登记
-    // 兜底 email = "unknown-{id}" 让 schema validation 不空，且方便后续 CSV 配对
-    const email = r.email ?? `unknown-${r.id}`;
-    const hasRefresh = inferHasRefreshToken(r);
+    const hasRefresh = fields.hasRefreshToken;
     const origin: AccountOrigin = hasRefresh ? "adopted_active" : "adopted_observing";
     const intent: AccountIntent = "active";
-    const health: AccountHealth = hasRefresh ? "unknown" : "broken";
+    // 健康初值给 unknown，让 diagnose 根据全部信号给出最终判定
+    const health: AccountHealth = "unknown";
     out.push({
       id: `adopt-${r.id}-${Math.random().toString(36).slice(2, 8)}`,
       externalId: r.id,
       origin,
       intent,
       health,
-      email,
-      organizationId: null,
-      clientId: null,
-      platform: r.platform ?? "openai",
-      type: r.type ?? "oauth",
+      email: fields.email ?? `unknown-${r.id}`,
+      organizationId: fields.organizationId,
+      clientId: fields.clientId,
+      platform: fields.platform,
+      type: fields.type,
       encPhone: null,
       encPassword: null,
       encRefreshToken: null,
@@ -152,14 +165,14 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
       encIdToken: null,
       encRecoveryInputJson: null,
       lastObservedAt: nowIso,
-      lastUsedAt: null,
-      rateLimitedAt: null,
-      rateLimitResetAt: null,
-      quota5hPercent: null,
-      quota7dPercent: null,
+      lastUsedAt: fields.lastUsedAt,
+      rateLimitedAt: fields.rateLimitedAt,
+      rateLimitResetAt: fields.rateLimitResetAt,
+      quota5hPercent: fields.quota5hPercent,
+      quota7dPercent: fields.quota7dPercent,
       errorsInWindow: 0,
-      brokenSinceTick: hasRefresh ? null : nowIso,
-      brokenConsecutiveTicks: hasRefresh ? 0 : 1,
+      brokenSinceTick: null,
+      brokenConsecutiveTicks: 0,
       recoveryAttempts: 0,
       nextRecoveryAfter: null,
       lastRecoveryError: null,
@@ -187,13 +200,69 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
 }
 
 /**
- * 根据 Sub2API account record 的 credentials_status（GET 列表里 schema 只暴露 email
- * 等基础字段；has_refresh_token 在抓包文档里有，但 schemas/sub2api.ts 的
- * sub2ApiAccountRecordSchema 没建模——为了保守起见，这里看 status==='active' 当作
- * 健康，否则按缺 token 处理）。后续 P2 sync 拉 raw record 后可改成 has_refresh_token。
+ * 提取 Sub2API account 记录里 sense 关心的字段。
+ *
+ * 抓包确认的真实结构（参考 docs/Sub2API 代理配置.md §"获取账号列表"）：
+ *   - email 在 credentials.email（顶层 email 字段实际不返回）
+ *   - has_refresh_token 在 credentials_status.has_refresh_token
+ *   - 配额在 extra.codex_5h_used_percent / extra.codex_7d_used_percent
+ *   - last_used_at / rate_limited_at / rate_limit_reset_at 在顶层
  */
-function inferHasRefreshToken(r: Sub2ApiAccountRecord): boolean {
-  return r.status === "active";
+function extractRemoteFields(r: Sub2ApiAccountRecord): {
+  email: string | null;
+  organizationId: string | null;
+  clientId: string | null;
+  platform: string;
+  type: string;
+  hasRefreshToken: boolean;
+  lastUsedAt: string | null;
+  rateLimitedAt: string | null;
+  rateLimitResetAt: string | null;
+  quota5hPercent: number | null;
+  quota7dPercent: number | null;
+} {
+  const cred = r.credentials ?? null;
+  const credStatus = r.credentials_status ?? null;
+  const extra = r.extra ?? null;
+  // email 优先级：credentials.email > extra.email > 顶层 email
+  const email =
+    (cred?.email && String(cred.email)) ||
+    (extra?.email && String(extra.email)) ||
+    (r.email && String(r.email)) ||
+    null;
+  const organizationId = cred?.organization_id ? String(cred.organization_id) : null;
+  const clientId = cred?.client_id ? String(cred.client_id) : null;
+  const hasRefreshToken =
+    typeof credStatus?.has_refresh_token === "boolean"
+      ? credStatus.has_refresh_token
+      : // 兜底：抓包里 credentials_status 永远三个 boolean；缺它时退回看 status
+        r.status === "active";
+  const lastUsedAt = r.last_used_at ?? null;
+  const rateLimitedAt = r.rate_limited_at ?? null;
+  const rateLimitResetAt = r.rate_limit_reset_at ?? null;
+  // codex_*_used_percent 字段是浮点 0–100；本地存整数 0–100
+  const quota5hPercent = clampPercent(extra?.codex_5h_used_percent);
+  const quota7dPercent = clampPercent(extra?.codex_7d_used_percent);
+  return {
+    email,
+    organizationId,
+    clientId,
+    platform: r.platform ?? "openai",
+    type: r.type ?? "oauth",
+    hasRefreshToken,
+    lastUsedAt,
+    rateLimitedAt,
+    rateLimitResetAt,
+    quota5hPercent,
+    quota7dPercent
+  };
+}
+
+function clampPercent(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 // ─── Step 2: diagnose ────────────────────────────

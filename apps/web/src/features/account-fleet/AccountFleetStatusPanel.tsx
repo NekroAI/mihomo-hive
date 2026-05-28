@@ -184,7 +184,8 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
           <thead>
             <tr>
               <th>邮箱</th>
-              <th>来源</th>
+              <th>类型</th>
+              <th>接管子类</th>
               <th>状态</th>
               <th>健康</th>
               <th className="num">配额 5h/7d</th>
@@ -193,14 +194,23 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((acc) => (
+            {sorted.map((acc) => {
+              const split = splitOrigin(acc.origin);
+              return (
               <tr key={acc.id} className={`node-matrix-tr role-${rowRoleByHealth(acc.health)}`}>
                 <td className="cell-name" title={acc.email}>
                   <span className="mono-strong">{acc.email}</span>
                   {acc.externalId ? <span className="muted small"> #{acc.externalId}</span> : null}
                 </td>
                 <td>
-                  <OriginBadge origin={acc.origin} />
+                  <Badge tone={split.typeTone}>{split.typeLabel}</Badge>
+                </td>
+                <td>
+                  {split.subLabel ? (
+                    <Badge tone={split.subTone}>{split.subLabel}</Badge>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
                 <td>
                   <IntentBadge intent={acc.intent} />
@@ -229,7 +239,8 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                   {acc.lastRecoveryPath ? `via ${acc.lastRecoveryPath}` : "—"}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -239,21 +250,21 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
 
 type FleetFeedItem =
   | { kind: "tick"; tick: AccountFleetTickSummary }
-  | { kind: "dry_run_run"; count: number; latestAt: string; earliestAt: string }
+  | { kind: "paused_run"; count: number; latestAt: string; earliestAt: string }
   | { kind: "no_change_run"; count: number; latestAt: string; earliestAt: string };
 
 /**
- * 把连续的 dry_run / no_change tick 合并成单行占位，给真有动作的 tick 让出空间。
- * ticks 是按 startedAt 倒序，所以"连续"是数组相邻。
+ * 把连续的 paused（自动维护未开启）/ no_change tick 合并成单行占位，
+ * 给真有动作的 tick 让出空间。ticks 是按 startedAt 倒序。
  */
 function mergeIdleRuns(ticks: AccountFleetTickSummary[]): FleetFeedItem[] {
   const items: FleetFeedItem[] = [];
-  let drRun: { count: number; latestAt: string; earliestAt: string } | null = null;
+  let pausedRun: { count: number; latestAt: string; earliestAt: string } | null = null;
   let ncRun: { count: number; latestAt: string; earliestAt: string } | null = null;
-  function flushDr() {
-    if (drRun) {
-      items.push({ kind: "dry_run_run", ...drRun });
-      drRun = null;
+  function flushPaused() {
+    if (pausedRun) {
+      items.push({ kind: "paused_run", ...pausedRun });
+      pausedRun = null;
     }
   }
   function flushNc() {
@@ -263,27 +274,27 @@ function mergeIdleRuns(ticks: AccountFleetTickSummary[]): FleetFeedItem[] {
     }
   }
   for (const tick of ticks) {
-    if (tick.skippedReason === "dry_run") {
+    if (tick.skippedReason === "paused") {
       flushNc();
-      if (!drRun) drRun = { count: 1, latestAt: tick.startedAt, earliestAt: tick.startedAt };
+      if (!pausedRun) pausedRun = { count: 1, latestAt: tick.startedAt, earliestAt: tick.startedAt };
       else {
-        drRun.count += 1;
-        drRun.earliestAt = tick.startedAt;
+        pausedRun.count += 1;
+        pausedRun.earliestAt = tick.startedAt;
       }
     } else if (tick.skippedReason === "no_change") {
-      flushDr();
+      flushPaused();
       if (!ncRun) ncRun = { count: 1, latestAt: tick.startedAt, earliestAt: tick.startedAt };
       else {
         ncRun.count += 1;
         ncRun.earliestAt = tick.startedAt;
       }
     } else {
-      flushDr();
+      flushPaused();
       flushNc();
       items.push({ kind: "tick", tick });
     }
   }
-  flushDr();
+  flushPaused();
   flushNc();
   return items;
 }
@@ -298,7 +309,7 @@ function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
   }
   const items = mergeIdleRuns(props.ticks);
   const meaningful = props.ticks.filter(
-    (t) => t.skippedReason !== "no_change" && t.skippedReason !== "dry_run"
+    (t) => t.skippedReason !== "no_change" && t.skippedReason !== "paused"
   ).length;
   return (
     <Panel
@@ -307,15 +318,15 @@ function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
     >
       <div className="reconcile-feed">
         {items.map((item, idx) => {
-          if (item.kind === "dry_run_run" || item.kind === "no_change_run") {
+          if (item.kind === "paused_run" || item.kind === "no_change_run") {
             const fromTs = new Date(item.earliestAt).toLocaleTimeString();
             const toTs = new Date(item.latestAt).toLocaleTimeString();
             const sameMoment = fromTs === toTs;
-            const label = item.kind === "dry_run_run" ? "dry-run" : "无变更";
+            const label = item.kind === "paused_run" ? "自动维护未开启" : "无变更";
             return (
               <article
                 key={`run-${idx}`}
-                className={`reconcile-row reconcile-${item.kind === "dry_run_run" ? "paused" : "no_change"} reconcile-run`}
+                className={`reconcile-row reconcile-${item.kind === "paused_run" ? "paused" : "no_change"} reconcile-run`}
               >
                 <div className="reconcile-row-head reconcile-run-head">
                   <ShieldCheck size={14} aria-hidden="true" />
@@ -429,22 +440,32 @@ function KpiCard(props: { title: string; primary: string; secondary: string; ton
   );
 }
 
-function OriginBadge(props: { origin: AccountOrigin }) {
-  const label: Record<AccountOrigin, string> = {
-    hive_registered: "Hive 注册",
-    adopted_active: "接管(活)",
-    adopted_recovered: "接管(救活)",
-    adopted_observing: "接管(观察)",
-    retired_legacy: "已弃用"
-  };
-  const tone: Record<AccountOrigin, "success" | "warning" | "danger" | "neutral" | "info"> = {
-    hive_registered: "success",
-    adopted_active: "info",
-    adopted_recovered: "success",
-    adopted_observing: "warning",
-    retired_legacy: "neutral"
-  };
-  return <Badge tone={tone[props.origin]}>{label[props.origin]}</Badge>;
+/**
+ * 把 5 个 origin 拆成两个视觉字段：
+ *   类型 = Hive 注册 / 接管 / 已弃用
+ *   接管子类 = 健康 / 已恢复 / 待救援（仅 origin=adopted_* 时显示）
+ *
+ * 让用户能一眼看出"这账号是 Hive 自己生的还是接管的"，
+ * 接管的还能看出"凭据是不是齐了"（决定能否自动修复）。
+ */
+function splitOrigin(origin: AccountOrigin): {
+  typeLabel: string;
+  typeTone: "success" | "warning" | "danger" | "neutral" | "info";
+  subLabel: string | null;
+  subTone: "success" | "warning" | "danger" | "neutral" | "info";
+} {
+  switch (origin) {
+    case "hive_registered":
+      return { typeLabel: "Hive 注册", typeTone: "success", subLabel: null, subTone: "neutral" };
+    case "adopted_active":
+      return { typeLabel: "接管", typeTone: "info", subLabel: "健康", subTone: "success" };
+    case "adopted_recovered":
+      return { typeLabel: "接管", typeTone: "info", subLabel: "已恢复", subTone: "success" };
+    case "adopted_observing":
+      return { typeLabel: "接管", typeTone: "info", subLabel: "待救援", subTone: "warning" };
+    case "retired_legacy":
+      return { typeLabel: "已弃用", typeTone: "neutral", subLabel: null, subTone: "neutral" };
+  }
 }
 
 function IntentBadge(props: { intent: AccountIntent }) {
@@ -538,7 +559,6 @@ function SkippedIcon(props: { skipped: AccountFleetTickSummary["skippedReason"] 
     case "no_change":
       return <ShieldCheck size={14} aria-hidden="true" />;
     case "paused":
-    case "dry_run":
       return <Clock size={14} aria-hidden="true" />;
     case "batch_capped":
     case "budget_exhausted":
@@ -569,9 +589,7 @@ function formatSkipReason(reason: AccountFleetTickSummary["skippedReason"]): str
     case "no_change":
       return "无变更";
     case "paused":
-      return "已暂停";
-    case "dry_run":
-      return "dry-run";
+      return "未开启";
     case "batch_capped":
       return "灰度受限";
     case "budget_exhausted":
@@ -586,9 +604,6 @@ function formatSkipReason(reason: AccountFleetTickSummary["skippedReason"]): str
 function summarizeTick(tick: AccountFleetTickSummary): string {
   if (tick.skippedReason === "error") return tick.errorMessage ?? "调和异常";
   if (tick.skippedReason === "no_change") return "状态符合预期，无需变更";
-  if (tick.skippedReason === "dry_run") {
-    return `dry-run：计划 ${tick.plannedTotal} 项（未入队）`;
-  }
   if (tick.skippedReason === "paused") {
     return `自动维护已暂停（计划 ${tick.plannedTotal} 项）`;
   }

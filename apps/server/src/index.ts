@@ -129,15 +129,14 @@ const reconcileScheduler: ReconcileSchedulerHandle | undefined =
   process.env.HIVE_DISABLE_RECONCILE === "true" ? undefined : startReconcileScheduler({ repo, config });
 
 // notes/account-fleet-design.md：账号生命周期调度器 + jobs worker。
-//   - HIVE_DISABLE_ACCOUNT_FLEET=true 完全关闭
-//   - HIVE_ACCOUNT_FLEET_MODE='dry_run'（默认）/ 'apply' 控制是否真入队 jobs
-//   - apply 模式需 HIVE_ACCOUNT_KEY env（AES-256-GCM 密钥）才能跑 codex_login / codex_register
-const accountFleetMode: "dry_run" | "apply" =
-  process.env.HIVE_ACCOUNT_FLEET_MODE === "apply" ? "apply" : "dry_run";
+//   - HIVE_DISABLE_ACCOUNT_FLEET=true 完全关闭（一般不需要）
+//   - 不再有 dry_run / apply 模式开关：默认 Spec.enabled=false 表示"只观察"，
+//     用户在 UI 手动打开后才真正触发 codex-tool / Sub2API 调用
+//   - HIVE_ACCOUNT_KEY env 是 codex_login / codex_register 解密 phone+password 用的密钥
 const accountFleetScheduler: AccountFleetSchedulerHandle | undefined =
   process.env.HIVE_DISABLE_ACCOUNT_FLEET === "true" || process.env.HIVE_DISABLE_RECONCILE === "true"
     ? undefined
-    : startAccountFleetScheduler({ repo, mode: accountFleetMode });
+    : startAccountFleetScheduler({ repo });
 const accountJobsWorker: AccountJobsWorkerHandle | undefined =
   process.env.HIVE_DISABLE_ACCOUNT_FLEET === "true" || process.env.HIVE_DISABLE_RECONCILE === "true"
     ? undefined

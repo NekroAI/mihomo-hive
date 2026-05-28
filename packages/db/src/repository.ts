@@ -927,6 +927,7 @@ export class HiveRepository {
       batchId: string | null;
       registeredAt: string | null;
       egressNodeHash: string | null;
+      email: string;
     }>
   ): AccountRecordInternal | undefined {
     const fieldMap: Record<keyof typeof patch, string> = {
@@ -934,6 +935,7 @@ export class HiveRepository {
       origin: "origin",
       intent: "intent",
       health: "health",
+      email: "email",
       lastObservedAt: "last_observed_at",
       lastUsedAt: "last_used_at",
       rateLimitedAt: "rate_limited_at",

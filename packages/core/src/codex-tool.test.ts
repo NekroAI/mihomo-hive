@@ -14,7 +14,7 @@ const baseConfig: CodexToolConfig = {
   binPath: "codex-tool",
   skymail: { baseUrl: "https://mail.example.com", adminEmail: "a@e", adminPassword: "secret" },
   chatgpt: { mailDomain: "example.com", chatWebClientId: "app_chat", codexClientId: "app_codex" },
-  phoneSms: { provider: "herosms", apiKey: "sms-key", service: "dr", country: "6" },
+  phoneSms: { provider: "herosms", apiKey: "sms-key", service: "dr", maxCostPerAccountUsd: 0.05 },
   httpUserAgentChrome: "Mozilla/5.0",
   proxyDefault: "socks5://127.0.0.1:10001"
 };
@@ -53,6 +53,16 @@ describe("buildCodexToolConfigJson", () => {
       phoneSms: { ...baseConfig.phoneSms, provider: "nexsms", apiKey: "nex-k" }
     });
     expect((json.phone_sms as Record<string, unknown>).nexsms_api_key).toBe("nex-k");
+  });
+
+  it("传递 max_cost_per_account_usd 给 codex-tool（地区由 codex-tool 自决）", () => {
+    const json = buildCodexToolConfigJson({
+      ...baseConfig,
+      phoneSms: { ...baseConfig.phoneSms, maxCostPerAccountUsd: 0.08 }
+    });
+    expect((json.phone_sms as Record<string, unknown>).max_cost_per_account_usd).toBe(0.08);
+    // 同时 country 字段不再传 —— codex-tool 自己根据上限筛地区
+    expect((json.phone_sms as Record<string, unknown>).country).toBeUndefined();
   });
 
   it("uses snake_case field names matching codex-tool config schema", () => {
@@ -402,26 +412,5 @@ describe("CodexToolAdapter", () => {
       expect(r.error).toBe("HeroSMS 取号失败");
     });
 
-    it("passes --sms-country override when provided", async () => {
-      const { spawner, recorded } = makeRecordingSpawner({
-        exitCode: 0,
-        stdout: JSON.stringify({
-          ok: true,
-          command: "all",
-          run_id: null,
-          data: { accounts: [], recoverable_accounts: [], registration_failures: [{ error: "x" }], summary: {} },
-          error: null,
-          warnings: [],
-          paths: {}
-        }),
-        stderr: "",
-        timedOut: false,
-        signal: null
-      });
-      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
-      await adapter.registerOne({ smsCountry: "12" });
-      expect(recorded[0]?.args).toContain("--sms-country");
-      expect(recorded[0]?.args[recorded[0]!.args.indexOf("--sms-country") + 1]).toBe("12");
-    });
   });
 });

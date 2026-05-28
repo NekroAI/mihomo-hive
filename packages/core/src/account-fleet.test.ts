@@ -5,7 +5,15 @@ import { planAccountFleet, type AccountFleetInput } from "./account-fleet.js";
 const NOW = new Date("2026-05-28T20:00:00Z");
 
 function makeSpec(overrides: Partial<AccountFleetSpec> = {}): AccountFleetSpec {
-  return { ...defaultAccountFleetSpec, ...overrides };
+  // 测试默认要求自动维护开启，并打开 recovery + registration 子开关
+  // （默认 Spec 现在全部 disabled，方便用户安全启动 —— 但测试要看决策树各分支）
+  return {
+    ...defaultAccountFleetSpec,
+    enabled: true,
+    recovery: { ...defaultAccountFleetSpec.recovery, enabled: true },
+    registration: { ...defaultAccountFleetSpec.registration, enabled: true },
+    ...overrides
+  };
 }
 
 function makeAcc(overrides: Partial<AccountRecordInternal> = {}): AccountRecordInternal {
@@ -168,7 +176,7 @@ describe("planAccountFleet", () => {
       const r = planAccountFleet(
         baseInput({
           spec: makeSpec({
-            recovery: { ...defaultAccountFleetSpec.recovery, pathPriority: ["codex_login"] }
+            recovery: { ...defaultAccountFleetSpec.recovery, enabled: true, pathPriority: ["codex_login"] }
           }),
           localAccounts: [acc],
           upstreamErrorsByAccountId: new Map([[42, 10]])
@@ -269,6 +277,7 @@ describe("planAccountFleet", () => {
         },
         registration: {
           ...defaultAccountFleetSpec.registration,
+          enabled: true,
           emergencyMode: { ...defaultAccountFleetSpec.registration.emergencyMode, enabled: false }
         }
       });
@@ -318,6 +327,11 @@ describe("planAccountFleet", () => {
           ...defaultAccountFleetSpec.target,
           healthyAccountsTarget: 100,
           minHealthyRatio: 0.8
+        },
+        registration: {
+          ...defaultAccountFleetSpec.registration,
+          enabled: true,
+          emergencyMode: { ...defaultAccountFleetSpec.registration.emergencyMode, enabled: true }
         }
       });
       // healthy=10/100=0.1 < 0.8 → emergency mode → perTickCap=10
@@ -329,31 +343,139 @@ describe("planAccountFleet", () => {
   });
 
   describe("sense (adopt from remote)", () => {
-    it("remote account not in local → adopted_active when status=active", () => {
+    it("remote account not in local → adopted_active when has_refresh_token=true", () => {
       const r = planAccountFleet(
         baseInput({
           localAccounts: [],
           remoteAccounts: [
-            { id: 555, name: "Remote-1", status: "active", email: "remote@x.com" } as never
+            {
+              id: 555,
+              name: "Remote-1",
+              status: "active",
+              credentials_status: { has_refresh_token: true },
+              credentials: { email: "remote@x.com" }
+            } as never
           ]
         })
       );
       const adopted = r.observedAccounts.find((a) => a.externalId === 555);
       expect(adopted).toBeDefined();
       expect(adopted?.origin).toBe("adopted_active");
+      // 关键回归：email 必须从 credentials.email 取，不是 "unknown-555"
+      expect(adopted?.email).toBe("remote@x.com");
     });
 
-    it("remote inactive → adopted_observing + broken", () => {
+    it("remote has_refresh_token=false → adopted_observing", () => {
       const r = planAccountFleet(
         baseInput({
           localAccounts: [],
           remoteAccounts: [
-            { id: 666, name: "Remote-2", status: "rate_limited", email: "r@x.com" } as never
+            {
+              id: 666,
+              name: "Remote-2",
+              status: "rate_limited",
+              credentials_status: { has_refresh_token: false },
+              credentials: { email: "r@x.com" }
+            } as never
           ]
         })
       );
       const adopted = r.observedAccounts.find((a) => a.externalId === 666);
       expect(adopted?.origin).toBe("adopted_observing");
+      expect(adopted?.email).toBe("r@x.com");
+    });
+
+    it("syncs rate_limited_at + quota + last_used_at from Sub2API record", () => {
+      const r = planAccountFleet(
+        baseInput({
+          localAccounts: [],
+          remoteAccounts: [
+            {
+              id: 777,
+              name: "Remote-3",
+              status: "active",
+              credentials_status: { has_refresh_token: true },
+              credentials: { email: "x@y.com", organization_id: "org-1", client_id: "app_x" },
+              extra: { codex_5h_used_percent: 30, codex_7d_used_percent: 87 },
+              last_used_at: "2026-05-28T10:00:00Z",
+              rate_limited_at: "2026-05-27T00:00:00Z",
+              rate_limit_reset_at: "2026-05-28T23:00:00Z"
+            } as never
+          ]
+        })
+      );
+      const adopted = r.observedAccounts.find((a) => a.externalId === 777);
+      expect(adopted?.email).toBe("x@y.com");
+      expect(adopted?.organizationId).toBe("org-1");
+      expect(adopted?.clientId).toBe("app_x");
+      expect(adopted?.lastUsedAt).toBe("2026-05-28T10:00:00Z");
+      expect(adopted?.rateLimitedAt).toBe("2026-05-27T00:00:00Z");
+      expect(adopted?.rateLimitResetAt).toBe("2026-05-28T23:00:00Z");
+      expect(adopted?.quota5hPercent).toBe(30);
+      expect(adopted?.quota7dPercent).toBe(87);
+    });
+
+    it("diagnose: rate_limited record with future reset_at → rate_limited (not healthy)", () => {
+      const futureReset = new Date(NOW.getTime() + 3600_000).toISOString();
+      const r = planAccountFleet(
+        baseInput({
+          localAccounts: [],
+          remoteAccounts: [
+            {
+              id: 888,
+              name: "Remote-RL",
+              status: "rate_limited",
+              credentials_status: { has_refresh_token: true },
+              credentials: { email: "rl@x.com" },
+              rate_limited_at: "2026-05-28T19:00:00Z",
+              rate_limit_reset_at: futureReset
+            } as never
+          ]
+        })
+      );
+      const adopted = r.observedAccounts.find((a) => a.externalId === 888);
+      // 经过 diagnose 后应该是 rate_limited，不是 healthy
+      expect(adopted?.health).toBe("rate_limited");
+    });
+
+    it("diagnose: quota 7d ≥ 95% → quota_exhausted", () => {
+      const r = planAccountFleet(
+        baseInput({
+          localAccounts: [],
+          remoteAccounts: [
+            {
+              id: 999,
+              name: "Remote-Q",
+              status: "active",
+              credentials_status: { has_refresh_token: true },
+              credentials: { email: "q@x.com" },
+              extra: { codex_7d_used_percent: 97 }
+            } as never
+          ]
+        })
+      );
+      const adopted = r.observedAccounts.find((a) => a.externalId === 999);
+      expect(adopted?.health).toBe("quota_exhausted");
+    });
+
+    it("update existing record: backfills email from credentials when prior value was unknown-XX", () => {
+      const existing = makeAcc({ externalId: 1000, email: "unknown-1000" });
+      const r = planAccountFleet(
+        baseInput({
+          localAccounts: [existing],
+          remoteAccounts: [
+            {
+              id: 1000,
+              name: "Old",
+              status: "active",
+              credentials_status: { has_refresh_token: true },
+              credentials: { email: "real@x.com" }
+            } as never
+          ]
+        })
+      );
+      const updated = r.observedAccounts.find((a) => a.id === existing.id);
+      expect(updated?.email).toBe("real@x.com");
     });
 
     it("local active but remote gone → marked retired", () => {
@@ -423,7 +545,7 @@ describe("planAccountFleet", () => {
   describe("graceBatch + perTickRecoveryCap", () => {
     it("perTickRecoveryCap limits the number of recover actions", () => {
       const spec = makeSpec({
-        recovery: { ...defaultAccountFleetSpec.recovery, perTickRecoveryCap: 2 },
+        recovery: { ...defaultAccountFleetSpec.recovery, enabled: true, perTickRecoveryCap: 2 },
         graceBatchAbs: 100
       });
       // 5 broken hive_registered accounts
@@ -441,7 +563,7 @@ describe("planAccountFleet", () => {
       const spec = makeSpec({
         graceBatchPercent: 0, // 用 graceBatchAbs only
         graceBatchAbs: 2,
-        recovery: { ...defaultAccountFleetSpec.recovery, perTickRecoveryCap: 100 },
+        recovery: { ...defaultAccountFleetSpec.recovery, enabled: true, perTickRecoveryCap: 100 },
         target: { ...defaultAccountFleetSpec.target, healthyAccountsTarget: 0 }
       });
       const accounts = Array.from({ length: 5 }, (_, i) =>

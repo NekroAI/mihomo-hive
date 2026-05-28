@@ -10,8 +10,6 @@ export interface AccountFleetRouteProps {
   spec: AccountFleetSpec;
   status: AccountFleetStatusSnapshot | undefined;
   statusLoading: boolean;
-  /** 来自后端 ENV：是否在 apply 模式（影响 UI 提示但不直接控制是否入队 jobs）。 */
-  mode?: "dry_run" | "apply";
   /** Sub2API 是否已连接 —— 决定"立即调和"按钮是否可点。 */
   sub2apiConnected: boolean;
   mutations: {
@@ -32,7 +30,6 @@ export function AccountFleetRoute(props: AccountFleetRouteProps) {
         saving={props.mutations.saveSpec.isPending}
         triggering={props.mutations.triggerNow.isPending}
         canTrigger={props.sub2apiConnected}
-        {...(props.mode ? { mode: props.mode } : {})}
         onSaveSpec={(next) => props.mutations.saveSpec.mutate(next)}
         onTriggerNow={() => props.mutations.triggerNow.mutate()}
       />

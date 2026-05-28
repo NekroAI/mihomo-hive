@@ -25,16 +25,12 @@ export interface AccountFleetSchedulerHandle {
 
 export interface AccountFleetSchedulerOptions {
   repo: HiveRepository;
-  /** P4: 默认 'dry_run'（不入队 jobs）。P6 切到 'apply'。 */
-  mode?: "dry_run" | "apply";
 }
 
 export function startAccountFleetScheduler(
   options: AccountFleetSchedulerOptions
 ): AccountFleetSchedulerHandle {
   const { repo } = options;
-  // 当前 P4 阶段恒为 dry_run；mode 选项预留给 P6 切换。
-  const mode = options.mode ?? "dry_run";
   let stopped = false;
   let inFlight = false;
   let nextTimer: NodeJS.Timeout | undefined;
@@ -110,30 +106,32 @@ export function startAccountFleetScheduler(
             origin: acc.origin,
             intent: acc.intent,
             health: acc.health,
+            email: acc.email,
             lastObservedAt: acc.lastObservedAt,
+            lastUsedAt: acc.lastUsedAt,
             rateLimitedAt: acc.rateLimitedAt,
             rateLimitResetAt: acc.rateLimitResetAt,
+            quota5hPercent: acc.quota5hPercent,
+            quota7dPercent: acc.quota7dPercent,
             errorsInWindow: acc.errorsInWindow,
             brokenSinceTick: acc.brokenSinceTick,
-            brokenConsecutiveTicks: acc.brokenConsecutiveTicks
+            brokenConsecutiveTicks: acc.brokenConsecutiveTicks,
+            organizationId: acc.organizationId,
+            clientId: acc.clientId
           });
         }
       }
 
       // P4: dry-run —— 不入队 jobs，只写 tick
-      // P6: apply —— 把 gatedActions 转成 account_jobs 入队
+      // 把 gatedActions 转 account_jobs 入队 —— 不再有 dry_run 模式开关，
+      // spec.enabled / recovery.enabled / registration.enabled 默认都是 false，
+      // 用户在 UI 显式打开后 plan 才会产出对应 actions。
       const triggeredJobIds: string[] = [];
       const tickId = randomUUID();
-      if (mode === "apply") {
-        for (const action of result.gatedActions) {
-          const jobId = enqueueJobForAction(repo, action, startedAt, tickId);
-          if (jobId) triggeredJobIds.push(jobId);
-        }
+      for (const action of result.gatedActions) {
+        const jobId = enqueueJobForAction(repo, action, startedAt, tickId);
+        if (jobId) triggeredJobIds.push(jobId);
       }
-
-      // skipped reason 决定逻辑：mode=dry_run 时强制 'dry_run'
-      const skippedReason: AccountFleetTick["skippedReason"] =
-        mode === "dry_run" ? "dry_run" : result.inferredSkippedReason;
 
       const tick = persistTick({
         id: tickId,
@@ -141,11 +139,11 @@ export function startAccountFleetScheduler(
         finishedAt: new Date(),
         enabled: spec.enabled,
         plannedTotal: result.plannedActions.length,
-        appliedTotal: mode === "apply" ? result.gatedActions.length : 0,
-        skippedReason,
+        appliedTotal: result.gatedActions.length,
+        skippedReason: result.inferredSkippedReason,
         observed: result.observedSummary,
         plannedActions: result.plannedActions,
-        appliedActions: mode === "apply" ? result.gatedActions : [],
+        appliedActions: result.gatedActions,
         triggeredJobIds
       });
 
