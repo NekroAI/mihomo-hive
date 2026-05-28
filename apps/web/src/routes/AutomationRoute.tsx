@@ -18,6 +18,7 @@ interface PendingMutation {
 export interface AutomationRouteProps {
   spec: OrchestrationSpec;
   status: OrchestrationStatusSnapshot | undefined;
+  statusLoading: boolean;
   connection: Sub2ApiSafeConnectionConfig | undefined;
   proxies: Sub2ApiProxyRecord[];
   connectionDraft: ConnectionDraft;
@@ -86,7 +87,7 @@ export function AutomationRoute(props: AutomationRouteProps) {
           await m.applyStrategySwitch.mutateAsync({ target });
         }}
       />
-      <OrchestrationStatusPanel snapshot={props.status} configured={configured} />
+      <OrchestrationStatusPanel snapshot={props.status} configured={configured} loading={props.statusLoading} />
     </section>
   );
 }

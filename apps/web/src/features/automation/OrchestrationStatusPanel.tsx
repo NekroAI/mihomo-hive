@@ -18,6 +18,8 @@ import { Badge, EmptyState, Panel } from "../../components/ui.js";
 export function OrchestrationStatusPanel(props: {
   snapshot: OrchestrationStatusSnapshot | undefined;
   configured: boolean;
+  /** 标识 query 是否处于 fetching / pending 状态。区分 "data 还没回来" 和 "data 回来了但 scheduler 还没跑过 tick"。 */
+  loading: boolean;
 }) {
   if (!props.configured) {
     return (
@@ -33,11 +35,43 @@ export function OrchestrationStatusPanel(props: {
   }
 
   const snapshot = props.snapshot;
+
+  // 状态 1：query 还在 fetch 中（没有任何数据回来）
+  if (!snapshot && props.loading) {
+    return (
+      <div className="orchestration-status-panel">
+        <Panel title="编排状态">
+          <EmptyState title="加载中…" description="正在从服务器拉取编排快照。" />
+        </Panel>
+      </div>
+    );
+  }
+
   if (!snapshot) {
     return (
       <div className="orchestration-status-panel">
         <Panel title="编排状态">
-          <EmptyState title="正在初始化..." description="第一次 reconcile 正在跑，稍候片刻。" />
+          <EmptyState
+            title="无法拉取编排状态"
+            description="服务可能未启动或网络异常，5 秒后会自动重试。"
+          />
+        </Panel>
+      </div>
+    );
+  }
+
+  // 状态 2：snapshot 已返回但 scheduler 还没完成第一次 tick（重启后头 ~10s 常见）
+  if (!snapshot.lastTick) {
+    return (
+      <div className="orchestration-status-panel">
+        <Panel
+          title="编排状态"
+          hint="编排器（reconcile scheduler）在服务启动时自动开始运行，按 reconcileIntervalMs（默认 30s）周期工作。这里展示的是它最近一次跑的快照。"
+        >
+          <EmptyState
+            title="Scheduler 正在跑首次 reconcile"
+            description="服务刚启动，编排器自动开始第一次 tick（需要拉 Sub2API 代理 / 账号 / 错误信号）。一般 5–15 秒内出第一份数据，本页面 5 秒一次自动刷新。"
+          />
         </Panel>
       </div>
     );

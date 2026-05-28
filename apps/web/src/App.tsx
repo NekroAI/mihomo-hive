@@ -708,6 +708,7 @@ function Dashboard(props: { onLogout: () => void }) {
         <AutomationRoute
           spec={orchestrationSpec.data ?? defaultOrchestrationSpec}
           status={orchestrationStatus.data}
+          statusLoading={orchestrationStatus.isLoading}
           connection={sub2apiConfig.data}
           proxies={sub2apiProxies.data ?? []}
           connectionDraft={{
