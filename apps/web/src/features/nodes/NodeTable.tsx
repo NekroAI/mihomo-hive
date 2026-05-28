@@ -247,13 +247,26 @@ export function NodeTable(props: {
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.map((row) => (
-                <tr key={row.original.hash} className={props.selectedHashes.has(row.original.hash) ? "is-selected" : ""}>
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
-                  ))}
-                </tr>
-              ))}
+              {table.getRowModel().rows.map((row) => {
+                const lifecycle = row.original.lifecycleStatus;
+                // 整行视觉提示：非健康 lifecycle 加 tinted 背景，扫表立刻能识别
+                const lifecycleClass =
+                  lifecycle === "disabled"
+                    ? "is-lifecycle-paused"
+                    : lifecycle === "cooling_down" || lifecycle === "draining"
+                      ? "is-lifecycle-warning"
+                      : lifecycle === "retired" || lifecycle === "deleted"
+                        ? "is-lifecycle-retired"
+                        : "";
+                const selected = props.selectedHashes.has(row.original.hash) ? "is-selected" : "";
+                return (
+                  <tr key={row.original.hash} className={`${selected} ${lifecycleClass}`.trim()}>
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

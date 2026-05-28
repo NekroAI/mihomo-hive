@@ -2015,6 +2015,25 @@ select {
   background: var(--row-selected);
 }
 
+/* 整行 lifecycle 视觉提示：扫表立刻识别非健康节点
+   暂停（disabled）= 蓝；冷却/排空（cooling_down/draining）= 黄；退役/删除（retired/deleted）= 红
+   优先级低于 is-selected（选中蓝跟暂停蓝可能重叠时，选中状态更重要） */
+.node-table tbody tr.is-lifecycle-paused td {
+  background: color-mix(in srgb, var(--info) 8%, transparent);
+}
+
+.node-table tbody tr.is-lifecycle-warning td {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.node-table tbody tr.is-lifecycle-retired td {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.node-table tbody tr.is-selected td {
+  background: var(--row-selected);
+}
+
 .sortable-header,
 .plain-header {
   display: inline-flex;

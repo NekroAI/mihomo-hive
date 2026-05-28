@@ -105,13 +105,14 @@ export function lifecycleTone(status: ProxyNode["lifecycleStatus"]): "success" |
   switch (status) {
     case "schedulable":
       return "success";
+    case "disabled":
+      return "info";       // 暂停：蓝色（用户主动停用，可恢复），跟其他不健康状态拉开视觉差
     case "cooling_down":
     case "draining":
-      return "warning";
-    case "disabled":
+      return "warning";    // 黄：自动 / 排空中
     case "retired":
     case "deleted":
-      return "neutral";
+      return "danger";     // 红：永久下线
     case "testing":
       return "info";
     default:
