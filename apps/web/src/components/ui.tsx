@@ -52,7 +52,18 @@ export function TextInput(props: {
   type?: string | undefined;
   mono?: boolean | undefined;
   disabled?: boolean | undefined;
+  /**
+   * 浏览器自动填充策略：
+   *   - "off"             普通字段（默认），告诉浏览器别填
+   *   - "new-password"    高敏字段（API key / token）+ 真新密码字段。Chrome 不会用旧密码填
+   *   - "current-password" 登录密码
+   * 默认 "off"。type==="password" 时若调用方未显式传，默认 "new-password" 防止
+   * 浏览器把账号登录密码塞到 API key 框这种荒唐场景。
+   */
+  autoComplete?: "off" | "new-password" | "current-password" | "username" | "email" | "url" | undefined;
+  name?: string;
 }) {
+  const autoComplete = props.autoComplete ?? (props.type === "password" ? "new-password" : "off");
   const input = (
     <input
       className={`text-input ${props.mono ? "font-mono" : ""}`}
@@ -61,6 +72,15 @@ export function TextInput(props: {
       onChange={(event) => props.onChange(event.target.value)}
       placeholder={props.placeholder}
       type={props.type ?? "text"}
+      autoComplete={autoComplete}
+      name={props.name}
+      // 关闭浏览器智能填充（旧 Safari/Firefox）
+      autoCorrect="off"
+      autoCapitalize="off"
+      spellCheck={false}
+      data-form-type="other"
+      data-lpignore="true"  /* LastPass */
+      data-1p-ignore="true" /* 1Password */
     />
   );
   if (!props.label) {

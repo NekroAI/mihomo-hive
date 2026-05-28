@@ -5,9 +5,10 @@ import type {
   OrchestrationStatusSnapshot,
   ReconcileNodeIntent,
   ReconcilePlannedChange,
-  ReconcileTick
+  ReconcileTickSummary
 } from "@mihomo-hive/schemas";
 import { Badge, EmptyState, Panel } from "../../components/ui.js";
+import { trpc } from "../../lib/trpc.js";
 
 /**
  * 状态右栏：用户主要"看"的页面。
@@ -247,14 +248,14 @@ function formatCountry(code: string): string {
 }
 
 type ReconcileFeedItem =
-  | { kind: "tick"; tick: ReconcileTick }
+  | { kind: "tick"; tick: ReconcileTickSummary }
   | { kind: "no_change_run"; count: number; latestAt: string; earliestAt: string };
 
 /**
  * 把连续的 no_change tick 合并成单行"X 次无变更"占位，给真正有动作的 tick 让出空间。
  * ticks 是按 startedAt 倒序，所以"连续"是数组相邻。
  */
-function mergeNoChangeRuns(ticks: ReconcileTick[]): ReconcileFeedItem[] {
+function mergeNoChangeRuns(ticks: ReconcileTickSummary[]): ReconcileFeedItem[] {
   const items: ReconcileFeedItem[] = [];
   let run: { count: number; latestAt: string; earliestAt: string } | null = null;
   for (const tick of ticks) {
@@ -276,7 +277,7 @@ function mergeNoChangeRuns(ticks: ReconcileTick[]): ReconcileFeedItem[] {
   return items;
 }
 
-function RecentReconcileCard(props: { ticks: ReconcileTick[] }) {
+function RecentReconcileCard(props: { ticks: ReconcileTickSummary[] }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   if (props.ticks.length === 0) {
     return (
@@ -325,46 +326,73 @@ function RecentReconcileCard(props: { ticks: ReconcileTick[] }) {
                 {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 <SkippedIcon skipped={tick.skippedReason} />
                 <span className="font-mono muted small">{new Date(tick.startedAt).toLocaleTimeString()}</span>
-                <span>{summarizeTick(tick)}</span>
+                <span>{summarizeTickSummary(tick)}</span>
                 <SkippedBadge skipped={tick.skippedReason} />
               </button>
-              {isOpen ? (
-                <div className="reconcile-row-body">
-                  {tick.errorMessage ? <div className="form-error">{tick.errorMessage}</div> : null}
-                  {tick.appliedChanges.length > 0 ? (
-                    <details open>
-                      <summary>已执行变更 ({tick.appliedChanges.length})</summary>
-                      <ul className="reconcile-change-list">
-                        {tick.appliedChanges.slice(0, 30).map((change, i) => (
-                          <li key={`${tick.id}-a-${i}`}>{summarizeChange(change)}</li>
-                        ))}
-                        {tick.appliedChanges.length > 30 ? (
-                          <li className="muted small">还有 {tick.appliedChanges.length - 30} 条...</li>
-                        ) : null}
-                      </ul>
-                    </details>
-                  ) : null}
-                  {tick.plannedChanges.length > tick.appliedChanges.length ? (
-                    <details>
-                      <summary>
-                        计划但未执行 ({tick.plannedChanges.length - tick.appliedChanges.length})
-                      </summary>
-                      <ul className="reconcile-change-list">
-                        {tick.plannedChanges
-                          .slice(tick.appliedChanges.length, tick.appliedChanges.length + 30)
-                          .map((change, i) => (
-                            <li key={`${tick.id}-p-${i}`}>{summarizeChange(change)}</li>
-                          ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                </div>
-              ) : null}
+              {isOpen ? <TickDetailBody tickId={tick.id} /> : null}
             </article>
           );
         })}
       </div>
     </Panel>
+  );
+}
+
+/**
+ * 单条 tick 详情，按需拉。statusSnapshot 列表只返回摘要 (~1KB/条) 而不再带
+ * nodeIntents/plannedChanges/appliedChanges 数组，所以展开时才发请求拉详情。
+ */
+function TickDetailBody(props: { tickId: string }) {
+  const detail = trpc.sub2api.orchestrator.tickDetail.useQuery(
+    { id: props.tickId },
+    { staleTime: Infinity } // 历史 tick 不会变，永久缓存
+  );
+  if (detail.isLoading) {
+    return (
+      <div className="reconcile-row-body">
+        <div className="muted small">加载详情中…</div>
+      </div>
+    );
+  }
+  if (!detail.data) {
+    return (
+      <div className="reconcile-row-body">
+        <div className="muted small">详情不存在（可能已被清理）。</div>
+      </div>
+    );
+  }
+  const tick = detail.data;
+  return (
+    <div className="reconcile-row-body">
+      {tick.errorMessage ? <div className="form-error">{tick.errorMessage}</div> : null}
+      {tick.appliedChanges.length > 0 ? (
+        <details open>
+          <summary>已执行变更 ({tick.appliedChanges.length})</summary>
+          <ul className="reconcile-change-list">
+            {tick.appliedChanges.slice(0, 30).map((change, i) => (
+              <li key={`${tick.id}-a-${i}`}>{summarizeChange(change)}</li>
+            ))}
+            {tick.appliedChanges.length > 30 ? (
+              <li className="muted small">还有 {tick.appliedChanges.length - 30} 条...</li>
+            ) : null}
+          </ul>
+        </details>
+      ) : null}
+      {tick.plannedChanges.length > tick.appliedChanges.length ? (
+        <details>
+          <summary>
+            计划但未执行 ({tick.plannedChanges.length - tick.appliedChanges.length})
+          </summary>
+          <ul className="reconcile-change-list">
+            {tick.plannedChanges
+              .slice(tick.appliedChanges.length, tick.appliedChanges.length + 30)
+              .map((change, i) => (
+                <li key={`${tick.id}-p-${i}`}>{summarizeChange(change)}</li>
+              ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -445,7 +473,7 @@ function formatSkipReason(reason: string): string {
   }
 }
 
-function summarizeTick(tick: ReconcileTick): string {
+function summarizeTickSummary(tick: ReconcileTickSummary): string {
   if (tick.skippedReason === "error") return tick.errorMessage ?? "执行错误";
   if (tick.skippedReason === "no_change") return "状态符合预期，无变更";
   if (tick.skippedReason === "paused") {

@@ -49,8 +49,26 @@ export function AuthScreen(props: { status: AuthStatus | undefined; onAuthentica
         <h1>{configured ? "登录 Mihomo Hive" : "设置访问密码"}</h1>
         <p>{configured ? "输入访问密码继续管理固定出口代理池。" : "首次访问需要创建访问密码，之后所有接口都会要求登录。"}</p>
         <div className="auth-form">
-          <TextInput label="密码" value={password} onChange={setPassword} type="password" placeholder="输入访问密码" />
-          {!configured ? <TextInput label="确认密码" value={confirm} onChange={setConfirm} type="password" placeholder="再次输入密码" /> : null}
+          <TextInput
+            label="密码"
+            value={password}
+            onChange={setPassword}
+            type="password"
+            placeholder="输入访问密码"
+            autoComplete={configured ? "current-password" : "new-password"}
+            name={configured ? "password" : "new-password"}
+          />
+          {!configured ? (
+            <TextInput
+              label="确认密码"
+              value={confirm}
+              onChange={setConfirm}
+              type="password"
+              placeholder="再次输入密码"
+              autoComplete="new-password"
+              name="new-password-confirm"
+            />
+          ) : null}
           <Button
             icon={<ShieldCheck size={16} />}
             loading={loading}

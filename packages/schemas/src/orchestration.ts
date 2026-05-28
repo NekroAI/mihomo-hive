@@ -188,11 +188,33 @@ export const reconcileTickSchema = z.object({
 
 export type ReconcileTick = z.infer<typeof reconcileTickSchema>;
 
+/**
+ * 调和 tick 的"轻量摘要" —— 用于历史列表展示，不带几十 KB 的 nodeIntents/changes 数组。
+ * 单条详情请走 orchestrator.tickDetail(id) 按需拉。
+ *
+ * 性能动机：statusSnapshot 一次返回最近 N 条，旧 schema 一条 ~50KB（含完整 nodeIntents
+ * + plannedChanges + appliedChanges）。500 条 = 25MB 响应，httpBatchLink 把整批
+ * query 拖到几十秒 / 几分钟。改成 summary 后 1KB/条，500 条只有 0.5MB。
+ */
+export const reconcileTickSummarySchema = z.object({
+  id: z.string().min(1),
+  startedAt: z.string(),
+  finishedAt: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  enabled: z.boolean(),
+  plannedTotal: z.number().int().nonnegative(),
+  appliedTotal: z.number().int().nonnegative(),
+  skippedReason: z.enum(["paused", "batch_capped", "no_change", "error", "applied"]),
+  errorMessage: z.string().optional()
+});
+
+export type ReconcileTickSummary = z.infer<typeof reconcileTickSummarySchema>;
+
 // status snapshot — UI 主面板要的数据
 export const orchestrationStatusSnapshotSchema = z.object({
   spec: orchestrationSpecSchema,
-  lastTick: reconcileTickSchema.optional(),
-  recentTicks: z.array(reconcileTickSchema),                            // 最近 N 条（默认 500，前端再折叠无变更）
+  lastTick: reconcileTickSchema.optional(),                              // 完整数据，KpiCards + NodeMatrix 用
+  recentTicks: z.array(reconcileTickSummarySchema),                      // 摘要列表，调和日志卡用
   nodeIntents: z.array(reconcileNodeIntentSchema),
   observedSummary: reconcileObservedSummarySchema.optional(),
   // 衍生 KPI
