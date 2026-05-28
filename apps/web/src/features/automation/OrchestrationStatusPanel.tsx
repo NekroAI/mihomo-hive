@@ -169,7 +169,7 @@ function KpiCards(props: { snapshot: OrchestrationStatusSnapshot }) {
 function NodeMatrix(props: { intents: ReconcileNodeIntent[] }) {
   if (props.intents.length === 0) {
     return (
-      <Panel title="节点矩阵">
+      <Panel title="节点矩阵" className="status-pane-matrix">
         <EmptyState
           title="还没有 Hive 托管节点参与编排"
           description="本地节点需先启用调度，并通过推送同步到 Sub2API 后才会出现在这里。"
@@ -178,7 +178,7 @@ function NodeMatrix(props: { intents: ReconcileNodeIntent[] }) {
     );
   }
   return (
-    <Panel title={`节点矩阵 (${props.intents.length})`}>
+    <Panel title={`节点矩阵 (${props.intents.length})`} className="status-pane-matrix">
       <div className="node-matrix-scroll">
         <table className="node-matrix-table">
           <thead>
@@ -289,7 +289,7 @@ function RecentReconcileCard(props: { ticks: ReconcileTickSummary[] }) {
   const items = mergeNoChangeRuns(props.ticks);
   const nonNoChange = props.ticks.filter((t) => t.skippedReason !== "no_change").length;
   return (
-    <Panel title={`最近调和 (${nonNoChange} 有变化 / 共 ${props.ticks.length})`}>
+    <Panel title={`最近调和 (${nonNoChange} 有变化 / 共 ${props.ticks.length})`} className="status-pane-feed">
       <div className="reconcile-feed">
         {items.map((item, idx) => {
           if (item.kind === "no_change_run") {

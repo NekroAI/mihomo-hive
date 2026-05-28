@@ -972,8 +972,14 @@ select {
   padding-right: 4px;
 }
 
-/* 宽屏：2×2 网格 —— KPI 跨两列，下方左 NodeMatrix / 右 RecentReconcileCard。
-   外层不再滚动；两个 panel 内部各自局部滚动，避免下半部分留白和整页滚动。 */
+/* 宽屏（≥1400px）布局：
+     ┌─────────────┬───────────────┐
+     │ KPI         │ 最近调和       │  row 1: auto（KPI 高度自适应）
+     ├─────────────┤ （跨两行）     │
+     │ 节点矩阵    │               │  row 2: 1fr（填满剩余高度）
+     └─────────────┴───────────────┘
+   把"最近调和"放右侧整列，避免之前 KPI 跨两列时右上 + 调和上方各有一块空白；
+   节点矩阵在左下，KPI 在左上紧凑展示。 */
 @media (min-width: 1400px) {
   .orchestration-status-panel {
     display: grid;
@@ -984,7 +990,16 @@ select {
     padding-right: 0;
   }
   .orchestration-status-panel > .kpi-grid {
-    grid-column: 1 / -1;
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .orchestration-status-panel > .status-pane-matrix {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .orchestration-status-panel > .status-pane-feed {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
   .orchestration-status-panel > .panel {
     min-height: 0;
@@ -1018,9 +1033,16 @@ select {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
   padding: 4px 0;
+}
+
+/* 宽屏右侧通栏布局下 KPI 在左半（约 480px），4 卡 2x2 更紧凑 */
+@media (min-width: 1400px) {
+  .orchestration-status-panel > .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .kpi-card {
@@ -2002,28 +2024,20 @@ select {
 
 .test-result-list {
   display: flex;
-  max-width: 170px;
+  flex-wrap: wrap;
   gap: 5px;
-  overflow: hidden;
 }
 
 .test-chip {
   display: inline-flex;
-  min-width: 0;
   align-items: center;
   gap: 4px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 3px 6px;
+  padding: 3px 8px;
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
-}
-
-.test-chip span {
-  overflow: hidden;
-  max-width: 48px;
-  text-overflow: ellipsis;
 }
 
 .test-chip.is-ok {
@@ -2038,17 +2052,17 @@ select {
   color: var(--danger);
 }
 
-/* 目标延迟在通过的前提下偏慢：is-warn 黄、is-slow 偏红橙（通了但很慢） */
+/* 目标延迟在通过的前提下偏慢：is-warn 黄、is-slow 橙红（通了但很慢，要跟 is-fail 视觉区分开） */
 .test-chip.is-warn {
-  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
   background: var(--warning-soft);
   color: var(--warning);
 }
 
 .test-chip.is-slow {
-  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
-  background: color-mix(in srgb, var(--danger-soft) 70%, var(--warning-soft));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--danger) 50%);
+  background: color-mix(in srgb, var(--warning-soft) 55%, var(--danger-soft) 45%);
+  color: color-mix(in srgb, var(--warning) 35%, var(--danger) 65%);
 }
 
 .mono,
