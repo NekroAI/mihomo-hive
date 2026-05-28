@@ -1945,7 +1945,10 @@ select {
 
 .nodes-workspace {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* 3 行：toolbar (auto) / table-frame (1fr) / footer (auto)。
+     之前是 4 行（含已删除的 selection-bar 那行），导致 table-frame 错位到
+     auto 行不受高度约束，分页器被挤出视区。 */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
