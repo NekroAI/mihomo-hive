@@ -26,13 +26,10 @@ import {
 import type { ProxyNode, Sub2ApiProxyRecord } from "@mihomo-hive/schemas";
 import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
 import {
-  canExportNode,
-  exportBlockReason,
   formatLifecycleStatus,
   formatRegion,
   formatNodeStatus,
   lifecycleTone,
-  parseTestResults,
   type NodeFilters,
   statusTone,
   uniqueOptions
@@ -95,18 +92,6 @@ export function NodeTable(props: {
         size: 86
       },
       {
-        id: "exportable",
-        header: "导出",
-        cell: ({ row }) =>
-          canExportNode(row.original) ? (
-            <Badge tone="success">可导出</Badge>
-          ) : (
-            <span className="muted small">{exportBlockReason(row.original)}</span>
-          ),
-        enableSorting: false,
-        size: 116
-      },
-      {
         accessorKey: "region",
         header: "地区",
         cell: ({ row }) => formatRegion(row.original.region),
@@ -120,21 +105,26 @@ export function NodeTable(props: {
       },
       {
         accessorKey: "lastTestLatencyMs",
-        header: "延迟",
-        cell: ({ row }) => (row.original.lastTestLatencyMs ? `${row.original.lastTestLatencyMs}ms` : "-"),
-        size: 90
+        header: "代理延迟",
+        cell: ({ row }) => <ProxyLatencyCell ms={row.original.lastTestLatencyMs ?? null} />,
+        size: 92
       },
       {
         accessorKey: "qualityScore",
         header: "质量",
         cell: ({ row }) => <QualityCell score={row.original.qualityScore ?? null} />,
-        size: 88
+        size: 80
       },
       {
         accessorKey: "lastTestStatus",
-        header: "测试结果",
-        cell: ({ row }) => <TestResult value={row.original.lastTestStatus} />,
-        size: 170
+        header: "目标延迟",
+        cell: ({ row }) => (
+          <TargetLatencies
+            targetsJson={row.original.lastTestTargets}
+            fallbackStatus={row.original.lastTestStatus}
+          />
+        ),
+        size: 230
       },
       {
         id: "sub2api",
@@ -147,7 +137,7 @@ export function NodeTable(props: {
           />
         ),
         enableSorting: false,
-        size: 156
+        size: 108
       },
       {
         id: "accountCount",
@@ -306,22 +296,117 @@ function QualityCell(props: { score: number | null | undefined }) {
   return <Badge tone={tone}>{props.score}</Badge>;
 }
 
-function TestResult(props: { value: string | undefined }) {
-  const results = parseTestResults(props.value);
-  if (results.length === 0) {
-    return <span className="muted small">-</span>;
+/**
+ * 代理延迟（L1）：服务直连代理 host:port 的 TCP 握手延迟。
+ * 不经 mihomo、不经业务目标 — 反映"我方→代理"的网络距离。
+ * 加入前置代理（dialer-proxy）后将变为"服务→front→代理"链路握手延迟。
+ *
+ * 阈值（经验）：<200ms 绿、<800ms 中性、<2000ms 黄、≥2000ms 红、null 灰。
+ */
+function ProxyLatencyCell(props: { ms: number | null }) {
+  if (props.ms === null || props.ms === undefined) return <span className="muted small">-</span>;
+  const ms = props.ms;
+  const tone: "success" | "neutral" | "warning" | "danger" =
+    ms < 200 ? "success" : ms < 800 ? "neutral" : ms < 2000 ? "warning" : "danger";
+  const display = ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
+  return <Badge tone={tone}>{display}</Badge>;
+}
+
+interface TargetResultEntry {
+  targetId: string;
+  ok: boolean;
+  latencyMs: number;
+  httpStatus?: number;
+  message?: string;
+}
+
+function parseTargetResults(json: string | undefined): TargetResultEntry[] {
+  if (!json) return [];
+  try {
+    const data = JSON.parse(json);
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((item): item is { targetId: string; ok: boolean; latencyMs: number } & Record<string, unknown> =>
+        Boolean(item) && typeof item.targetId === "string" && typeof item.ok === "boolean" && typeof item.latencyMs === "number"
+      )
+      .map((item) => ({
+        targetId: item.targetId,
+        ok: item.ok,
+        latencyMs: item.latencyMs,
+        ...(typeof item.httpStatus === "number" ? { httpStatus: item.httpStatus } : {}),
+        ...(typeof item.message === "string" ? { message: item.message } : {})
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 目标延迟（L2）：通过 mihomo listener 到 OpenAI / Claude 等业务目标的端到端延迟。
+ * 用秒.cc 显示，颜色按延迟健康度（<1.5s 绿、<3s 黄、≥3s 暖橙）。
+ * 失败用错误色 + Fail 字串保留信号；优先读 lastTestTargets，fallback 到旧 lastTestStatus。
+ */
+function TargetLatencies(props: { targetsJson: string | undefined; fallbackStatus: string | undefined }) {
+  const targets = parseTargetResults(props.targetsJson);
+  if (targets.length === 0) {
+    // 旧数据兜底（没有 latency 信息，只能显示 OK/Fail）
+    const fallback = props.fallbackStatus
+      ? props.fallbackStatus.split(",").map((item) => {
+          const [target = "?", detail = "-"] = item.split(":");
+          const ok = target === "openai" ? detail === "401" : target === "claude" ? detail === "405" : false;
+          return { targetId: target, ok, latencyMs: 0, message: detail };
+        })
+      : [];
+    if (fallback.length === 0) return <span className="muted small">-</span>;
+    return (
+      <div className="test-result-list">
+        {fallback.map((r) => (
+          <span key={r.targetId} className={`test-chip ${r.ok ? "is-ok" : "is-fail"}`}>
+            {targetIcon(r.targetId)}
+            <span>{targetLabel(r.targetId)}</span>
+            <strong>{r.ok ? "OK" : "Fail"}</strong>
+          </span>
+        ))}
+      </div>
+    );
   }
   return (
-    <div className="test-result-list" title={props.value}>
-      {results.map((result) => (
-        <span key={result.target} className={`test-chip ${result.ok ? "is-ok" : "is-fail"}`}>
-          {result.target === "openai" ? <Bot size={13} /> : result.target === "claude" ? <MessageSquare size={13} /> : null}
-          <span>{result.target === "openai" ? "OpenAI" : result.target === "claude" ? "Claude" : result.target}</span>
-          <strong>{result.ok ? "OK" : "Fail"}</strong>
-        </span>
-      ))}
+    <div className="test-result-list">
+      {targets.map((r) => {
+        const seconds = r.latencyMs / 1000;
+        const display = `${seconds.toFixed(2)}s`;
+        const cls = r.ok ? targetLatencyToneClass(r.latencyMs) : "is-fail";
+        const tooltip = r.ok
+          ? `${targetLabel(r.targetId)}: ${display}${r.httpStatus ? ` (HTTP ${r.httpStatus})` : ""}`
+          : `${targetLabel(r.targetId)} 失败: ${r.message ?? "未知"}（${display}）`;
+        return (
+          <span key={r.targetId} className={`test-chip ${cls}`} title={tooltip}>
+            {targetIcon(r.targetId)}
+            <span>{targetLabel(r.targetId)}</span>
+            <strong>{r.ok ? display : "Fail"}</strong>
+          </span>
+        );
+      })}
     </div>
   );
+}
+
+function targetLatencyToneClass(ms: number): string {
+  if (ms < 1500) return "is-ok";       // 绿
+  if (ms < 3000) return "is-warn";     // 黄
+  return "is-slow";                    // 橙红（通但很慢）
+}
+
+function targetIcon(targetId: string) {
+  if (targetId === "openai") return <Bot size={13} />;
+  if (targetId === "claude") return <MessageSquare size={13} />;
+  return null;
+}
+
+function targetLabel(targetId: string): string {
+  if (targetId === "openai") return "OpenAI";
+  if (targetId === "claude") return "Claude";
+  return targetId;
 }
 
 function Sub2ApiCell(props: { node: ProxyNode; proxy: Sub2ApiProxyRecord | undefined; connected: boolean }) {

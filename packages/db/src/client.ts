@@ -55,6 +55,7 @@ function ensureSchema(sqlite: HiveSqlite): void {
       assigned_port INTEGER,
       last_test_status TEXT,
       last_test_latency_ms INTEGER,
+      last_test_targets TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -103,6 +104,8 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "backoff_attempts", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "nodes", "health_score", "INTEGER");
   addColumnIfMissing(sqlite, "nodes", "last_health_check", "TEXT");
+  // P5-R: 每个测试目标（openai / claude / ...）的独立结果，JSON 数组字符串
+  addColumnIfMissing(sqlite, "nodes", "last_test_targets", "TEXT");
   // Seed intent_role from lifecycle for nodes that pre-date this column.
   sqlite.exec(`
     UPDATE nodes

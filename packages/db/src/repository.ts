@@ -56,6 +56,7 @@ interface NodeRow {
   assigned_port: number | null;
   last_test_status: string | null;
   last_test_latency_ms: number | null;
+  last_test_targets: string | null;
   intent_role: NodeIntentRole;
   backoff_until: string | null;
   backoff_attempts: number;
@@ -188,14 +189,14 @@ export class HiveRepository {
       INSERT INTO nodes (
         hash, source_id, name, original_name, type, region, raw_json, status,
         lifecycle_status, schedulable, protected, sub2api_proxy_id, quality_score,
-        assigned_port, last_test_status, last_test_latency_ms,
+        assigned_port, last_test_status, last_test_latency_ms, last_test_targets,
         intent_role, backoff_until, backoff_attempts, health_score, last_health_check,
         created_at, updated_at
       )
       VALUES (
         @hash, @sourceId, @name, @originalName, @type, @region, @rawJson, @status,
         @lifecycleStatus, @schedulable, @protected, @sub2apiProxyId, @qualityScore,
-        @assignedPort, @lastTestStatus, @lastTestLatencyMs,
+        @assignedPort, @lastTestStatus, @lastTestLatencyMs, @lastTestTargets,
         @intentRole, @backoffUntil, @backoffAttempts, @healthScore, @lastHealthCheck,
         @createdAt, @updatedAt
       )
@@ -232,6 +233,7 @@ export class HiveRepository {
           assignedPort: node.assignedPort ?? null,
           lastTestStatus: node.lastTestStatus ?? null,
           lastTestLatencyMs: node.lastTestLatencyMs ?? null,
+          lastTestTargets: node.lastTestTargets ?? null,
           intentRole: node.intentRole ?? intentFromLifecycle(node.lifecycleStatus ?? lifecycleFromStatus(node.status)),
           backoffUntil: node.backoffUntil ?? null,
           backoffAttempts: node.backoffAttempts ?? 0,
@@ -264,6 +266,7 @@ export class HiveRepository {
         assigned_port = @assignedPort,
         last_test_status = @lastTestStatus,
         last_test_latency_ms = @lastTestLatencyMs,
+        last_test_targets = @lastTestTargets,
         intent_role = @intentRole,
         backoff_until = @backoffUntil,
         backoff_attempts = @backoffAttempts,
@@ -287,6 +290,7 @@ export class HiveRepository {
           assignedPort: node.assignedPort ?? null,
           lastTestStatus: node.lastTestStatus ?? null,
           lastTestLatencyMs: node.lastTestLatencyMs ?? null,
+          lastTestTargets: node.lastTestTargets ?? null,
           intentRole: node.intentRole ?? intentFromLifecycle(node.lifecycleStatus ?? lifecycleFromStatus(node.status)),
           backoffUntil: node.backoffUntil ?? null,
           backoffAttempts: node.backoffAttempts ?? 0,
@@ -676,6 +680,7 @@ function nodeFromRow(row: NodeRow): ProxyNode {
     ...(row.assigned_port ? { assignedPort: row.assigned_port } : {}),
     ...(row.last_test_status ? { lastTestStatus: row.last_test_status } : {}),
     ...(row.last_test_latency_ms ? { lastTestLatencyMs: row.last_test_latency_ms } : {}),
+    ...(row.last_test_targets ? { lastTestTargets: row.last_test_targets } : {}),
     intentRole: row.intent_role ?? intentFromLifecycle(row.lifecycle_status),
     backoffUntil: row.backoff_until,
     backoffAttempts: row.backoff_attempts ?? 0,

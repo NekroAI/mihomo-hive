@@ -23,6 +23,7 @@ import {
   planSub2ApiAssignments,
   planSub2ApiManagedMaintenance,
   renderMihomoConfig,
+  measureProxyTcpLatency,
   resolveProxyTestTargets,
   testProxyTarget
 } from "@mihomo-hive/core";
@@ -495,21 +496,43 @@ export const appRouter = t.router({
         //   • 未给 hashFilter（"测试全部"或定时任务）：保留原自动 lifecycle 调整行为。
         const manualMode = Boolean(hashFilter);
         const tested = await mapWithConcurrency(candidates, input.concurrency, async (node) => {
+          // L1：服务直连代理 host:port 的 TCP 握手延迟（不经 mihomo、不经目标）。
+          // 反映"我方→代理"的网络距离。从 node.raw 拿真实出口地址。
+          const rawHost = typeof node.raw?.server === "string" ? node.raw.server : null;
+          const rawPort = typeof node.raw?.port === "number" ? node.raw.port : null;
+          const l1 =
+            rawHost && rawPort
+              ? await measureProxyTcpLatency({ host: rawHost, port: rawPort, timeoutMs: input.timeoutMs })
+              : { latencyMs: 0, error: "no_raw_endpoint" };
+
+          // L2：通过 mihomo listener 到每个业务目标（openai/claude）的端到端延迟
           const results = [];
           for (const target of targets) {
             results.push(await testProxyTarget({ host, port: Number(node.assignedPort), target, timeoutMs: input.timeoutMs }));
           }
           const passed = results.every((result) => result.ok);
-          const latency = Math.max(...results.map((result) => result.latencyMs));
-          // inPoolGate (ADR 0003 supply policy)：测通过但延迟/质量不达标 → 不进 schedulable
-          const latencyExceeds = inPoolGate.maxLatencyMs ? latency > inPoolGate.maxLatencyMs : false;
+          // 用 OpenAI/Claude 的最大延迟做 gate 判定（保持旧语义不变，只改 lastTestLatencyMs 字段含义）
+          const targetMaxLatency = Math.max(...results.map((result) => result.latencyMs));
+          const latencyExceeds = inPoolGate.maxLatencyMs ? targetMaxLatency > inPoolGate.maxLatencyMs : false;
           const inPool = passed && !latencyExceeds;
           const base = {
             ...node,
             status: passed ? ("active" as const) : ("failed" as const),
             qualityScore: passed ? (latencyExceeds ? 60 : 100) : 25,
+            // 旧字段：保留 status 拼接给老 UI 兜底
             lastTestStatus: results.map((result) => `${result.targetId}:${result.httpStatus ?? result.message}`).join(","),
-            lastTestLatencyMs: latency
+            // 新语义：lastTestLatencyMs = L1（服务→代理）
+            lastTestLatencyMs: l1.latencyMs,
+            // 新字段：每个目标的完整结果（含 L2 端到端 latency），JSON 字符串
+            lastTestTargets: JSON.stringify(
+              results.map((r) => ({
+                targetId: r.targetId,
+                ok: r.ok,
+                latencyMs: r.latencyMs,
+                ...(r.httpStatus !== undefined ? { httpStatus: r.httpStatus } : {}),
+                message: r.message
+              }))
+            )
           };
           if (manualMode) {
             return base;

@@ -2038,6 +2038,19 @@ select {
   color: var(--danger);
 }
 
+/* 目标延迟在通过的前提下偏慢：is-warn 黄、is-slow 偏红橙（通了但很慢） */
+.test-chip.is-warn {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.test-chip.is-slow {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  background: color-mix(in srgb, var(--danger-soft) 70%, var(--warning-soft));
+  color: var(--danger);
+}
+
 .mono,
 .mono-strong {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
