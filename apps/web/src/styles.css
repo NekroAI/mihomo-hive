@@ -289,6 +289,13 @@ select {
   white-space: nowrap;
 }
 
+/* badge 内部含图标 + 文本（账号数 Badge 等） */
+.badge-icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 /* 选择按钮组：紧跟统计区，跟主操作区视觉上区分 */
 .node-toolbar-selectors {
   display: inline-flex;
@@ -974,12 +981,12 @@ select {
 
 /* 宽屏（≥1400px）布局：
      ┌─────────────┬───────────────┐
-     │ KPI         │ 最近调和       │  row 1: auto（KPI 高度自适应）
-     ├─────────────┤ （跨两行）     │
-     │ 节点矩阵    │               │  row 2: 1fr（填满剩余高度）
+     │             │ KPI           │  row 1: auto
+     │ 节点矩阵    ├───────────────┤
+     │ (跨两行)    │ 最近调和      │  row 2: 1fr
      └─────────────┴───────────────┘
-   把"最近调和"放右侧整列，避免之前 KPI 跨两列时右上 + 调和上方各有一块空白；
-   节点矩阵在左下，KPI 在左上紧凑展示。 */
+   节点矩阵占左侧整列高度（信息密度最高），右侧上 KPI 下 调和日志；
+   节点矩阵高度跟整个 status 区一样满，不留空白。 */
 @media (min-width: 1400px) {
   .orchestration-status-panel {
     display: grid;
@@ -989,17 +996,17 @@ select {
     overflow: hidden;
     padding-right: 0;
   }
-  .orchestration-status-panel > .kpi-grid {
-    grid-column: 1;
-    grid-row: 1;
-  }
   .orchestration-status-panel > .status-pane-matrix {
     grid-column: 1;
-    grid-row: 2;
+    grid-row: 1 / span 2;
+  }
+  .orchestration-status-panel > .kpi-grid {
+    grid-column: 2;
+    grid-row: 1;
   }
   .orchestration-status-panel > .status-pane-feed {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 2;
   }
   .orchestration-status-panel > .panel {
     min-height: 0;

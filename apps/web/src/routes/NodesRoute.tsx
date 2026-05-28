@@ -9,7 +9,7 @@ import type {
 import { NodePoolPanel } from "../features/node-pool/NodePoolPanel.js";
 import { NodeToolbar, summarizePool } from "../features/nodes/NodeToolbar.js";
 import { NodeTable } from "../features/nodes/NodeTable.js";
-import { canExportNode, type NodeFilters } from "../features/nodes/node-utils.js";
+import type { NodeFilters } from "../features/nodes/node-utils.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
 
 interface PendingMutation {
@@ -83,7 +83,6 @@ export function NodesRoute(props: NodesRouteProps) {
   );
   const selectedWithPortCount = selectedNodes.filter((node) => node.assignedPort).length;
   const selectedUntestedCount = selectedNodes.filter((node) => !node.lastTestStatus).length;
-  const exportableFiltered = props.filteredNodes.filter(canExportNode).length;
   const filteredCount = props.filteredNodes.length;
   return (
     <section className="workspace-grid node-pool-grid">
@@ -163,7 +162,6 @@ export function NodesRoute(props: NodesRouteProps) {
           totalNodes={pool.total}
           filteredCount={filteredCount}
           schedulableCount={pool.schedulable}
-          exportableCount={exportableFiltered}
           selectedCount={props.selectedHashes.size}
           selectedWithPortCount={selectedWithPortCount}
           selectedUntestedCount={selectedUntestedCount}

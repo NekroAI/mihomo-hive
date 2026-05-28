@@ -465,9 +465,11 @@ function AccountCountCell(props: { proxy: Sub2ApiProxyRecord | undefined; hasPro
   const count = props.proxy.account_count ?? 0;
   const tone = count > 0 ? "info" : "neutral";
   return (
-    <span className="account-count-cell" title={`当前 Sub2API 端绑定到此代理的账号数：${count}`}>
-      <Users size={12} className="muted" aria-hidden="true" />
-      <Badge tone={tone}>{count}</Badge>
-    </span>
+    <Badge tone={tone}>
+      <span className="badge-icon-text" title={`当前 Sub2API 端绑定到此代理的账号数：${count}`}>
+        <Users size={11} aria-hidden="true" />
+        {count}
+      </span>
+    </Badge>
   );
 }

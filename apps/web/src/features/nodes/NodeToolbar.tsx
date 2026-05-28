@@ -21,7 +21,6 @@ export interface NodeToolbarProps {
   totalNodes: number;
   filteredCount: number;
   schedulableCount: number;
-  exportableCount: number;
   selectedCount: number;
   selectedWithPortCount: number;
   selectedUntestedCount: number;
@@ -68,9 +67,6 @@ export function NodeToolbar(props: NodeToolbarProps) {
         </span>
         <span className="node-toolbar-stat muted small" title="lifecycleStatus === schedulable 的节点数">
           可调度 {props.schedulableCount}
-        </span>
-        <span className="node-toolbar-stat muted small" title="已分配端口、非 retired 的节点数（导出基数）">
-          可导出 {props.exportableCount}
         </span>
         <div className="node-toolbar-selectors">
           <Button
