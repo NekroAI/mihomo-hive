@@ -19,7 +19,7 @@ import type {
   AccountOrigin,
   AccountRecordView
 } from "@mihomo-hive/schemas";
-import { Badge, EmptyState, Panel } from "../../components/ui.js";
+import { Badge, EmptyState, InfoTip, Panel } from "../../components/ui.js";
 
 /**
  * 账号编排状态右栏 —— 跟 OrchestrationStatusPanel 同形：
@@ -261,14 +261,23 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
               return (
               <tr key={acc.id} className={`node-matrix-tr role-${rowRoleByHealth(acc.health)}`}>
                 <td className="cell-name" title={acc.email}>
-                  <span className="mono-strong">{acc.email}</span>
+                  {acc.email.startsWith("unknown-") ? (
+                    // 接管时 Sub2API 未返回 email 的账号（多为已下线 / 无凭据的残留记录）。
+                    // 不显示丑陋的 unknown-177，改成"无邮箱记录"+ 账号编号。
+                    <span className="muted">无邮箱记录</span>
+                  ) : (
+                    <span className="mono-strong">{acc.email}</span>
+                  )}
                   {acc.externalId ? <span className="muted small"> #{acc.externalId}</span> : null}
                 </td>
-                <td title={split.tooltip} style={{ cursor: "help" }}>
-                  <Badge tone={split.typeTone}>{split.typeLabel}</Badge>
-                  {split.subLabel ? (
-                    <span className="muted small" style={{ marginLeft: 6 }}>· {split.subLabel}</span>
-                  ) : null}
+                <td>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                    <Badge tone={split.typeTone}>{split.typeLabel}</Badge>
+                    {split.subLabel ? (
+                      <span className="muted small" style={{ marginLeft: 4 }}>· {split.subLabel}</span>
+                    ) : null}
+                    <InfoTip text={split.tooltip} />
+                  </span>
                 </td>
                 <td>
                   <IntentBadge intent={acc.intent} />

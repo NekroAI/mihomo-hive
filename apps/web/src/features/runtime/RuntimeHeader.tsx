@@ -4,7 +4,7 @@ import { Badge, Button } from "../../components/ui.js";
 import type { Theme } from "../../hooks/useTheme.js";
 
 // "system" 是 P5-AK 引入的新 workspace（替代原 "runtime"）—— 把 Sub2API/codex-tool
-// 连接、运维工具箱、账号接管、节点导出篮子都收纳进去。"runtime" 别名保留向前
+// 连接、运维工具箱、账号接管、节点导出都收纳进去。"runtime" 别名保留向前
 // 兼容（localStorage 里可能有用户旧值），App.tsx 读取时会把 "runtime" 映射成 "system"。
 export type WorkspaceId = "nodes" | "automation" | "account_fleet" | "system";
 

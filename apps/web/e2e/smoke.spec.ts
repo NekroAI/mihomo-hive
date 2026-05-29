@@ -42,7 +42,7 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await nav.getByRole("tab", { name: "账号编排" }).click();
     await expect(page.getByRole("heading", { name: "自动维护" })).toBeVisible();
 
-    // 切到设置与工具：连接配置 + 运维工具 + 导出篮子集中地（P5-AK 重构）
+    // 切到设置与工具：连接配置 + 运维工具 + 导出节点集中地（P5-AK 重构）
     await nav.getByRole("tab", { name: "设置与工具" }).click();
     await expect(page.getByRole("heading", { name: "Sub2API 连接" })).toBeVisible();
 

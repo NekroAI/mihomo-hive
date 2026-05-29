@@ -83,6 +83,22 @@ export function startAccountFleetScheduler(
         }
       }
 
+      // P5-AM: Sub2API 自己标 status=error 的账号（如 "Token revoked (401)"）→ 确定性
+      // 需重登信号。按 externalId 收集错误原因，交给 diagnose 最高优先级判 broken，
+      // 避免 has_refresh_token=true + 配额低时被误判健康。
+      let remoteAuthErrorByExternalId: Map<number, string> | undefined;
+      if (remoteAccounts) {
+        remoteAuthErrorByExternalId = new Map<number, string>();
+        for (const r of remoteAccounts) {
+          if (r.status === "error") {
+            remoteAuthErrorByExternalId.set(
+              r.id,
+              r.error_message ? `Sub2API: ${r.error_message}` : "Sub2API 标记账号异常（status=error）"
+            );
+          }
+        }
+      }
+
       const localAccounts = repo.listAccounts();
       const budgetState = getBudgetState(repo, spec, startedAt);
 
@@ -92,6 +108,7 @@ export function startAccountFleetScheduler(
         localAccounts,
         ...(remoteAccounts ? { remoteAccounts } : {}),
         ...(upstreamErrorsByAccountId ? { upstreamErrorsByAccountId } : {}),
+        ...(remoteAuthErrorByExternalId ? { remoteAuthErrorByExternalId } : {}),
         budgetState
       });
 

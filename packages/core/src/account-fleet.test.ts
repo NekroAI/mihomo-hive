@@ -124,6 +124,19 @@ describe("planAccountFleet", () => {
       expect(r.observedAccounts[0]!.health).toBe("broken");
     });
 
+    it("Sub2API status=error（token revoked）→ broken，优先于配额判定（P5-AM）", () => {
+      // 即便配额很低（healthy 区间），只要 Sub2API 标了 auth error 就应判 broken
+      const acc = makeAcc({ externalId: 42, quota7dPercent: 10 });
+      const r = planAccountFleet(
+        baseInput({
+          localAccounts: [acc],
+          remoteAuthErrorByExternalId: new Map([[42, "Sub2API: Token revoked (401)"]])
+        })
+      );
+      expect(r.observedAccounts[0]!.health).toBe("broken");
+      expect(r.observedAccounts[0]!.lastRecoveryError).toContain("Token revoked");
+    });
+
     it("brokenConsecutiveTicks increments while broken, resets when healthy", () => {
       let acc = makeAcc({ externalId: 42, brokenConsecutiveTicks: 2 });
       let r = planAccountFleet(

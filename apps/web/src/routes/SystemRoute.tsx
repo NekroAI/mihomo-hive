@@ -35,7 +35,7 @@ interface PendingMutation {
  *   2. codex-tool 连接（账号编排和接管依赖）
  *   3. Sub2API 运维工具箱（推送本地节点 / 质量检查 / 排空 / 清理空代理）
  *   4. codex-tool 账号接管（P5-AK/3 实现，本期占位）
- *   5. 节点导出篮子（手动批量导出 sub2api-proxies.json）
+ *   5. 节点导出（手动批量导出 sub2api-proxies.json）
  */
 export interface SystemRouteProps {
   // Sub2API 连接
@@ -49,7 +49,7 @@ export interface SystemRouteProps {
   lastCodexTest: CodexToolTestResult | null | undefined;
   // Sub2API 运维工具
   maintenance: Sub2ApiMaintenancePreview | undefined;
-  // 导出篮子
+  // 导出节点
   exportHost: string;
   exportFilename: string;
   failedNodeStatus: "active" | "inactive";
@@ -187,7 +187,7 @@ export function SystemRoute(props: SystemRouteProps) {
           />
         </div>
 
-        {/* Col 3: 导出篮子（中屏会落到第二行 col 1，宽屏 ≥1600 独占第三列） */}
+        {/* Col 3: 导出节点（中屏会落到第二行 col 1，宽屏 ≥1600 独占第三列） */}
         <div className="system-col">
           {props.selectedCount === 0 ? (
             <p className="muted small system-export-note">
@@ -219,7 +219,7 @@ export function SystemRoute(props: SystemRouteProps) {
               props.requestConfirmation({
                 title: "确认写入服务器文件",
                 description: `将把 ${props.exportableSelectedCount} 个可导出节点写入 generated/sub2api-proxies.json。`,
-                detail: "导出严格按当前选择集执行；失败节点状态由导出篮子的选项决定。",
+                detail: "导出严格按当前选择集执行；失败节点状态由下方选项决定。",
                 confirmLabel: "写入文件",
                 run: async () =>
                   m.writeExport.mutate({

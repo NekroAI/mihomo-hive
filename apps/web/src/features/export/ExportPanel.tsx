@@ -25,7 +25,7 @@ export function ExportPanel(props: {
   return (
     <aside className="export-panel">
       <Panel
-        title="导出篮子"
+        title="导出节点"
         actions={exportable > 0 ? <Badge tone="success">{exportable} 个可导出</Badge> : <Badge tone="warning">等待选择</Badge>}
       >
         <div className="export-stats">

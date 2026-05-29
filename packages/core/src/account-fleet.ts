@@ -35,6 +35,13 @@ export interface AccountFleetInput {
   remoteAccounts?: Sub2ApiAccountRecord[];
   /** 按 account_id 索引的 upstream errors 计数（窗口内）。 */
   upstreamErrorsByAccountId?: Map<number, number>;
+  /**
+   * Sub2API 自己判定为不可用的账号（status=error，如 "Token revoked (401)"）。
+   * 按 externalId 索引 → 错误原因字符串。这是确定性「需重登」信号：Sub2API 已经把
+   * 账号停用（schedulable=false），即便 has_refresh_token=true、配额很低，账号也用不了。
+   * diagnose 据此最高优先级判 broken，避免误判健康。
+   */
+  remoteAuthErrorByExternalId?: Map<number, string>;
   /** 当前预算状态。 */
   budgetState: {
     dailyUsed: number;
@@ -276,6 +283,7 @@ function diagnoseAccounts(
   accounts: AccountRecordInternal[]
 ): AccountRecordInternal[] {
   const errorsBy = input.upstreamErrorsByAccountId ?? new Map<number, number>();
+  const authErrorBy = input.remoteAuthErrorByExternalId ?? new Map<number, string>();
   const policy = input.spec.health;
   const nowIso = input.now.toISOString();
   const out = accounts.map((a) => ({ ...a }));
@@ -286,6 +294,19 @@ function diagnoseAccounts(
 
     const errors = acc.externalId !== null ? errorsBy.get(acc.externalId) ?? 0 : 0;
     acc.errorsInWindow = errors;
+
+    // 最高优先级：Sub2API 标 status=error（OAuth token 失效 / revoked）→ 直接 broken。
+    // 这是确定性「需重登」信号，优先于配额/限流判定：token 都失效了配额再低也用不了。
+    // 把 Sub2API 给的原因写进 lastRecoveryError 方便 UI 展示"为什么挂了"。
+    const remoteAuthError = acc.externalId !== null ? authErrorBy.get(acc.externalId) : undefined;
+    if (remoteAuthError) {
+      acc.health = "broken";
+      acc.lastRecoveryError = remoteAuthError;
+      if (!acc.brokenSinceTick) acc.brokenSinceTick = nowIso;
+      acc.brokenConsecutiveTicks = (acc.brokenConsecutiveTicks ?? 0) + 1;
+      acc.updatedAt = nowIso;
+      continue;
+    }
 
     // 优先级：quota_exhausted > rate_limited > broken > healthy
     if (acc.quota7dPercent !== null && acc.quota7dPercent >= policy.quotaExhaustedThresholdPercent) {

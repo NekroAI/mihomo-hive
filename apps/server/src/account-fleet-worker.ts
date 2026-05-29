@@ -892,12 +892,13 @@ export async function buildCodexToolAdapter(
    */
   egress: EgressSelection | null
 ): Promise<CodexToolAdapter> {
-  const skymailPassword = spec.codexTool.skymail.adminPasswordRef
-    ? crypto.decrypt(spec.codexTool.skymail.adminPasswordRef)
-    : "";
-  const smsApiKey = spec.codexTool.phoneSms.apiKeyRef
-    ? crypto.decrypt(spec.codexTool.phoneSms.apiKeyRef)
-    : "";
+  // P5-AM: codexTool.skymail.adminPasswordRef / phoneSms.apiKeyRef 按设计是「明文存储」
+  // （docs：私有部署 UI 不脱敏，加密留作未来增强）。早期代码无脑 crypto.decrypt() 会把
+  // 明文当密文解析 → "Malformed ciphertext: expected 4 parts, got 1"。
+  // readMaybeEncrypted：只有 4 段 VERSION:iv:tag:ct 格式才尝试解密，否则按明文返回，
+  // 兼容"明文存储"与"未来加密存储"两种形态。
+  const skymailPassword = readMaybeEncrypted(crypto, spec.codexTool.skymail.adminPasswordRef);
+  const smsApiKey = readMaybeEncrypted(crypto, spec.codexTool.phoneSms.apiKeyRef);
   const proxyDefault = egress ? `socks5://127.0.0.1:${egress.port}` : resolveLegacyEgressProxyUrl(repo, spec);
   // P5-AI: 透明回灌 region_hint —— 上次注册成功的 sms_region_result blob 原样塞给
   // codex-tool 让它优先尝试该地区，Hive 不解析 blob 字段。第一次跑时没有，为 null。
@@ -1012,6 +1013,24 @@ function requireSub2apiClient(repo: HiveRepository): Sub2ApiClient {
   const conn = repo.getSub2ApiConnection();
   if (!conn) throw new Error("Sub2API connection not configured");
   return createSub2ApiClient(conn);
+}
+
+/**
+ * 读取「可能加密、也可能是明文」的 secret 字段（P5-AM）。
+ * codexTool 的 adminPasswordRef / apiKeyRef 按当前设计明文存储，但字段名带 Ref
+ * 暗示未来可能加密。AccountCrypto 密文格式是 4 段 `VERSION:iv:tag:ct`，明文几乎
+ * 不可能恰好命中。所以：4 段才尝试 decrypt（失败回退明文），否则直接当明文。
+ */
+function readMaybeEncrypted(crypto: AccountCrypto, value: string | null | undefined): string {
+  if (!value) return "";
+  if (value.split(":").length === 4) {
+    try {
+      return crypto.decrypt(value);
+    } catch {
+      return value; // 看着像密文但解不开 → 当明文兜底，不阻断
+    }
+  }
+  return value;
 }
 
 export function safeLoadCrypto(): AccountCrypto {

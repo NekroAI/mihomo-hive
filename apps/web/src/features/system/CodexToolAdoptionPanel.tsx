@@ -215,7 +215,6 @@ export function CodexToolAdoptionPanel(props: {
       <pre style={{ marginTop: 4, marginBottom: 12, padding: 8, fontSize: "0.85em" }}>
         <code>{`codex-tool accounts list --include-tokens \\
   --json --no-color --reveal-secrets \\
-  --data-dir ~/.local/share/codex-tool \\
   > codex-export.json`}</code>
       </pre>
 
