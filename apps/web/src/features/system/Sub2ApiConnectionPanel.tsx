@@ -29,8 +29,21 @@ export function Sub2ApiConnectionPanel(props: {
   onTest: () => void;
   /** 默认 collapsible；系统页主区可传 false 让它常驻展开 */
   collapsible?: boolean;
+  /** P6-12：新注册账号默认加入的 Sub2API 分组 group_ids（账号编排的注册行为，但概念属 Sub2API 侧）。 */
+  autoAssignGroupIds: number[];
+  savingGroups: boolean;
+  onSaveGroups: (ids: number[]) => void;
 }) {
   const connected = Boolean(props.connection?.configured);
+  const [groupText, setGroupText] = React.useState(props.autoAssignGroupIds.join(", "));
+  React.useEffect(() => {
+    setGroupText(props.autoAssignGroupIds.join(", "));
+  }, [props.autoAssignGroupIds.join(",")]);
+  const parsedGroups = groupText
+    .split(/[,，\s]+/)
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n > 0);
+  const groupsDirty = parsedGroups.join(",") !== props.autoAssignGroupIds.join(",");
   const body = (
     <>
       <div className="sub2api-fields">
@@ -71,6 +84,33 @@ export function Sub2ApiConnectionPanel(props: {
       <p className="muted small">
         托管前缀用于识别由 Hive 推送到 Sub2API 的代理。drain / 清理 / quality-check 操作只会作用于带这个前缀的代理。
       </p>
+      <div className="sub2api-fields" style={{ marginTop: 8 }}>
+        <div className="form-field">
+          <label className="form-label">新账号默认分组 group_ids</label>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              type="text"
+              className="matrix-search"
+              style={{ flex: 1 }}
+              value={groupText}
+              onChange={(e) => setGroupText(e.target.value)}
+              placeholder="例如 2 或 2, 5"
+            />
+            <Button
+              size="sm"
+              icon={<Save size={14} />}
+              loading={props.savingGroups}
+              disabled={!groupsDirty || parsedGroups.length === 0}
+              onClick={() => props.onSaveGroups(parsedGroups)}
+            >
+              保存
+            </Button>
+          </div>
+          <p className="muted small" style={{ marginTop: 4 }}>
+            Hive 自动注册/接管的新账号会加入这些 Sub2API 账号分组（group_id 在 Sub2API 侧定义）。逗号分隔多个。
+          </p>
+        </div>
+      </div>
       <div className="button-row wrap">
         <Button
           icon={<Save size={16} />}

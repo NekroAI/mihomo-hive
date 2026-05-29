@@ -896,6 +896,7 @@ function Dashboard(props: { onLogout: () => void }) {
             testSub2apiConnection: testSub2apiConnection,
             saveCodexTool: saveCodexTool,
             testCodexTool: testCodexTool,
+            saveFleetSpec: saveAccountFleetSpec,
             pushLocalNodes: pushManagedSub2api,
             qualityCheck: qualityCheckManaged,
             drainManaged: drainManagedSub2api,

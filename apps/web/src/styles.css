@@ -5,6 +5,7 @@
 /* —— 默认浅色主题 + auto 模式下的浅色 fallback —— */
 :root,
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #f6f7f9;
   --panel: #ffffff;
   --panel-subtle: #f9fafb;
@@ -38,6 +39,7 @@
 /* —— 深色 palette 共享定义 —— */
 :root[data-theme="dark"],
 :root[data-theme="dark"][data-theme="dark"] {
+  color-scheme: dark;
   --bg: #0f1117;
   --panel: #181b22;
   --panel-subtle: #1e222b;
@@ -70,6 +72,7 @@
 /* auto 模式（未显式 data-theme）下，系统偏好深色时复用上面的深色 palette */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #0f1117;
     --panel: #181b22;
     --panel-subtle: #1e222b;
@@ -195,6 +198,38 @@ select {
 
 .header-tabs button.is-active {
   color: var(--accent-strong);
+}
+
+/* P6-12 自定义滚动条：跟随主题，hover 不再变成系统默认的白色裸滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: padding-box;
+}
+
+/* P6-12 裸 number 输入框跟随主题（注册插队数量框等） */
+input[type="number"] {
+  background: var(--panel-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  padding: 4px 8px;
 }
 
 .workspace-grid {
@@ -758,6 +793,9 @@ select {
   margin: 0;
   font-size: 15px;
 }
+.tick-countdown { display: inline-flex; align-items: baseline; gap: 5px; cursor: help; }
+.tick-countdown strong { font-variant-numeric: tabular-nums; color: var(--text, inherit); }
+.tick-countdown-interval { opacity: 0.7; }
 
 /* P6-04 账号矩阵筛选条：chips + 搜索 */
 .matrix-toolbar {

@@ -124,12 +124,6 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patchTarget((c) => ({ ...c, healthyAccountsTarget: v }))}
           />
           <NumberInput
-            label="target group_id"
-            value={draft.target.targetGroupId}
-            min={1}
-            onChange={(v) => patchTarget((c) => ({ ...c, targetGroupId: v }))}
-          />
-          <NumberInput
             label="最低健康比 (0–1)"
             value={Number(draft.target.minHealthyRatio.toFixed(2))}
             min={0}
@@ -218,7 +212,7 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patchHealth((c) => ({ ...c, windowMs: v * 60_000 }))}
           />
           <NumberInput
-            label="adopted 降级阈值（tick）"
+            label="降级阈值（连续巡检次数）"
             value={draft.health.adoptedDemotionConsecutiveTicks}
             min={1}
             onChange={(v) => patchHealth((c) => ({ ...c, adoptedDemotionConsecutiveTicks: v }))}
@@ -253,7 +247,7 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patchRecovery((c) => ({ ...c, maxConcurrent: v }))}
           />
           <NumberInput
-            label="单 tick 修复上限"
+            label="每次巡检最多修复"
             value={draft.recovery.perTickRecoveryCap}
             min={0}
             onChange={(v) => patchRecovery((c) => ({ ...c, perTickRecoveryCap: v }))}
@@ -352,7 +346,7 @@ export function AccountFleetSpecPanel(props: {
       <CollapsiblePanel
         title="退役策略"
         storageKey="account-fleet-retirement"
-        hint="累计修复失败 N 次 / 长期无流量 N 天 → 自动退役。默认仅 schedulable=false，不删除 Sub2API 记录。"
+        hint="只退役【掉线】账号：① 修复连续失败达上限，或 ② 掉线且连续 N 天无流量。两个条件都要求账号已经掉线——健康账号即使长期闲置（池子充足/低负载）也不会被退役。默认仅设 schedulable=false 不删 Sub2API 记录。"
       >
         <div className="checkbox-stack">
           <Checkbox
@@ -368,7 +362,7 @@ export function AccountFleetSpecPanel(props: {
         </div>
         <div className="form-grid">
           <NumberInput
-            label="无流量退役阈值（天）"
+            label="掉线且无流量退役阈值（天）"
             value={draft.retirement.afterDeadDays}
             min={1}
             onChange={(v) => patchRetirement((c) => ({ ...c, afterDeadDays: v }))}

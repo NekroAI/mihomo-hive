@@ -80,6 +80,7 @@ export interface SystemRouteProps {
     };
     saveCodexTool: PendingMutation & { mutate: (next: AccountFleetSpec["codexTool"]) => void };
     testCodexTool: PendingMutation & { mutate: (next?: AccountFleetSpec["codexTool"]) => void };
+    saveFleetSpec: PendingMutation & { mutate: (next: AccountFleetSpec) => void };
     pushLocalNodes: PendingMutation & { mutate: () => void };
     qualityCheck: PendingMutation & { mutate: () => void };
     drainManaged: PendingMutation & { mutate: () => void };
@@ -152,6 +153,14 @@ export function SystemRoute(props: SystemRouteProps) {
               })
             }
             collapsible={false}
+            autoAssignGroupIds={props.fleetSpec.registration.autoAssignGroupIds}
+            savingGroups={m.saveFleetSpec.isPending}
+            onSaveGroups={(ids) =>
+              m.saveFleetSpec.mutate({
+                ...props.fleetSpec,
+                registration: { ...props.fleetSpec.registration, autoAssignGroupIds: ids }
+              })
+            }
           />
 
           <Sub2ApiMaintenancePanel

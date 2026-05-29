@@ -71,6 +71,12 @@ export function AccountFleetRoute(props: AccountFleetRouteProps) {
           ) : null}
         </div>
         <div className="fleet-toolbar-right">
+          {enabled ? (
+            <TickCountdown
+              intervalMs={props.spec.reconcileIntervalMs}
+              lastTickAt={props.status?.lastTick?.startedAt}
+            />
+          ) : null}
           <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "自动维护运行中" : "已暂停"}</Badge>
           <Button
             variant={specOpen ? "primary" : "ghost"}
@@ -98,5 +104,39 @@ export function AccountFleetRoute(props: AccountFleetRouteProps) {
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * P6-12「巡检」倒计时 —— "tick/巡检"是一次"检查账号池→按策略入队任务"的周期循环。
+ * 显示间隔 + 距下一次的秒数，把抽象的 tick 概念变得可见。每秒刷新。
+ */
+function TickCountdown(props: { intervalMs: number; lastTickAt: string | undefined }) {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const intervalMin = Math.round(props.intervalMs / 60000);
+  let remainLabel = "—";
+  if (props.lastTickAt) {
+    const next = new Date(props.lastTickAt).getTime() + props.intervalMs;
+    const remainMs = next - now;
+    if (remainMs <= 0) {
+      remainLabel = "即将巡检";
+    } else {
+      const s = Math.floor(remainMs / 1000);
+      remainLabel = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    }
+  }
+  return (
+    <span
+      className="tick-countdown muted small"
+      title={`巡检 = 每 ${intervalMin} 分钟检查一次账号池，按策略入队恢复/注册/退役任务。这里是距下一次巡检的倒计时。`}
+    >
+      下次巡检 <strong>{remainLabel}</strong>
+      <span className="tick-countdown-interval">/ 每 {intervalMin} 分钟</span>
+    </span>
   );
 }
