@@ -1320,8 +1320,11 @@ export const appRouter = t.router({
       //   currentNodeName 留 null 即可，UI 自有 fallback 链。
       let proxyIdByExternalId = new Map<number, number>();
       try {
+        // status:"" 拉全量 —— schema 默认 status:"active"，但实测 Sub2API 对
+        // status=active 返回 0（其 status 过滤值语义不同），会导致漏掉所有账号。
+        // 跟 orchestrator sense 保持一致用空 status。
         const sub2apiAccounts = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
-          sub2ApiAccountFiltersSchema.parse({})
+          sub2ApiAccountFiltersSchema.parse({ status: "" })
         );
         proxyIdByExternalId = new Map(
           sub2apiAccounts
@@ -1580,8 +1583,10 @@ export const appRouter = t.router({
             // Sub2API 离线 / 未配置时静默 fallback，匹配只在本地做
             let sub2apiAccounts: Array<{ id: number; email: string | null }> = [];
             try {
+              // status:"" 拉全量做去重匹配 —— 默认 status:"active" 在该 Sub2API 上返回 0，
+              // 会让所有账号匹配不上 → 全判 register_new（产生 Sub2API 重复账号）。必须全量。
               const remote = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
-                sub2ApiAccountFiltersSchema.parse({})
+                sub2ApiAccountFiltersSchema.parse({ status: "" })
               );
               sub2apiAccounts = remote.map((r) => ({
                 id: r.id,
@@ -1617,8 +1622,9 @@ export const appRouter = t.router({
             }));
             let sub2apiAccounts: Array<{ id: number; email: string | null }> = [];
             try {
+              // 同 preview：status:"" 拉全量，否则匹配不上会重复建号。
               const remote = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
-                sub2ApiAccountFiltersSchema.parse({})
+                sub2ApiAccountFiltersSchema.parse({ status: "" })
               );
               sub2apiAccounts = remote.map((r) => ({ id: r.id, email: r.credentials?.email ?? r.email ?? null }));
             } catch {
