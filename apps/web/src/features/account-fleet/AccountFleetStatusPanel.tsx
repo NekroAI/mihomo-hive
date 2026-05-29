@@ -302,16 +302,12 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                   <IntentBadge intent={acc.intent} />
                 </td>
                 <td>
-                  <HealthBadge health={acc.health} />
-                  {acc.lastRecoveryFailureCategory === "account_unusable" ? (
-                    <span
-                      className="muted small"
-                      style={{ marginLeft: 4, cursor: "help" }}
-                      title="codex-tool 判定为 account_unusable：OAuth 授权链终态缺失，无法自动恢复。"
-                    >
-                      ⚠
-                    </span>
-                  ) : null}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                    <HealthBadge health={acc.health} />
+                    {acc.lastRecoveryFailureCategory ? (
+                      <InfoTip text={formatFailureCategory(acc.lastRecoveryFailureCategory)} />
+                    ) : null}
+                  </span>
                 </td>
                 <td className="num">
                   <span className={`mono-strong ${quotaToneClass(acc.quota5hPercent)}`}>

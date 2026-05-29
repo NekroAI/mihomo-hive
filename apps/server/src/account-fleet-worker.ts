@@ -46,6 +46,26 @@ export interface AccountJobsWorkerHandle {
   stop: () => void;
 }
 
+/**
+ * 全局串行闸门：保证同一时刻只有一个 codex-tool 调用在跑（P5-AP 实测）。
+ *
+ * 背景：worker 按 spec.recovery.maxConcurrent 并发跑 job，但 codex-tool 的 login/
+ * register 会起 Playwright chromium 抓 Sentinel。两个 chromium 在小机器上同时跑，
+ * Cloudflare 重保护页加载极易 ERR_CONNECTION_CLOSED / 提取不到 token（用户手动单跑
+ * 几乎不遇到）。所以把 codex-tool 的 chromium 类调用串行化 —— 其它 job（delete/
+ * toggle/observe，不起 chromium）仍可并发。锁是 promise 链，先到先跑、依次释放。
+ */
+let codexToolGate: Promise<unknown> = Promise.resolve();
+function withCodexToolLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = codexToolGate.then(fn, fn);
+  // 无论成功失败都释放（吞掉结果，仅作链式排队），让下一个排队者继续
+  codexToolGate = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 export interface AccountJobsWorkerOptions {
   repo: HiveRepository;
   /**
@@ -197,7 +217,10 @@ async function runCodexLogin(
 
   const egress = resolveEgressForLogin(repo, spec, account);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
-  const outcome = await adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs });
+  // 串行化：codex-tool 的 chromium/Sentinel 调用不能并发（见 withCodexToolLock）
+  const outcome = await withCodexToolLock(() =>
+    adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs })
+  );
   // login 失败统一抛错，由 executor catch → applyRecoveryFailure 按错误消息分类处理
   // （account_unusable 退役 / network_or_proxy 换出口重试 / oauth_failed 退避）。
   // 不在这里 patch —— 否则会和 applyRecoveryFailure 的 intent 写回打架（先退役又被翻回）。
@@ -234,9 +257,10 @@ async function runCodexRegister(
   // 注册：按质量+负载加权随机选 egress，让新账号 IP 出生地自然分散
   const egress = resolveEgressForRegister(repo, spec);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
-  const outcome = await adapter.registerOne({
-    timeoutMs: spec.codexTool.timeouts.registerMs
-  });
+  // 串行化：与 login 共用同一闸门，避免两个 chromium 同时跑
+  const outcome = await withCodexToolLock(() =>
+    adapter.registerOne({ timeoutMs: spec.codexTool.timeouts.registerMs })
+  );
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
 
   // P5-AI: 不管成功失败，只要 codex-tool 返回了 sms_region_result 就回灌经验
