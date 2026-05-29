@@ -204,6 +204,11 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
       if (purged > 0) {
         console.log(`AccountJobsWorker: cancelled ${purged} queued job(s) for retired accounts on startup.`);
       }
+      // P5-AV：去重 —— 每个账号只留一条 queued 恢复任务，清掉上线前堆积的重复。
+      const deduped = repo.dedupeQueuedRecoveryJobs();
+      if (deduped > 0) {
+        console.log(`AccountJobsWorker: de-duplicated ${deduped} redundant queued recovery job(s) on startup.`);
+      }
     } catch (err) {
       console.warn("AccountJobsWorker: failed to reset stale running jobs:", err);
     }

@@ -1214,6 +1214,28 @@ export class HiveRepository {
       .run(now, reason, now).changes;
   }
 
+  /**
+   * 去重历史堆积的 queued 恢复 job（P5-AV）：每个账号只保留最先会被认领的一条
+   * (priority↑, scheduled_at↑)，其余 queued 作废。清掉上线前积累的重复任务。
+   * 返回作废条数。
+   */
+  dedupeQueuedRecoveryJobs(): number {
+    const now = new Date().toISOString();
+    return this.sqlite
+      .prepare(
+        `UPDATE account_jobs SET status='cancelled', finished_at=?, error_message='去重清理', updated_at=?
+         WHERE status='queued' AND kind IN ('codex_login','codex_register') AND account_id IS NOT NULL
+           AND id NOT IN (
+             SELECT id FROM (
+               SELECT id, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY priority ASC, scheduled_at ASC) AS rn
+               FROM account_jobs
+               WHERE status='queued' AND kind IN ('codex_login','codex_register') AND account_id IS NOT NULL
+             ) WHERE rn = 1
+           )`
+      )
+      .run(now, now).changes;
+  }
+
   /** 当前有 queued 或 running job 的账号 id 集合（P5-AV：调度器据此去重，避免重复入队）。 */
   accountIdsWithPendingJobs(): Set<string> {
     const rows = this.sqlite

@@ -296,6 +296,19 @@ describe("HiveRepository account-fleet", () => {
       expect(repo.accountIdsWithPendingJobs()).toEqual(new Set(["acc-y"]));
     });
 
+    it("dedupeQueuedRecoveryJobs keeps one per account (P5-AV)", () => {
+      const t = (s: number) => new Date(2026, 0, 1, 0, 0, s).toISOString();
+      repo.enqueueAccountJob(makeJob({ id: "d1", accountId: "acc-d", status: "queued", scheduledAt: t(1) }));
+      repo.enqueueAccountJob(makeJob({ id: "d2", accountId: "acc-d", status: "queued", scheduledAt: t(2) }));
+      repo.enqueueAccountJob(makeJob({ id: "d3", accountId: "acc-d", status: "queued", scheduledAt: t(3) }));
+      repo.enqueueAccountJob(makeJob({ id: "e1", accountId: "acc-e", status: "queued", scheduledAt: t(1) }));
+      const cancelled = repo.dedupeQueuedRecoveryJobs();
+      expect(cancelled).toBe(2); // acc-d 保留 1 取消 2，acc-e 不动
+      expect(repo.getAccountJob("d1")?.status).toBe("queued"); // 最早的留下
+      expect(repo.getAccountJob("d2")?.status).toBe("cancelled");
+      expect(repo.getAccountJob("e1")?.status).toBe("queued");
+    });
+
     it("listRunningAccountJobs + countQueuedAccountJobs", () => {
       repo.enqueueAccountJob(makeJob({ id: "q1", status: "queued" }));
       repo.enqueueAccountJob(makeJob({ id: "q2", status: "queued" }));

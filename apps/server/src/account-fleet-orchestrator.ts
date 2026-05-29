@@ -395,6 +395,9 @@ function enqueueJobForAction(
       if (action.accountId) {
         const spec = repo.getAccountFleetSpec();
         repo.patchAccount(action.accountId, { intent: "retired" });
+        // P5-AV：退役同时取消该账号残留 queued 恢复 job，避免死磕（与 worker 失败
+        // 退役路径一致；调度器退役路径之前漏了这步，导致退役账号仍堆着 queued）。
+        repo.cancelQueuedJobsForAccount(action.accountId, "scheduler 退役");
         if (spec.retirement.deleteOnRetire && action.externalId) {
           repo.enqueueAccountJob({
             ...baseJob,
