@@ -96,81 +96,90 @@ export function SystemRoute(props: SystemRouteProps) {
   return (
     <section className="workspace-grid system-workspace">
       <div className="system-stack">
-        <Sub2ApiConnectionPanel
-          connection={props.sub2apiConnection}
-          draft={props.sub2apiConnectionDraft}
-          saving={m.saveSub2apiConnection.isPending}
-          testing={m.testSub2apiConnection.isPending}
-          onDraftChange={props.setSub2apiConnectionDraft}
-          onSave={() =>
-            m.saveSub2apiConnection.mutate({
-              baseUrl: props.sub2apiConnectionDraft.baseUrl,
-              adminApiKey: props.sub2apiConnectionDraft.apiKey || undefined,
-              timezone: props.sub2apiConnectionDraft.timezone || "Asia/Shanghai",
-              managedProxyPrefix: props.sub2apiConnectionDraft.managedPrefix || "MH-"
-            })
-          }
-          onTest={() => m.testSub2apiConnection.mutate()}
-          collapsible={false}
-        />
+        {/* Col 1: Sub2API 主题（连接 + 运维工具） */}
+        <div className="system-col">
+          <Sub2ApiConnectionPanel
+            connection={props.sub2apiConnection}
+            draft={props.sub2apiConnectionDraft}
+            saving={m.saveSub2apiConnection.isPending}
+            testing={m.testSub2apiConnection.isPending}
+            onDraftChange={props.setSub2apiConnectionDraft}
+            onSave={() =>
+              m.saveSub2apiConnection.mutate({
+                baseUrl: props.sub2apiConnectionDraft.baseUrl,
+                adminApiKey: props.sub2apiConnectionDraft.apiKey || undefined,
+                timezone: props.sub2apiConnectionDraft.timezone || "Asia/Shanghai",
+                managedProxyPrefix: props.sub2apiConnectionDraft.managedPrefix || "MH-"
+              })
+            }
+            onTest={() => m.testSub2apiConnection.mutate()}
+            collapsible={false}
+          />
 
-        <CodexToolConnectionPanel
-          draft={props.codexToolDraft}
-          saving={m.saveCodexTool.isPending}
-          testing={m.testCodexTool.isPending}
-          lastTest={props.lastCodexTest}
-          onDraftChange={props.setCodexToolDraft}
-          onSave={() => m.saveCodexTool.mutate(props.codexToolDraft)}
-          onTest={() => m.testCodexTool.mutate()}
-        />
+          <Sub2ApiMaintenancePanel
+            connected={sub2apiConnected}
+            maintenance={props.maintenance}
+            pushingLocal={m.pushLocalNodes.isPending}
+            checkingQuality={m.qualityCheck.isPending}
+            draining={m.drainManaged.isPending}
+            cleaningEmpty={m.cleanupEmpty.isPending}
+            onPushLocal={() => m.pushLocalNodes.mutate()}
+            onQualityCheck={() => m.qualityCheck.mutate()}
+            onDrain={() => m.drainManaged.mutate()}
+            onCleanupEmpty={() => m.cleanupEmpty.mutate()}
+          />
+        </div>
 
-        <Sub2ApiMaintenancePanel
-          connected={sub2apiConnected}
-          maintenance={props.maintenance}
-          pushingLocal={m.pushLocalNodes.isPending}
-          checkingQuality={m.qualityCheck.isPending}
-          draining={m.drainManaged.isPending}
-          cleaningEmpty={m.cleanupEmpty.isPending}
-          onPushLocal={() => m.pushLocalNodes.mutate()}
-          onQualityCheck={() => m.qualityCheck.mutate()}
-          onDrain={() => m.drainManaged.mutate()}
-          onCleanupEmpty={() => m.cleanupEmpty.mutate()}
-        />
+        {/* Col 2: codex-tool 主题（连接 + 接管） */}
+        <div className="system-col">
+          <CodexToolConnectionPanel
+            draft={props.codexToolDraft}
+            saving={m.saveCodexTool.isPending}
+            testing={m.testCodexTool.isPending}
+            lastTest={props.lastCodexTest}
+            onDraftChange={props.setCodexToolDraft}
+            onSave={() => m.saveCodexTool.mutate(props.codexToolDraft)}
+            onTest={() => m.testCodexTool.mutate()}
+          />
 
-        <CodexToolAdoptionPanel
-          sub2apiConnected={sub2apiConnected}
-          requestConfirmation={props.requestConfirmation}
-        />
+          <CodexToolAdoptionPanel
+            sub2apiConnected={sub2apiConnected}
+            requestConfirmation={props.requestConfirmation}
+          />
+        </div>
 
-        <ExportPanel
-          host={props.exportHost}
-          filename={props.exportFilename}
-          selectedCount={props.selectedCount}
-          preview={props.exportPreview}
-          loading={props.exportPreviewFetching}
-          writing={m.writeExport.isPending}
-          downloading={props.downloading}
-          failedNodeStatus={props.failedNodeStatus}
-          onHostChange={props.setExportHost}
-          onFilenameChange={props.setExportFilename}
-          onFailedNodeStatusChange={props.setFailedNodeStatus}
-          onDownload={props.onDownload}
-          onWrite={() =>
-            props.requestConfirmation({
-              title: "确认写入服务器文件",
-              description: `将把 ${props.exportableSelectedCount} 个可导出节点写入 generated/sub2api-proxies.json。`,
-              detail: "导出严格按当前选择集执行；失败节点状态由导出篮子的选项决定。",
-              confirmLabel: "写入文件",
-              run: async () =>
-                m.writeExport.mutate({
-                  selectedHashes: props.selectedHashesList,
-                  host: props.exportHost,
-                  filename: props.exportFilename,
-                  failedNodeStatus: props.failedNodeStatus
-                })
-            })
-          }
-        />
+        {/* Col 3: 导出篮子（中屏会落到第二行 col 1，宽屏 ≥1600 独占第三列） */}
+        <div className="system-col">
+          <ExportPanel
+            host={props.exportHost}
+            filename={props.exportFilename}
+            selectedCount={props.selectedCount}
+            preview={props.exportPreview}
+            loading={props.exportPreviewFetching}
+            writing={m.writeExport.isPending}
+            downloading={props.downloading}
+            failedNodeStatus={props.failedNodeStatus}
+            onHostChange={props.setExportHost}
+            onFilenameChange={props.setExportFilename}
+            onFailedNodeStatusChange={props.setFailedNodeStatus}
+            onDownload={props.onDownload}
+            onWrite={() =>
+              props.requestConfirmation({
+                title: "确认写入服务器文件",
+                description: `将把 ${props.exportableSelectedCount} 个可导出节点写入 generated/sub2api-proxies.json。`,
+                detail: "导出严格按当前选择集执行；失败节点状态由导出篮子的选项决定。",
+                confirmLabel: "写入文件",
+                run: async () =>
+                  m.writeExport.mutate({
+                    selectedHashes: props.selectedHashesList,
+                    host: props.exportHost,
+                    filename: props.exportFilename,
+                    failedNodeStatus: props.failedNodeStatus
+                  })
+              })
+            }
+          />
+        </div>
       </div>
     </section>
   );
