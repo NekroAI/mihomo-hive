@@ -413,6 +413,7 @@ function planActions(
 
   // (1) 降级：adopted_active 满足 brokenConsecutiveTicks ≥ 阈值
   for (const acc of accounts) {
+    if (acc.intent === "retired") continue; // 已退役不再处理
     if (
       acc.origin === "adopted_active" &&
       acc.health === "broken" &&
@@ -469,6 +470,9 @@ function planActions(
   if (policy.recovery.enabled) {
     for (const acc of accounts) {
       if (acc.health !== "broken") continue;
+      // P6-14 关键修复：已退役账号 health 仍为 broken，但绝不能再排恢复 —— 否则每个 tick
+      // 都给死号重新入队 recover_via_login，被执行前拦截删除后又入队，无限空转。
+      if (acc.intent === "retired") continue;
       if (retiringIds.has(acc.id)) continue;
       // 不自动修复的 origins
       if (acc.origin === "retired_legacy" || acc.origin === "adopted_observing") continue;

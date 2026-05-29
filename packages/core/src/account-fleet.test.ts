@@ -91,6 +91,34 @@ describe("planAccountFleet", () => {
     });
   });
 
+  describe("retired accounts never re-planned (P6-14)", () => {
+    it("retired + broken account gets no recover_via_login / demote", () => {
+      const r = planAccountFleet(
+        baseInput({
+          spec: makeSpec({
+            recovery: { ...defaultAccountFleetSpec.recovery, enabled: true },
+            registration: { ...defaultAccountFleetSpec.registration, enabled: false }
+          }),
+          localAccounts: [
+            makeAcc({
+              id: "dead-1",
+              externalId: 1,
+              intent: "retired",
+              health: "broken",
+              origin: "adopted_recovered",
+              encPhone: "v1:x:y:z",
+              encPassword: "v1:x:y:z"
+            })
+          ]
+        })
+      );
+      const forDead = r.plannedActions.filter((a) => a.accountId === "dead-1");
+      expect(forDead.filter((a) => a.kind === "recover_via_login")).toHaveLength(0);
+      expect(forDead.filter((a) => a.kind === "recover_via_register")).toHaveLength(0);
+      expect(forDead.filter((a) => a.kind === "demote_to_observing")).toHaveLength(0);
+    });
+  });
+
   describe("diagnose", () => {
     it("clears rate_limited when reset_at is past", () => {
       const acc = makeAcc({
