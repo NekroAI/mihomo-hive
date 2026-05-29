@@ -269,6 +269,11 @@ export interface CodexToolSpawnRequest {
   args: string[];
   stdinJson: string | null;
   timeoutMs: number;
+  /**
+   * P5-AT：实时 stderr 行回调（codex-tool 进度日志走 stderr，stdout 留给 JSON
+   * 信封 / token）。**绝不回调 stdout**。调用方负责 redact 后再落地。
+   */
+  onStderr?: (line: string) => void;
 }
 
 export interface CodexToolSpawnResult {
@@ -292,10 +297,13 @@ export interface CodexToolAdapter {
     phone: string;
     password: string;
     timeoutMs?: number;
+    /** P5-AT：codex-tool stderr 进度行回调（实时日志）。 */
+    onLog?: (line: string) => void;
   }): Promise<CodexToolLoginOutcome>;
 
   registerOne(input?: {
     timeoutMs?: number;
+    onLog?: (line: string) => void;
   }): Promise<CodexToolRegisterOutcome>;
 }
 
@@ -325,12 +333,14 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
     args: string[],
     timeoutMs: number,
     withStdin: boolean,
-    lenient = false
+    lenient = false,
+    onStderr?: (line: string) => void
   ): Promise<CodexToolEnvelope> {
     const res = await spawner({
       args,
       stdinJson: withStdin ? configJson : null,
-      timeoutMs
+      timeoutMs,
+      ...(onStderr ? { onStderr } : {})
     });
     if (res.timedOut) {
       throw new CodexToolError(
@@ -409,7 +419,7 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
       ];
       const timeoutMs = input.timeoutMs ?? opts.defaults.loginMs;
       // lenient：ok=false 不抛错，调用方能从 data 里读 failure_category 做分流
-      const env = await runEnvelope(args, timeoutMs, true, true);
+      const env = await runEnvelope(args, timeoutMs, true, true, input.onLog);
       if (!env.ok) {
         const data = isObject(env.data) ? (env.data as Record<string, unknown>) : {};
         return {
@@ -433,7 +443,7 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
         "--config-json-stdin"
       ];
       const timeoutMs = input.timeoutMs ?? opts.defaults.registerMs;
-      const env = await runEnvelope(args, timeoutMs, true);
+      const env = await runEnvelope(args, timeoutMs, true, false, input.onLog);
       return parseRegisterEnvelope(env);
     }
   };
@@ -639,7 +649,7 @@ function buildChildEnv(): NodeJS.ProcessEnv {
 }
 
 function createDefaultSpawner(binPath: string): CodexToolSpawner {
-  return async ({ args, stdinJson, timeoutMs }) => {
+  return async ({ args, stdinJson, timeoutMs, onStderr }) => {
     return new Promise<CodexToolSpawnResult>((resolve, reject) => {
       let child: ChildProcess;
       try {
@@ -663,6 +673,7 @@ function createDefaultSpawner(binPath: string): CodexToolSpawner {
       }
       let stdout = "";
       let stderr = "";
+      let stderrPending = ""; // 按行切分缓冲，给 onStderr 实时回调
       let timedOut = false;
 
       const stdoutStream = child.stdout as Readable | null;
@@ -673,7 +684,17 @@ function createDefaultSpawner(binPath: string): CodexToolSpawner {
         stdout += chunk.toString("utf8");
       });
       stderrStream?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
+        const s = chunk.toString("utf8");
+        stderr += s;
+        if (onStderr) {
+          stderrPending += s;
+          const lines = stderrPending.split(/\r?\n/);
+          stderrPending = lines.pop() ?? ""; // 最后一段可能不完整，留到下次
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed) onStderr(trimmed);
+          }
+        }
       });
 
       const killTimer = setTimeout(() => {

@@ -39,6 +39,7 @@ import type {
   Sub2ApiCreateAccountPayload
 } from "@mihomo-hive/schemas";
 import { budgetWindowKey } from "./account-fleet-orchestrator.js";
+import { appendJobLog, finalizeJobLog } from "./job-log-buffer.js";
 
 export interface AccountJobsWorkerHandle {
   /** 立刻尝试 poll 一次（测试 / UI 手动触发用）。 */
@@ -101,20 +102,25 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
       startedAt: startedAt.toISOString(),
       attempt: job.attempt + 1
     });
+    appendJobLog(job.id, `▶ 开始执行 ${job.kind}（尝试 ${job.attempt + 1}/${job.maxAttempts}）`);
     try {
       await executeJob(job, spec);
+      appendJobLog(job.id, `✓ 执行成功`);
       repo.updateAccountJob(job.id, {
         status: "succeeded",
         finishedAt: new Date().toISOString(),
-        durationMs: Date.now() - startedAt.getTime()
+        durationMs: Date.now() - startedAt.getTime(),
+        logTail: finalizeJobLog(job.id)
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "未知错误";
+      appendJobLog(job.id, `✗ 失败: ${redactErrorMessage(message)}`);
       repo.updateAccountJob(job.id, {
         status: "failed",
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt.getTime(),
-        errorMessage: redactErrorMessage(message)
+        errorMessage: redactErrorMessage(message),
+        logTail: finalizeJobLog(job.id)
       });
       // 同步 account.recoveryAttempts / nextRecoveryAfter
       //
@@ -226,13 +232,20 @@ async function runCodexLogin(
   repo.patchAccount(account.id, { intent: "recovering" });
 
   const egress = resolveEgressForLogin(repo, spec, account);
+  appendJobLog(job.id, egress ? `选定出口节点 ${egressLabel(repo, egress)}` : "未走本地出口（egress=none）");
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
+  appendJobLog(job.id, "调用 codex-tool login（chromium/Sentinel，串行排队中）…");
   // 串行化：codex-tool 的 chromium/Sentinel 调用不能并发（见 withCodexToolLock）。
   // P5-AS：抛出型失败（超时/非零退出）也要给节点记一笔（多为网络/代理类）。
   let outcome: Awaited<ReturnType<typeof adapter.login>>;
   try {
     outcome = await withCodexToolLock(() =>
-      adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs })
+      adapter.login({
+        phone,
+        password,
+        timeoutMs: spec.codexTool.timeouts.loginMs,
+        onLog: (line) => appendJobLog(job.id, `codex: ${redactErrorMessage(line)}`)
+      })
     );
   } catch (err) {
     recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
@@ -277,12 +290,17 @@ async function runCodexRegister(
 ): Promise<void> {
   // 注册：按质量+负载加权随机选 egress，让新账号 IP 出生地自然分散
   const egress = resolveEgressForRegister(repo, spec);
+  appendJobLog(job.id, egress ? `选定出口节点 ${egressLabel(repo, egress)}` : "未走本地出口（egress=none）");
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
+  appendJobLog(job.id, "调用 codex-tool all（注册 + OAuth，串行排队中）…");
   // 串行化：与 login 共用同一闸门，避免两个 chromium 同时跑
   let outcome: Awaited<ReturnType<typeof adapter.registerOne>>;
   try {
     outcome = await withCodexToolLock(() =>
-      adapter.registerOne({ timeoutMs: spec.codexTool.timeouts.registerMs })
+      adapter.registerOne({
+        timeoutMs: spec.codexTool.timeouts.registerMs,
+        onLog: (line) => appendJobLog(job.id, `codex: ${redactErrorMessage(line)}`)
+      })
     );
   } catch (err) {
     recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
@@ -924,6 +942,14 @@ function classifyCodexFailure(message: string): "account_unusable" | "network_or
  * 是账号自身问题，不该污染节点的"能否过 Sentinel"信誉。egress 为 null（egress.mode=none）
  * 时 no-op。
  */
+/** 把 egress 选择渲染成"节点名 (原因)"给日志用，找不到名字就用 hash 前 8 位。 */
+function egressLabel(repo: HiveRepository, egress: EgressSelection): string {
+  const node = repo.listNodes().find((n) => n.hash === egress.hash);
+  const name = node?.name ?? egress.hash.slice(0, 8);
+  const tag = egress.reserved ? "保留" : egress.reason;
+  return `${name} [${tag}]`;
+}
+
 function recordNodeOutcome(
   repo: HiveRepository,
   egress: EgressSelection | null,

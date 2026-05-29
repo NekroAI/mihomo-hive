@@ -217,6 +217,7 @@ describe("HiveRepository account-fleet", () => {
         payloadJson: "{}",
         resultJson: null,
         errorMessage: null,
+        logTail: null,
         triggeredBy: "scheduler",
         triggeredTickId: null,
         createdAt: now,

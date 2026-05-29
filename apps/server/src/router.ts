@@ -48,6 +48,7 @@ import {
 } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import { buildCodexToolAdapter, safeLoadCrypto } from "./account-fleet-worker.js";
+import { getJobLog } from "./job-log-buffer.js";
 import type {
   AccountFleetSpec,
   AccountFleetStatusSnapshot,
@@ -1325,6 +1326,26 @@ export const appRouter = t.router({
           }
         })
     }),
+    /**
+     * P5-AT: 某 job 的实时日志。运行中 → 进程内缓冲（worker 里程碑 + codex stderr）；
+     * 已结束 → DB 持久化的 log_tail。UI 展开行时轮询。
+     */
+    jobLog: protectedProcedure
+      .input(z.object({ jobId: z.string().min(1) }))
+      .query(({ ctx, input }) => {
+        const live = getJobLog(input.jobId);
+        if (live.length > 0) {
+          return { live: true as const, lines: live };
+        }
+        const job = ctx.repo.getAccountJob(input.jobId);
+        const tail = job?.logTail ?? "";
+        return {
+          live: false as const,
+          lines: tail
+            ? tail.split("\n").map((text) => ({ ts: "", text }))
+            : []
+        };
+      }),
     status: protectedProcedure.query(async ({ ctx }): Promise<AccountFleetStatusSnapshot> => {
       const spec = ctx.repo.getAccountFleetSpec();
       const accounts = ctx.repo.listAccounts();
@@ -1332,6 +1353,7 @@ export const appRouter = t.router({
       const recentJobs = ctx.repo.listAccountJobs(50);
       const runningJobs = ctx.repo.listRunningAccountJobs();
       const queuedJobCount = ctx.repo.countQueuedAccountJobs();
+      const recentFinishedJobs = ctx.repo.listRecentFinishedAccountJobs(30);
       const lastTickSummary = recentTicks[0];
       const lastTick = lastTickSummary ? ctx.repo.getAccountFleetTick(lastTickSummary.id) : undefined;
 
@@ -1339,6 +1361,11 @@ export const appRouter = t.router({
       //   失败（Sub2API 未配置 / 离线 / 接口报错）静默 fallback，账号视图仍能返回，
       //   currentNodeName 留 null 即可，UI 自有 fallback 链。
       let proxyIdByExternalId = new Map<number, number>();
+      // P5-AU: externalId → Sub2API "限流中" 冷却信号（live）
+      const coolingByExternalId = new Map<
+        number,
+        { until: string | null; reason: string | null; resetAt: string | null }
+      >();
       try {
         // status:"" 拉全量 —— schema 默认 status:"active"，但实测 Sub2API 对
         // status=active 返回 0（其 status 过滤值语义不同），会导致漏掉所有账号。
@@ -1351,6 +1378,15 @@ export const appRouter = t.router({
             .filter((a): a is typeof a & { proxy_id: number } => typeof a.proxy_id === "number")
             .map((a) => [a.id, a.proxy_id])
         );
+        for (const a of sub2apiAccounts) {
+          if (a.temp_unschedulable_until || a.rate_limit_reset_at) {
+            coolingByExternalId.set(a.id, {
+              until: a.temp_unschedulable_until ?? null,
+              reason: a.temp_unschedulable_reason ?? null,
+              resetAt: a.rate_limit_reset_at ?? null
+            });
+          }
+        }
       } catch {
         // Sub2API 未配置或失败 —— currentNodeName 全显示 —
       }
@@ -1362,11 +1398,21 @@ export const appRouter = t.router({
       const accountViews: AccountRecordView[] = accounts.map((a) => {
         const base = toAccountView(a);
         if (a.externalId === null) return base;
+        const cooling = coolingByExternalId.get(a.externalId);
+        // P5-AU: 合并 live 冷却信号；rateLimitResetAt 用 live 覆盖持久化值（更新鲜）
+        const withCooling: AccountRecordView = cooling
+          ? {
+              ...base,
+              tempUnschedulableUntil: cooling.until,
+              tempUnschedulableReason: cooling.reason,
+              ...(cooling.resetAt ? { rateLimitResetAt: cooling.resetAt } : {})
+            }
+          : base;
         const proxyId = proxyIdByExternalId.get(a.externalId);
-        if (!proxyId) return base;
+        if (!proxyId) return withCooling;
         const node = nodeByProxyId.get(proxyId);
         return {
-          ...base,
+          ...withCooling,
           currentProxyId: proxyId,
           currentNodeHash: node?.hash ?? null,
           currentNodeName: node?.name ?? null
@@ -1388,6 +1434,7 @@ export const appRouter = t.router({
         recentJobs,
         runningJobs,
         queuedJobCount,
+        recentFinishedJobs,
         kpis: {
           totalAccounts: accountViews.length,
           healthyCount,

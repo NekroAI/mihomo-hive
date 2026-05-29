@@ -179,6 +179,7 @@ interface AccountJobRow {
   payload_json: string;
   result_json: string | null;
   error_message: string | null;
+  log_tail: string | null;
   triggered_by: AccountJob["triggeredBy"];
   triggered_tick_id: string | null;
   created_at: string;
@@ -1125,6 +1126,7 @@ export class HiveRepository {
       durationMs: number | null;
       resultJson: string | null;
       errorMessage: string | null;
+      logTail: string | null;
     }>
   ): AccountJob | undefined {
     const fieldMap: Record<keyof typeof patch, string> = {
@@ -1134,7 +1136,8 @@ export class HiveRepository {
       finishedAt: "finished_at",
       durationMs: "duration_ms",
       resultJson: "result_json",
-      errorMessage: "error_message"
+      errorMessage: "error_message",
+      logTail: "log_tail"
     };
     const sets: string[] = [];
     const values: Record<string, unknown> = {};
@@ -1180,6 +1183,19 @@ export class HiveRepository {
   countQueuedAccountJobs(): number {
     return (this.sqlite.prepare("SELECT COUNT(*) AS c FROM account_jobs WHERE status = 'queued'").get() as { c: number })
       .c;
+  }
+
+  /**
+   * 最近"执行完"的 job（P5-AT）—— 按 finished_at 倒序，仅 succeeded/failed/cancelled。
+   * 区别于 listAccountJobs（按 created_at，会被一堆刚入队的 queued 淹没，看不到执行结果）。
+   */
+  listRecentFinishedAccountJobs(limit = 30): AccountJob[] {
+    const rows = this.sqlite
+      .prepare(
+        "SELECT * FROM account_jobs WHERE status IN ('succeeded','failed','cancelled') AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?"
+      )
+      .all(limit) as AccountJobRow[];
+    return rows.map(accountJobFromRow);
   }
 
   /**
@@ -1581,6 +1597,7 @@ function accountJobFromRow(row: AccountJobRow): AccountJob {
     payloadJson: row.payload_json,
     resultJson: row.result_json,
     errorMessage: row.error_message,
+    logTail: row.log_tail ?? null,
     triggeredBy: row.triggered_by,
     triggeredTickId: row.triggered_tick_id,
     createdAt: row.created_at,

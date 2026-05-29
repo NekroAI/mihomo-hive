@@ -229,6 +229,8 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "codex_last_outcome_at", "TEXT");
   // P5-AS: 保留节点标记（专用于注册/登录的高质量备用出口）
   addColumnIfMissing(sqlite, "nodes", "codex_reserved", "INTEGER NOT NULL DEFAULT 0");
+  // P5-AT: job 结束时持久化的日志末尾（redact 过），供"最近完成"回看
+  addColumnIfMissing(sqlite, "account_jobs", "log_tail", "TEXT");
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：
   // 旧 accounts 表升级时补 egress_node_hash 字段
   addColumnIfMissing(sqlite, "accounts", "egress_node_hash", "TEXT");

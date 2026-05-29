@@ -71,10 +71,10 @@ export function AccountFleetStatusPanel(props: {
       <div className="account-fleet-main">
         <AccountMatrix accounts={snap.accounts} />
         <div className="account-fleet-side">
-          <RunningJobsCard running={snap.runningJobs} queuedCount={snap.queuedJobCount} accounts={snap.accounts} />
           <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
+          <RunningJobsCard running={snap.runningJobs} queuedCount={snap.queuedJobCount} accounts={snap.accounts} />
+          <RecentFinishedJobsCard jobs={snap.recentFinishedJobs} accounts={snap.accounts} />
           <RecentTicksCard ticks={snap.recentTicks} />
-          <RecentJobsCard jobs={snap.recentJobs} />
         </div>
       </div>
     </div>
@@ -303,11 +303,12 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                   <IntentBadge intent={acc.intent} />
                 </td>
                 <td>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
                     <HealthBadge health={acc.health} />
                     {acc.lastRecoveryFailureCategory ? (
                       <InfoTip text={formatFailureCategory(acc.lastRecoveryFailureCategory)} />
                     ) : null}
+                    <CooldownHint acc={acc} />
                   </span>
                 </td>
                 <td className="num">
@@ -564,6 +565,14 @@ function RunningJobsCard(props: {
   queuedCount: number;
   accounts: AccountRecordView[];
 }) {
+  const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const emailById = React.useMemo(() => {
     const m = new Map<string, string>();
     for (const a of props.accounts) m.set(a.id, a.email);
@@ -595,9 +604,15 @@ function RunningJobsCard(props: {
           const who = email && !email.startsWith("unknown-") ? email : job.accountId?.slice(0, 12) ?? "—";
           const elapsed = job.startedAt ? Date.now() - new Date(job.startedAt).getTime() : 0;
           const tone = elapsed > 240_000 ? "danger" : elapsed > 120_000 ? "warning" : "info";
+          const isOpen = expanded.has(job.id);
           return (
             <article key={job.id} className="reconcile-row reconcile-running">
-              <div className="reconcile-row-head" style={{ cursor: "default" }}>
+              <button
+                type="button"
+                className="reconcile-row-head"
+                onClick={() => toggle(job.id)}
+              >
+                {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 <Loader2 size={14} className="animate-spin" />
                 <span>
                   <strong>{jobKindLabel(job.kind)}</strong>
@@ -605,7 +620,12 @@ function RunningJobsCard(props: {
                 </span>
                 <span className="muted small">尝试 {job.attempt}/{job.maxAttempts}</span>
                 <Badge tone={tone}>已运行 {formatElapsed(elapsed)}</Badge>
-              </div>
+              </button>
+              {isOpen ? (
+                <div className="reconcile-row-body">
+                  <JobLogView jobId={job.id} live />
+                </div>
+              ) : null}
             </article>
           );
         })}
@@ -623,23 +643,60 @@ function formatElapsed(ms: number): string {
   return `${m}m${rem.toString().padStart(2, "0")}s`;
 }
 
-function RecentJobsCard(props: { jobs: AccountJob[] }) {
+/**
+ * P5-AT: job 实时日志视图。运行中 → 每 2s 轮询进程内缓冲；已结束 → 拉一次
+ * 持久化 log_tail。展示 worker 里程碑 + codex-tool stderr 进度（已 redact）。
+ */
+function JobLogView(props: { jobId: string; live?: boolean }) {
+  const q = trpc.accountFleet.jobLog.useQuery(
+    { jobId: props.jobId },
+    { refetchInterval: props.live ? 2000 : false }
+  );
+  const lines = q.data?.lines ?? [];
+  if (q.isLoading) return <div className="muted small" style={{ padding: "6px 12px" }}>加载日志…</div>;
+  if (lines.length === 0) {
+    return <div className="muted small" style={{ padding: "6px 12px" }}>暂无日志输出。</div>;
+  }
+  return (
+    <pre className="job-log-view">
+      {lines.map((l, i) => (
+        <div key={i}>
+          {l.ts ? <span className="muted">{l.ts.slice(11, 19)} </span> : null}
+          {l.text}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+/**
+ * P5-AT「最近完成」卡片 —— 按 finished_at 倒序展示执行完的 job（区别于按入队时间
+ * 排序、被一堆 queued 淹没的旧"最近 jobs"）。展开看持久化日志 + 错误信息。
+ */
+function RecentFinishedJobsCard(props: { jobs: AccountJob[]; accounts: AccountRecordView[] }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
+  const emailById = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of props.accounts) m.set(a.id, a.email);
+    return m;
+  }, [props.accounts]);
   if (props.jobs.length === 0) {
     return (
-      <Panel title="最近 jobs">
+      <Panel title="最近完成">
         <EmptyState
-          title="尚无 job 记录"
-          description="dry-run 模式不入队 jobs；切到 apply 模式后会出现 codex_login / codex_register / observe_usage 等任务。"
+          title="尚无执行完的 job"
+          description="job 执行结束（成功/失败）后会按完成时间出现在这里，可展开看日志与错误。"
         />
       </Panel>
     );
   }
   return (
-    <Panel title={`最近 jobs (${props.jobs.length})`}>
+    <Panel title={`最近完成 (${props.jobs.length})`}>
       <div className="reconcile-feed">
-        {props.jobs.slice(0, 20).map((job) => {
+        {props.jobs.slice(0, 25).map((job) => {
           const isOpen = expanded.has(job.id);
+          const email = job.accountId ? emailById.get(job.accountId) : undefined;
+          const who = email && !email.startsWith("unknown-") ? email : job.accountId?.slice(0, 12);
           return (
             <article key={job.id} className={`reconcile-row reconcile-${jobReason(job.status)}`}>
               <button
@@ -656,26 +713,29 @@ function RecentJobsCard(props: { jobs: AccountJob[] }) {
               >
                 {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 <JobStatusIcon status={job.status} />
-                <span className="font-mono muted small">{new Date(job.createdAt).toLocaleTimeString()}</span>
+                <span className="font-mono muted small">
+                  {job.finishedAt ? new Date(job.finishedAt).toLocaleTimeString() : ""}
+                </span>
                 <span>
                   <strong>{jobKindLabel(job.kind)}</strong>
-                  {job.accountId ? <span className="muted small"> · {job.accountId.slice(0, 8)}</span> : null}
+                  {who ? <span className="muted small"> · {who}</span> : null}
                 </span>
                 <Badge tone={jobBadgeTone(job.status)}>{jobStatusLabel(job.status)}</Badge>
               </button>
               {isOpen ? (
                 <div className="reconcile-row-body">
                   <ul className="reconcile-change-list">
-                    <li className="muted small">触发 {job.triggeredBy} · 尝试 {job.attempt}/{job.maxAttempts}</li>
-                    {job.durationMs !== null ? (
-                      <li className="muted small">耗时 {job.durationMs}ms</li>
-                    ) : null}
+                    <li className="muted small">
+                      触发 {job.triggeredBy} · 尝试 {job.attempt}/{job.maxAttempts}
+                      {job.durationMs !== null ? ` · 耗时 ${(job.durationMs / 1000).toFixed(1)}s` : ""}
+                    </li>
                     {job.errorMessage ? (
                       <li>
                         <span className="form-error">{job.errorMessage}</span>
                       </li>
                     ) : null}
                   </ul>
+                  <JobLogView jobId={job.id} />
                 </div>
               ) : null}
             </article>
@@ -837,6 +897,28 @@ function formatEgressTooltip(acc: AccountRecordView): string {
     lines.push(`上次修复错误: ${acc.lastRecoveryError}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * P5-AU: Sub2API "限流中" 冷却提示。配额耗尽时 Sub2API 会给账号设冷却截止
+ * (temp_unschedulable_until) / 配额重置预计时间 (rate_limit_reset_at)。展示预计
+ * 恢复时间，让用户知道账号会自然恢复、不必在冷却期内瞎触发恢复。
+ */
+function CooldownHint(props: { acc: AccountRecordView }) {
+  const until = props.acc.tempUnschedulableUntil ?? props.acc.rateLimitResetAt ?? null;
+  if (!until) return null;
+  const ms = new Date(until).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return null; // 已过期 → 不显示
+  const mins = Math.round(ms / 60000);
+  const label = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
+  const lines = [`Sub2API 限流中，预计 ${new Date(until).toLocaleString()} 恢复（约 ${label} 后）`];
+  if (props.acc.tempUnschedulableReason) lines.push(`原因: ${props.acc.tempUnschedulableReason}`);
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+      <Badge tone="warning">限流 {label}</Badge>
+      <InfoTip text={lines.join("\n")} />
+    </span>
+  );
 }
 
 function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFailureCategory"]>): string {

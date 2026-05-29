@@ -1466,6 +1466,25 @@ select {
   opacity: 0.7;
 }
 
+/* P5-AT job 实时日志：等宽小字 + 深底 + 可滚动 */
+.job-log-view {
+  margin: 6px 12px 10px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--panel-subtle) 60%, #000 8%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.job-log-view > div {
+  white-space: pre-wrap;
+}
+
 /* P5-AR「进行中」行：左侧蓝色高亮条 + 转圈图标，跟历史 jobs 视觉区分 */
 .reconcile-row.reconcile-running {
   border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, var(--border));

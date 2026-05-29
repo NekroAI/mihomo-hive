@@ -198,6 +198,15 @@ export const accountRecordViewSchema = z.object({
   currentNodeHash: z.string().nullable().optional(),
   currentNodeName: z.string().nullable().optional(),
 
+  /**
+   * P5-AU: Sub2API 侧"限流中"冷却信号（status 查询时从 live Sub2API 实时读取，不持久化）。
+   *   tempUnschedulableUntil —— Sub2API 发现配额耗尽后给账号设的冷却截止时间，到点才会
+   *     重新参与调度。结合 rateLimitResetAt(配额重置预计时间) 让用户知道账号何时自然恢复，
+   *     避免在冷却期内瞎触发恢复。
+   */
+  tempUnschedulableUntil: z.string().nullable().optional(),
+  tempUnschedulableReason: z.string().nullable().optional(),
+
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 });
@@ -505,6 +514,8 @@ export const accountJobSchema = z.object({
   payloadJson: z.string(),
   resultJson: z.string().nullable(),
   errorMessage: z.string().nullable(),
+  /** P5-AT: job 结束时持久化的日志末尾（redact 过），供"最近完成"回看。运行中/未设置为 null。 */
+  logTail: z.string().nullable().optional(),
   triggeredBy: accountJobTriggeredBySchema,
   triggeredTickId: z.string().nullable(),
   createdAt: z.string().min(1),
@@ -541,6 +552,8 @@ export const accountFleetStatusSnapshotSchema = z.object({
   runningJobs: z.array(accountJobSchema),
   /** 当前排队中的 job 总数（P5-AR：让用户知道积压规模，不必把全部 queued 塞进列表）。 */
   queuedJobCount: z.number().int().nonnegative().default(0),
+  /** 最近"执行完"的 job（P5-AT：按 finished_at 倒序，看执行结果，不被 queued 淹没）。 */
+  recentFinishedJobs: z.array(accountJobSchema).default([]),
   kpis: z.object({
     totalAccounts: z.number().int().nonnegative(),
     healthyCount: z.number().int().nonnegative(),
