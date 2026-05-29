@@ -72,7 +72,6 @@ export function AccountFleetSpecPanel(props: {
   }
   // P5-AK: codexTool 子树编辑已下沉到系统页 features/system/CodexToolConnectionPanel.tsx
 
-  const enabled = draft.enabled;
   // codex-tool 配置是否完整（用于"自动维护可以开吗"的提示）
   const codexConfigured = Boolean(
     draft.codexTool.binPath &&
@@ -86,14 +85,11 @@ export function AccountFleetSpecPanel(props: {
     <aside className="orchestration-spec-panel fleet-spec-drawer">
       <div className="fleet-spec-header">
         <h2>维护策略</h2>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "运行中" : "已暂停"}</Badge>
-          {props.onClose ? (
-            <Button variant="ghost" size="sm" icon={<X size={15} />} onClick={props.onClose} title="收起策略">
-              收起
-            </Button>
-          ) : null}
-        </div>
+        {props.onClose ? (
+          <Button variant="ghost" size="sm" icon={<X size={15} />} onClick={props.onClose} title="收起策略">
+            收起
+          </Button>
+        ) : null}
       </div>
       <p className="muted small" style={{ margin: "0 0 4px" }}>
         开启/暂停自动维护与「立即巡检」在页面顶部操作条；这里调具体策略。注册、修复可各自单独开关。

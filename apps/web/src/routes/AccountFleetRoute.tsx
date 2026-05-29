@@ -1,7 +1,7 @@
 import React from "react";
 import { Pause, Play, Settings2, Zap } from "lucide-react";
 import type { AccountFleetSpec, AccountFleetStatusSnapshot } from "@mihomo-hive/schemas";
-import { Badge, Button } from "../components/ui.js";
+import { Button } from "../components/ui.js";
 import { AccountFleetSpecPanel } from "../features/account-fleet/AccountFleetSpecPanel.js";
 import { AccountFleetStatusPanel } from "../features/account-fleet/AccountFleetStatusPanel.js";
 
@@ -77,7 +77,6 @@ export function AccountFleetRoute(props: AccountFleetRouteProps) {
               lastTickAt={props.status?.lastTick?.startedAt}
             />
           ) : null}
-          <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "自动维护运行中" : "已暂停"}</Badge>
           <Button
             variant={specOpen ? "primary" : "ghost"}
             icon={<Settings2 size={16} />}
