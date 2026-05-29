@@ -17,7 +17,7 @@ const tabs: WorkspaceTab[] = [
   { id: "nodes", label: "节点池" },
   { id: "automation", label: "代理编排" },
   { id: "account_fleet", label: "账号编排" },
-  { id: "system", label: "系统" }
+  { id: "system", label: "设置与工具" }
 ];
 
 export function RuntimeHeader(props: {

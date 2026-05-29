@@ -52,6 +52,7 @@ const FILE_SIZE_WARN_BYTES = 5 * 1024 * 1024;
 export function CodexToolAdoptionPanel(props: {
   sub2apiConnected: boolean;
   requestConfirmation: (a: ConfirmAction) => void;
+  pushToast: (tone: "success" | "danger" | "warning" | "info", title: string, detail?: string) => void;
 }) {
   const [envelopeJson, setEnvelopeJson] = React.useState<string | null>(null);
   const [fileName, setFileName] = React.useState<string | null>(null);
@@ -84,7 +85,11 @@ export function CodexToolAdoptionPanel(props: {
 
   const importMutation = trpc.accountFleet.adoption.codexTool.import.useMutation({
     onSuccess: (res) => {
-      window.alert(`已入队 ${res.enqueued} 个接管 job，worker 将异步处理。可在账号编排页观察进度。`);
+      props.pushToast(
+        "success",
+        `已提交 ${res.enqueued} 个账号接管`,
+        "后台正在逐个处理，可到「账号编排」页查看每个账号的接管进度。"
+      );
       // 清空表单
       setEnvelopeJson(null);
       setFileName(null);
@@ -92,20 +97,14 @@ export function CodexToolAdoptionPanel(props: {
       setPlan(null);
       setSelectedIds(new Set());
       if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (err) => {
+      props.pushToast("danger", "接管提交失败", err.message);
     }
   });
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > FILE_SIZE_WARN_BYTES) {
-      if (!window.confirm(
-        `文件 ${(file.size / 1024 / 1024).toFixed(1)} MB，超出常规接管规模（>5MB ≈ 2500 账号）。继续？`
-      )) {
-        e.target.value = "";
-        return;
-      }
-    }
+  // 读文件 + 触发预览（被 handleFileChange 直接调用，或大文件确认后调用）
+  async function proceedWithFile(file: File) {
     const text = await file.text();
     setEnvelopeJson(text);
     setFileName(file.name);
@@ -114,6 +113,26 @@ export function CodexToolAdoptionPanel(props: {
     setParseError(null);
     setSelectedIds(new Set());
     previewMutation.mutate({ envelopeJson: text });
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // input 一旦读完就清值，方便用户重选同名文件再次触发 onChange
+    e.target.value = "";
+    if (file.size > FILE_SIZE_WARN_BYTES) {
+      props.requestConfirmation({
+        title: "文件较大，确认继续？",
+        description: `文件 ${(file.size / 1024 / 1024).toFixed(1)} MB，超出常规接管规模（>5MB ≈ 2500 个账号）。`,
+        detail: "大文件解析可能稍慢，但不影响正确性。",
+        confirmLabel: "继续解析",
+        run: async () => {
+          await proceedWithFile(file);
+        }
+      });
+      return;
+    }
+    await proceedWithFile(file);
   }
 
   function handleToggleSelect(id: number) {
@@ -147,18 +166,18 @@ export function CodexToolAdoptionPanel(props: {
         selectedIds.has(i.source.id)
     );
     if (importable.length === 0) {
-      window.alert("请至少选择一条可导入账号。");
+      props.pushToast("warning", "请至少勾选一个账号", "下方列表里勾选要接管的账号后再提交。");
       return;
     }
     props.requestConfirmation({
-      title: "确认导入 codex-tool 账号",
-      description: `将入队 ${importable.length} 个接管 job。worker 异步处理，可在账号编排页观察。`,
+      title: `确认接管 ${importable.length} 个账号？`,
+      description: "后台会逐个处理：写入加密凭据、并按需在 Sub2API 建账号。处理是异步的，提交后到「账号编排」页查看进度。",
       detail: [
-        `升级 adopted_recovered: ${importable.filter((i) => i.action === "upgrade_recovered").length}`,
-        `注册新账号(refresh + create): ${importable.filter((i) => i.action === "register_new").length}`,
-        `仅本地落 observed-only: ${importable.filter((i) => i.action === "observed_only").length}`
+        `· 补全已有账号凭据：${importable.filter((i) => i.action === "upgrade_recovered").length} 个`,
+        `· 新建并接入 Sub2API：${importable.filter((i) => i.action === "register_new").length} 个`,
+        `· 仅本地记录（待登录）：${importable.filter((i) => i.action === "observed_only").length} 个`
       ].join("\n"),
-      confirmLabel: "入队导入",
+      confirmLabel: "确认接管",
       run: async () =>
         importMutation.mutate({
           envelopeJson,
@@ -171,6 +190,11 @@ export function CodexToolAdoptionPanel(props: {
   const summaryConfigured =
     plan?.summary &&
     plan.summary.upgradeRecovered + plan.summary.registerNew + plan.summary.observedOnly > 0;
+  const importableCount = plan
+    ? plan.items.filter(
+        (i) => i.action !== "skip_already_hive" && i.action !== "skip_creds_complete"
+      ).length
+    : 0;
 
   return (
     <CollapsiblePanel
@@ -179,11 +203,9 @@ export function CodexToolAdoptionPanel(props: {
       actions={
         hasFile && plan ? (
           <Badge tone={summaryConfigured ? "success" : "neutral"}>
-            {plan.summary.totalScanned} 条扫描
+            扫描到 {plan.summary.totalScanned} 个账号
           </Badge>
-        ) : (
-          <Badge tone="neutral">就绪</Badge>
-        )
+        ) : null
       }
       hint="把 codex-tool 主机上 SQLite 里的账号一次性导入 Hive + 关联 Sub2API + 回填 phone/password 凭据。"
     >
@@ -227,39 +249,39 @@ export function CodexToolAdoptionPanel(props: {
         <>
           <div style={{ marginTop: 16 }}>
             <div className="muted small" style={{ marginBottom: 8 }}>
-              扫描结果（共 {plan.summary.totalScanned} 条）：
+              扫描结果（共 {plan.summary.totalScanned} 个账号）：
             </div>
-            <div className="form-grid" style={{ gap: 8 }}>
+            <div className="adoption-stat-grid">
               <SummaryStat
                 tone="info"
-                label="升级 adopted_recovered"
+                label="补全凭据"
                 value={plan.summary.upgradeRecovered}
-                hint="远端有 + codex 凭据回填 → 本地凭据齐"
+                hint="Sub2API 已有，回填手机号 + 密码后可自动登录续命"
               />
               <SummaryStat
                 tone="success"
-                label="新建 hive_registered"
+                label="新建并接入"
                 value={plan.summary.registerNew}
-                hint="refresh_token 有效 → refresh + create Sub2API account"
+                hint="凭据有效，将在 Sub2API 建号并纳入账号池"
               />
               <SummaryStat
                 tone="warning"
-                label="observed-only"
+                label="仅记录（待登录）"
                 value={plan.summary.observedOnly}
-                hint="refresh 缺，需手动 codex_login"
+                hint="凭据已过期，先存档，之后手动触发一次登录救活"
               />
               <SummaryStat
                 tone="neutral"
-                label="跳过（已存在）"
+                label="跳过"
                 value={plan.summary.skipped}
-                hint="本地凭据已齐 / 已 hive_registered"
+                hint="账号已存在且凭据完整，无需重复接管"
               />
             </div>
             {sub2apiReachable === false ? (
               <div className="muted small" style={{ marginTop: 8, color: "var(--warning)" }}>
                 <AlertCircle size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-                Sub2API 未连接或不可达 —— 预览只在本地账号匹配，所有"upgrade_recovered"
-                可能漏判。建议先到 Sub2API 连接区配置后重新预览。
+                Sub2API 未连接，只能在本地账号里比对 —— "补全凭据"类可能漏判。
+                建议先在上方配置并连接 Sub2API，再重新上传预览。
               </div>
             ) : null}
           </div>
@@ -280,10 +302,17 @@ export function CodexToolAdoptionPanel(props: {
             <table className="node-matrix-table" style={{ fontSize: "0.85em" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 32 }}>选</th>
+                  <th style={{ width: 32 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="全选可接管账号"
+                      checked={importableCount > 0 && selectedIds.size >= importableCount}
+                      onChange={(e) => (e.target.checked ? handleSelectAllImportable() : handleClearSelection())}
+                    />
+                  </th>
                   <th>邮箱 / 手机</th>
-                  <th>action</th>
-                  <th>原因</th>
+                  <th>处理方式</th>
+                  <th>说明</th>
                 </tr>
               </thead>
               <tbody>
@@ -326,13 +355,14 @@ export function CodexToolAdoptionPanel(props: {
         </>
       ) : previewMutation.isPending ? (
         <div className="muted small" style={{ marginTop: 12 }}>
-          正在解析 envelope 并扫描去重...
+          正在分析文件、比对已有账号...
         </div>
       ) : null}
     </CollapsiblePanel>
   );
 }
 
+/** 接管统计卡 —— 大号数字为主，标签在上、说明在下。 */
 function SummaryStat(props: {
   tone: "success" | "warning" | "info" | "neutral";
   label: string;
@@ -340,26 +370,23 @@ function SummaryStat(props: {
   hint: string;
 }) {
   return (
-    <div>
-      <div className="muted small">{props.label}</div>
-      <div className="mono-strong">
-        <Badge tone={props.tone}>{props.value}</Badge>
-      </div>
-      <div className="muted small" style={{ marginTop: 2, fontSize: "0.8em" }}>
-        {props.hint}
-      </div>
+    <div className={`adoption-stat adoption-stat-${props.tone}`}>
+      <div className="adoption-stat-label">{props.label}</div>
+      <div className="adoption-stat-value">{props.value}</div>
+      <div className="adoption-stat-hint">{props.hint}</div>
     </div>
   );
 }
 
+const ACTION_LABEL: Record<AdoptionAction, { tone: "success" | "info" | "warning" | "neutral"; label: string }> = {
+  upgrade_recovered: { tone: "info", label: "补全凭据" },
+  register_new: { tone: "success", label: "新建接入" },
+  observed_only: { tone: "warning", label: "仅记录" },
+  skip_already_hive: { tone: "neutral", label: "跳过" },
+  skip_creds_complete: { tone: "neutral", label: "跳过" }
+};
+
 function ActionBadge(props: { action: AdoptionAction }) {
-  const map: Record<AdoptionAction, { tone: "success" | "info" | "warning" | "neutral"; label: string }> = {
-    upgrade_recovered: { tone: "info", label: "升级 recovered" },
-    register_new: { tone: "success", label: "新建" },
-    observed_only: { tone: "warning", label: "observe-only" },
-    skip_already_hive: { tone: "neutral", label: "跳过" },
-    skip_creds_complete: { tone: "neutral", label: "跳过" }
-  };
-  const cfg = map[props.action];
+  const cfg = ACTION_LABEL[props.action];
   return <Badge tone={cfg.tone}>{cfg.label}</Badge>;
 }

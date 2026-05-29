@@ -85,9 +85,9 @@ export function Sub2ApiConnectionPanel(props: {
           variant="secondary"
           icon={<Activity size={16} />}
           loading={props.testing}
-          disabled={!connected}
+          disabled={!props.draft.baseUrl || (!props.draft.apiKey && !props.connection?.apiKeyConfigured)}
           onClick={props.onTest}
-          title="向 Sub2API 发一次试探请求，验证 baseUrl + adminApiKey 可用，回报代理与账号总数。"
+          title="用当前填写的地址 + API Key 发一次试探请求（无需先保存），回报代理与账号总数。"
         >
           测试连接
         </Button>

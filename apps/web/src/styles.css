@@ -544,6 +544,104 @@ select {
   }
 }
 
+/* 顶部状态条：全宽，连接状态一目了然 + 引导文案 */
+.system-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.system-statuschip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.system-statusdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.system-statusdot.is-ok {
+  background: var(--success, #16a34a);
+}
+
+.system-statusdot.is-pending {
+  background: #d97706;
+}
+
+.system-statuschip .tone-ok {
+  color: var(--success, #16a34a);
+}
+
+.system-statuschip .tone-pending {
+  color: #d97706;
+}
+
+.system-statusbar-hint {
+  margin-left: auto;
+}
+
+.system-export-note {
+  margin: 0 0 4px;
+}
+
+/* 接管统计卡：大号数字为主，标签上、说明下；4 列自适应 */
+.adoption-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.adoption-stat {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--panel-input);
+}
+
+.adoption-stat-info {
+  border-left-color: var(--accent);
+}
+.adoption-stat-success {
+  border-left-color: var(--success, #16a34a);
+}
+.adoption-stat-warning {
+  border-left-color: #d97706;
+}
+.adoption-stat-neutral {
+  border-left-color: var(--border);
+}
+
+.adoption-stat-label {
+  font-size: 12px;
+  color: var(--muted-strong);
+  font-weight: 650;
+}
+
+.adoption-stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.adoption-stat-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 .automation-grid {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);

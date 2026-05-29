@@ -657,7 +657,38 @@ export const appRouter = t.router({
           ctx.repo.setSub2ApiConnection({ ...input, adminApiKey: input.adminApiKey || current?.adminApiKey || "" });
           return ctx.repo.getSafeSub2ApiConnection();
         }),
-      test: protectedProcedure.mutation(async ({ ctx }) => createConfiguredSub2ApiClient(ctx.repo).testConnection())
+      // 先测后存（P5-AL）：可选传入 draft（baseUrl + 可选 adminApiKey）。
+      //   - 传了 → 用 draft 临时构造 client 测试，不落库（让用户填完直接验证）
+      //   - adminApiKey 留空但已有持久化 key → 复用持久化 key（配合"已保存留空不变"）
+      //   - 没传 draft → 退回测试已持久化配置（旧行为）
+      test: protectedProcedure
+        .input(
+          z
+            .object({
+              baseUrl: z.string().optional(),
+              adminApiKey: z.string().optional()
+            })
+            .optional()
+        )
+        .mutation(async ({ ctx, input }) => {
+          if (input?.baseUrl) {
+            const current = ctx.repo.getSub2ApiConnection();
+            const adminApiKey = input.adminApiKey || current?.adminApiKey || "";
+            if (!adminApiKey) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "请填写 Sub2API 管理员 API Key 后再测试。"
+              });
+            }
+            return createSub2ApiClient({
+              baseUrl: input.baseUrl,
+              adminApiKey,
+              timezone: current?.timezone ?? "Asia/Shanghai",
+              managedProxyPrefix: current?.managedProxyPrefix ?? "MH-"
+            }).testConnection();
+          }
+          return createConfiguredSub2ApiClient(ctx.repo).testConnection();
+        })
     }),
     proxies: t.router({
       list: protectedProcedure.query(async ({ ctx }) => createConfiguredSub2ApiClient(ctx.repo).listAllProxies()),
@@ -1251,25 +1282,30 @@ export const appRouter = t.router({
        *   spawn binary → 解析 envelope → 链路里需要 SkyMail 配置 + phoneSms apiKey 都齐
        * 任一环节失败都能精确报错，比一个 --version 更有用。
        *
-       * 不写库 / 不下发 job，只对 currently-persisted spec 测一次。
+       * 先测后存（P5-AL）：可选传入 codexTool draft，用 draft 临时构造 adapter 测试，
+       * 不写库。draft 值与 save 后持久化值、与 buildCodexToolAdapter 取用值完全同源，
+       * 所以"测 draft"与"保存后测"等价。不传则退回测已持久化 spec（旧行为）。
        */
-      test: protectedProcedure.mutation(async ({ ctx }) => {
-        const spec = ctx.repo.getAccountFleetSpec();
-        try {
-          const adapter = await buildCodexToolAdapter(ctx.repo, safeLoadCrypto(), spec, null);
-          const result = await adapter.smsCountries({ limit: 1, timeoutMs: 15_000 });
-          return {
-            ok: true as const,
-            provider: result.provider,
-            service: result.service,
-            countriesSampled: result.countries.length,
-            totalCountries: result.total
-          };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return { ok: false as const, error: message };
-        }
-      })
+      test: protectedProcedure
+        .input(accountFleetSpecSchema.shape.codexTool.optional())
+        .mutation(async ({ ctx, input }) => {
+          const persisted = ctx.repo.getAccountFleetSpec();
+          const spec = input ? { ...persisted, codexTool: input } : persisted;
+          try {
+            const adapter = await buildCodexToolAdapter(ctx.repo, safeLoadCrypto(), spec, null);
+            const result = await adapter.smsCountries({ limit: 1, timeoutMs: 15_000 });
+            return {
+              ok: true as const,
+              provider: result.provider,
+              service: result.service,
+              countriesSampled: result.countries.length,
+              totalCountries: result.total
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { ok: false as const, error: message };
+          }
+        })
     }),
     status: protectedProcedure.query(async ({ ctx }): Promise<AccountFleetStatusSnapshot> => {
       const spec = ctx.repo.getAccountFleetSpec();

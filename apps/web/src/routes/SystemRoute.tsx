@@ -19,6 +19,9 @@ import { Badge, Button, CollapsiblePanel, Panel } from "../components/ui.js";
 import { CodexToolAdoptionPanel } from "../features/system/CodexToolAdoptionPanel.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
 
+type ToastTone = "success" | "danger" | "warning" | "info";
+type PushToast = (tone: ToastTone, title: string, detail?: string) => void;
+
 interface PendingMutation {
   isPending: boolean;
 }
@@ -61,6 +64,7 @@ export interface SystemRouteProps {
   setFailedNodeStatus: (v: "active" | "inactive") => void;
   onDownload: () => void;
   requestConfirmation: (action: ConfirmAction) => void;
+  pushToast: PushToast;
   // mutations
   mutations: {
     saveSub2apiConnection: PendingMutation & {
@@ -71,9 +75,11 @@ export interface SystemRouteProps {
         managedProxyPrefix: string;
       }) => void;
     };
-    testSub2apiConnection: PendingMutation & { mutate: () => void };
+    testSub2apiConnection: PendingMutation & {
+      mutate: (input?: { baseUrl?: string | undefined; adminApiKey?: string | undefined }) => void;
+    };
     saveCodexTool: PendingMutation & { mutate: (next: AccountFleetSpec["codexTool"]) => void };
-    testCodexTool: PendingMutation & { mutate: () => void };
+    testCodexTool: PendingMutation & { mutate: (next?: AccountFleetSpec["codexTool"]) => void };
     pushLocalNodes: PendingMutation & { mutate: () => void };
     qualityCheck: PendingMutation & { mutate: () => void };
     drainManaged: PendingMutation & { mutate: () => void };
@@ -92,9 +98,36 @@ export interface SystemRouteProps {
 export function SystemRoute(props: SystemRouteProps) {
   const m = props.mutations;
   const sub2apiConnected = Boolean(props.sub2apiConnection?.configured);
+  // codex-tool 是否配齐（用必填字段判断，跟 CodexToolConnectionPanel 同口径）
+  const codexConfigured = Boolean(
+    props.codexToolDraft.binPath &&
+      props.codexToolDraft.skymail.baseUrl &&
+      props.codexToolDraft.skymail.adminEmail &&
+      props.codexToolDraft.chatgpt.codexClientId &&
+      props.codexToolDraft.phoneSms.apiKeyRef
+  );
 
   return (
     <section className="workspace-grid system-workspace">
+      {/* 顶部状态条：一眼看出连接状态 + 引导首次用户从哪开始（全宽,不进三列网格） */}
+      <div className="system-statusbar">
+        <StatusChip
+          label="Sub2API"
+          ok={sub2apiConnected}
+          okText="已连接"
+          pendingText="未连接 · 先在下方配置"
+        />
+        <StatusChip
+          label="codex-tool"
+          ok={codexConfigured}
+          okText="已配置"
+          pendingText="未配置 · 需账号自动化才填"
+        />
+        <span className="system-statusbar-hint muted small">
+          配置 / 运维 / 账号接管 / 节点导出都在这里。日常调度请用「代理编排」「账号编排」。
+        </span>
+      </div>
+
       <div className="system-stack">
         {/* Col 1: Sub2API 主题（连接 + 运维工具） */}
         <div className="system-col">
@@ -112,7 +145,12 @@ export function SystemRoute(props: SystemRouteProps) {
                 managedProxyPrefix: props.sub2apiConnectionDraft.managedPrefix || "MH-"
               })
             }
-            onTest={() => m.testSub2apiConnection.mutate()}
+            onTest={() =>
+              m.testSub2apiConnection.mutate({
+                baseUrl: props.sub2apiConnectionDraft.baseUrl,
+                adminApiKey: props.sub2apiConnectionDraft.apiKey || undefined
+              })
+            }
             collapsible={false}
           />
 
@@ -139,17 +177,31 @@ export function SystemRoute(props: SystemRouteProps) {
             lastTest={props.lastCodexTest}
             onDraftChange={props.setCodexToolDraft}
             onSave={() => m.saveCodexTool.mutate(props.codexToolDraft)}
-            onTest={() => m.testCodexTool.mutate()}
+            onTest={() => m.testCodexTool.mutate(props.codexToolDraft)}
           />
 
           <CodexToolAdoptionPanel
             sub2apiConnected={sub2apiConnected}
             requestConfirmation={props.requestConfirmation}
+            pushToast={props.pushToast}
           />
         </div>
 
         {/* Col 3: 导出篮子（中屏会落到第二行 col 1，宽屏 ≥1600 独占第三列） */}
         <div className="system-col">
+          {props.selectedCount === 0 ? (
+            <p className="muted small system-export-note">
+              ⓘ 导出对象 = 你在「节点池」勾选的节点。当前未选中任何节点 —— 先到「节点池」勾选要导出的节点。
+            </p>
+          ) : (
+            <p className="muted small system-export-note">
+              ⓘ 当前已在「节点池」勾选 <strong>{props.selectedCount}</strong> 个节点
+              {props.exportableSelectedCount !== props.selectedCount
+                ? `（其中 ${props.exportableSelectedCount} 个可导出）`
+                : ""}
+              。
+            </p>
+          )}
           <ExportPanel
             host={props.exportHost}
             filename={props.exportFilename}
@@ -182,6 +234,17 @@ export function SystemRoute(props: SystemRouteProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** 状态条上的连接状态芯片 —— 绿点=已连/已配，黄点=待配置 + 引导文案。 */
+function StatusChip(props: { label: string; ok: boolean; okText: string; pendingText: string }) {
+  return (
+    <span className="system-statuschip">
+      <span className={`system-statusdot ${props.ok ? "is-ok" : "is-pending"}`} aria-hidden="true" />
+      <strong>{props.label}</strong>
+      <span className={props.ok ? "tone-ok" : "tone-pending"}>{props.ok ? props.okText : props.pendingText}</span>
+    </span>
   );
 }
 
@@ -273,6 +336,15 @@ function Sub2ApiMaintenancePanel(props: {
             清理空代理
           </Button>
         </div>
+        {!props.connected ? (
+          <p className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
+            连接 Sub2API 后这些工具才可用（在上方「Sub2API 连接」配置）。
+          </p>
+        ) : props.maintenance && props.maintenance.summary.managedProxies === 0 ? (
+          <p className="muted small" style={{ marginTop: 8, marginBottom: 0 }}>
+            还没有 Hive 托管代理 —— 先「推送本地节点」把节点推到 Sub2API，其余工具才有作用对象。
+          </p>
+        ) : null}
       </div>
     </CollapsiblePanel>
   );

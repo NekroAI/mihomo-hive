@@ -882,6 +882,7 @@ function Dashboard(props: { onLogout: () => void }) {
           setFailedNodeStatus={setFailedNodeStatus}
           onDownload={downloadExport}
           requestConfirmation={requestConfirmation}
+          pushToast={pushToast}
           mutations={{
             saveSub2apiConnection: saveSub2apiConfig,
             testSub2apiConnection: testSub2apiConnection,

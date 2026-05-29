@@ -205,7 +205,7 @@ export function CodexToolConnectionPanel(props: {
           icon={<Activity size={16} />}
           loading={props.testing}
           onClick={props.onTest}
-          title="调用 codex-tool sms countries 一次，验证 binary 可执行 + SkyMail 链路 + 接码 apiKey 都对。不写库、不下发 job。"
+          title="用当前填写的配置（无需先保存）调一次 codex-tool sms countries，验证二进制可执行 + SkyMail 链路 + 接码 apiKey 都对。不写库、不下发任务。"
         >
           测试连通
         </Button>

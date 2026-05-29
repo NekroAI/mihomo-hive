@@ -231,11 +231,13 @@ export function planCodexToolAdoption(input: AdoptionPlanInput): AdoptionPlan {
     const remote = emailKey ? remoteByEmail.get(emailKey) : undefined;
     const local = emailKey ? localByEmail.get(emailKey) : undefined;
 
+    // reason 文案面向用户：不暴露内部 origin/enum 名（adopted_recovered / hive_registered
+    // 等），只讲"会发生什么"。内部分支语义见各 action 类型注释。
     if (remote && local && local.origin === "hive_registered") {
       items.push({
         source: acc,
         action: "skip_already_hive",
-        reason: "本地已有 hive_registered 同邮箱账号，凭据应已齐全",
+        reason: "Hive 已有同邮箱账号，凭据齐全，无需重复接管",
         sub2apiAccountId: remote.id,
         hiveLocalId: local.id
       });
@@ -245,7 +247,7 @@ export function planCodexToolAdoption(input: AdoptionPlanInput): AdoptionPlan {
       items.push({
         source: acc,
         action: "skip_creds_complete",
-        reason: "本地 adopted_recovered 已有 enc_phone+password，无需重复回填",
+        reason: "本地已存有手机号 + 密码，无需重复回填",
         sub2apiAccountId: remote.id,
         hiveLocalId: local.id
       });
@@ -257,8 +259,8 @@ export function planCodexToolAdoption(input: AdoptionPlanInput): AdoptionPlan {
         source: acc,
         action: "upgrade_recovered",
         reason: local
-          ? `本地 ${local.origin} 缺 phone+password 凭据，从 codex-tool 回填后升级为 adopted_recovered`
-          : "Sub2API 远端已有此邮箱账号，本地无；从 codex-tool 拿凭据 + 远端拿 token 一次性入库",
+          ? "Sub2API 已有此账号但本地缺凭据，回填手机号 + 密码后可自动续命"
+          : "Sub2API 已有此账号，回填凭据 + 拉取 token 一次性纳入本地管理",
         sub2apiAccountId: remote.id,
         ...(local ? { hiveLocalId: local.id } : {})
       });
@@ -269,15 +271,14 @@ export function planCodexToolAdoption(input: AdoptionPlanInput): AdoptionPlan {
       items.push({
         source: acc,
         action: "register_new",
-        reason: "Sub2API 远端无，codex-tool 有 refresh_token → refresh + create + 落 hive_registered"
+        reason: "Sub2API 暂无此账号，凭据有效 → 自动建号并纳入账号池"
       });
       continue;
     }
     items.push({
       source: acc,
       action: "observed_only",
-      reason:
-        "Sub2API 远端无 + codex-tool refresh_token 缺失。落 Hive observed-only，触发一次 codex_login 救活"
+      reason: "凭据已过期，先在本地存档；之后手动触发一次登录即可救活"
     });
   }
 
