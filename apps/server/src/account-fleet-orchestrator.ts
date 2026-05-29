@@ -133,6 +133,10 @@ export function startAccountFleetScheduler(
             errorsInWindow: acc.errorsInWindow,
             brokenSinceTick: acc.brokenSinceTick,
             brokenConsecutiveTicks: acc.brokenConsecutiveTicks,
+            // P5-AM: diagnose 给 revoked-token 账号写了 lastRecoveryError（"为什么挂"），
+            // 之前 patch 漏了这个字段导致原因不落库；补上让 UI 能展示。非 revoked 账号
+            // 这里携带的是其原有值（diagnose 用 {...a} 保留），不会被误清。
+            lastRecoveryError: acc.lastRecoveryError,
             organizationId: acc.organizationId,
             clientId: acc.clientId
           });
