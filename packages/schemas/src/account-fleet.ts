@@ -450,12 +450,13 @@ export type AccountFleetTickSummary = z.infer<typeof accountFleetTickSummarySche
 // ─── Jobs ─────────────────────────────────────────
 
 export const accountJobKindSchema = z.enum([
-  "codex_login",          // codex-tool login → fresh tokens → import to Sub2API
-  "codex_register",       // codex-tool all → 新账号
-  "import_to_sub2api",    // 已有 refresh_token，灌到 Sub2API（试探导入用）
-  "delete_sub2api",       // DELETE /accounts/{id}
-  "toggle_schedulable",   // PUT /accounts/{id}/schedulable
-  "observe_usage"         // GET /accounts/{id}/usage
+  "codex_login",                    // codex-tool login → fresh tokens → import to Sub2API
+  "codex_register",                 // codex-tool all → 新账号
+  "import_to_sub2api",              // 已有 refresh_token，灌到 Sub2API（试探导入用）
+  "import_codex_tool_account",      // P5-AK 接管：从 codex-tool accounts list 导入 + 三分支分流
+  "delete_sub2api",                 // DELETE /accounts/{id}
+  "toggle_schedulable",             // PUT /accounts/{id}/schedulable
+  "observe_usage"                   // GET /accounts/{id}/usage
 ]);
 export type AccountJobKind = z.infer<typeof accountJobKindSchema>;
 

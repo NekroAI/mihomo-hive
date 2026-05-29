@@ -150,6 +150,7 @@ function ensureSchema(sqlite: HiveSqlite): void {
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL
         CHECK (kind IN ('codex_login', 'codex_register', 'import_to_sub2api',
+                        'import_codex_tool_account',
                         'delete_sub2api', 'toggle_schedulable', 'observe_usage')),
       account_id TEXT,
       status TEXT NOT NULL DEFAULT 'queued'
@@ -226,6 +227,9 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "accounts", "sms_country", "TEXT");
   addColumnIfMissing(sqlite, "accounts", "sms_cost_cents", "INTEGER");
   addColumnIfMissing(sqlite, "accounts", "last_recovery_failure_category", "TEXT");
+  // P5-AK/3: account_jobs.kind 加 import_codex_tool_account。SQLite 不能 ALTER CHECK，
+  // 老 DB 必须 rebuild 表（rename → create → copy → drop → 重建 indexes）。
+  rebuildAccountJobsCheckIfNeeded(sqlite);
   // Seed intent_role from lifecycle for nodes that pre-date this column.
   sqlite.exec(`
     UPDATE nodes
@@ -250,6 +254,60 @@ function ensureSchema(sqlite: HiveSqlite): void {
 
     UPDATE nodes
     SET schedulable = CASE WHEN lifecycle_status = 'schedulable' THEN 1 ELSE schedulable END;
+  `);
+}
+
+/**
+ * 重建 account_jobs 表，让 kind CHECK 接受新加的 'import_codex_tool_account'（P5-AK/3）。
+ *
+ * SQLite ALTER TABLE 不支持改 CHECK，只能 rename → create_new → copy → drop_old →
+ * rename 回去。检测条件：用 sqlite_master 的 sql 字段判断 CHECK 是否含新 kind 字符串。
+ * 已是新结构 → 跳过。
+ */
+function rebuildAccountJobsCheckIfNeeded(sqlite: HiveSqlite): void {
+  const row = sqlite
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='account_jobs'")
+    .get() as { sql: string } | undefined;
+  if (!row || !row.sql) return;
+  if (row.sql.includes("import_codex_tool_account")) return; // 已是新结构
+
+  sqlite.exec(`
+    BEGIN TRANSACTION;
+    ALTER TABLE account_jobs RENAME TO account_jobs_old;
+    CREATE TABLE account_jobs (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL
+        CHECK (kind IN ('codex_login', 'codex_register', 'import_to_sub2api',
+                        'import_codex_tool_account',
+                        'delete_sub2api', 'toggle_schedulable', 'observe_usage')),
+      account_id TEXT,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+      attempt INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 100,
+      scheduled_at TEXT NOT NULL,
+      started_at TEXT,
+      finished_at TEXT,
+      duration_ms INTEGER,
+      payload_json TEXT NOT NULL,
+      result_json TEXT,
+      error_message TEXT,
+      triggered_by TEXT NOT NULL DEFAULT 'scheduler'
+        CHECK (triggered_by IN ('scheduler', 'manual', 'adopter')),
+      triggered_tick_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO account_jobs SELECT * FROM account_jobs_old;
+    DROP TABLE account_jobs_old;
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_dispatch
+      ON account_jobs(status, scheduled_at, priority);
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_account
+      ON account_jobs(account_id);
+    CREATE INDEX IF NOT EXISTS idx_account_jobs_tick
+      ON account_jobs(triggered_tick_id);
+    COMMIT;
   `);
 }
 

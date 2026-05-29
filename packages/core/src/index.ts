@@ -3,6 +3,7 @@ export * from "./account-fleet.js";
 export * from "./account-fleet-egress.js";
 export * from "./auth.js";
 export * from "./codex-tool.js";
+export * from "./codex-tool-adoption.js";
 export * from "./config.js";
 export * from "./filter.js";
 export * from "./mihomo-render.js";

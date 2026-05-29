@@ -836,6 +836,7 @@ function jobKindLabel(kind: AccountJob["kind"]): string {
     codex_login: "codex_login（修复）",
     codex_register: "codex_register（注册）",
     import_to_sub2api: "导入 refresh_token",
+    import_codex_tool_account: "接管 codex-tool 账号",
     delete_sub2api: "删 Sub2API 账号",
     toggle_schedulable: "切 schedulable",
     observe_usage: "查配额"

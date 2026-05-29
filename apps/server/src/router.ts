@@ -8,6 +8,7 @@ import {
   assignStablePorts,
   buildNodeDeletionPlan,
   buildSubscriptionImportPreview,
+  CodexAdoptionParseError,
   createSub2ApiClient,
   enumeratePorts,
   filterPreviewImportableNodes,
@@ -16,6 +17,8 @@ import {
   groupAssignmentChangesByProxy,
   isManagedProxy,
   mapLocalNodesToSub2ApiProxies,
+  parseCodexAccountListEnvelope,
+  planCodexToolAdoption,
   planStrategySwitch,
   validateIntakeAgainstSpec,
   mapWithConcurrency,
@@ -1502,6 +1505,131 @@ export const appRouter = t.router({
           ctx.repo.patchAccount(acc.id, { origin: "retired_legacy", intent: "retired" });
           return { ok: true };
         })
+    }),
+
+    /**
+     * 接管子路由（P5-AK/3）—— 系统页"codex-tool 账号接管"面板用。
+     * 关键流程：用户上传 `accounts list --include-tokens` 的 JSON envelope，
+     *   preview → 三分支去重 + summary（不入队）
+     *   import  → 按 selectedIds 入队 import_codex_tool_account jobs
+     */
+    adoption: t.router({
+      codexTool: t.router({
+        /**
+         * 解析上传的 envelope JSON，预览三分支去重计划。不入队，纯只读。
+         * Sub2API 已配置时拉远端账号清单做匹配；未配置时空集兜底（仅本地匹配）。
+         */
+        preview: protectedProcedure
+          .input(z.object({ envelopeJson: z.string().min(1) }))
+          .mutation(async ({ ctx, input }) => {
+            let codexAccounts;
+            try {
+              codexAccounts = parseCodexAccountListEnvelope(input.envelopeJson);
+            } catch (err) {
+              if (err instanceof CodexAdoptionParseError) {
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: `codex-tool envelope 解析失败 (${err.kind}): ${err.message}`
+                });
+              }
+              throw err;
+            }
+            const hiveAccounts = ctx.repo.listAccounts().map((a) => ({
+              id: a.id,
+              email: a.email,
+              origin: a.origin,
+              hasEncPhonePassword: Boolean(a.encPhone && a.encPassword),
+              externalId: a.externalId
+            }));
+            // Sub2API 离线 / 未配置时静默 fallback，匹配只在本地做
+            let sub2apiAccounts: Array<{ id: number; email: string | null }> = [];
+            try {
+              const remote = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
+                sub2ApiAccountFiltersSchema.parse({})
+              );
+              sub2apiAccounts = remote.map((r) => ({
+                id: r.id,
+                email: r.credentials?.email ?? r.email ?? null
+              }));
+            } catch {
+              // 静默 fallback：preview 中 Sub2API 视为无；用户能感知（summary 不会出 upgrade/skip）
+            }
+            const plan = planCodexToolAdoption({ codexAccounts, hiveAccounts, sub2apiAccounts });
+            return { plan, sub2apiReachable: sub2apiAccounts.length > 0 || hiveAccounts.length === 0 };
+          }),
+        /**
+         * 按 selectedExternalIds 入队 import_codex_tool_account job。
+         * selectedExternalIds 为 codex-tool DB 的 account.id；未指定则导入 plan
+         * 里所有 action != skip_* 的条目。
+         */
+        import: protectedProcedure
+          .input(
+            z.object({
+              envelopeJson: z.string().min(1),
+              selectedExternalIds: z.array(z.number().int().positive()).optional()
+            })
+          )
+          .mutation(async ({ ctx, input }) => {
+            // 解析 + 重做 plan（不信前端传 plan，保证后端一致）
+            const codexAccounts = parseCodexAccountListEnvelope(input.envelopeJson);
+            const hiveAccounts = ctx.repo.listAccounts().map((a) => ({
+              id: a.id,
+              email: a.email,
+              origin: a.origin,
+              hasEncPhonePassword: Boolean(a.encPhone && a.encPassword),
+              externalId: a.externalId
+            }));
+            let sub2apiAccounts: Array<{ id: number; email: string | null }> = [];
+            try {
+              const remote = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
+                sub2ApiAccountFiltersSchema.parse({})
+              );
+              sub2apiAccounts = remote.map((r) => ({ id: r.id, email: r.credentials?.email ?? r.email ?? null }));
+            } catch {
+              // 静默；后续 import_codex_tool_account worker 会按 plan 处理
+            }
+            const plan = planCodexToolAdoption({ codexAccounts, hiveAccounts, sub2apiAccounts });
+            const selectedSet = input.selectedExternalIds ? new Set(input.selectedExternalIds) : null;
+            const toEnqueue = plan.items.filter((item) => {
+              if (item.action === "skip_already_hive" || item.action === "skip_creds_complete") return false;
+              if (selectedSet && !selectedSet.has(item.source.id)) return false;
+              return true;
+            });
+            const now = new Date().toISOString();
+            const jobIds: string[] = [];
+            for (const item of toEnqueue) {
+              const jobId = randomUUID();
+              ctx.repo.enqueueAccountJob({
+                id: jobId,
+                kind: "import_codex_tool_account",
+                accountId: item.hiveLocalId ?? null,
+                status: "queued",
+                attempt: 0,
+                maxAttempts: 1,
+                priority: 60,
+                scheduledAt: now,
+                startedAt: null,
+                finishedAt: null,
+                durationMs: null,
+                payloadJson: JSON.stringify({
+                  action: item.action,
+                  reason: item.reason,
+                  sub2apiAccountId: item.sub2apiAccountId ?? null,
+                  source: item.source
+                }),
+                resultJson: null,
+                errorMessage: null,
+                triggeredBy: "adopter",
+                triggeredTickId: null,
+                createdAt: now,
+                updatedAt: now
+              });
+              jobIds.push(jobId);
+            }
+            if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+            return { enqueued: jobIds.length, jobIds };
+          })
+      })
     })
   })
 });

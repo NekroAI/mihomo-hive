@@ -129,6 +129,8 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
         return runToggleSchedulable(repo, spec, job);
       case "observe_usage":
         return runObserveUsage(repo, spec, job);
+      case "import_codex_tool_account":
+        return runImportCodexToolAccount(repo, crypto, spec, job);
       default:
         throw new Error(`Unknown job kind: ${job.kind satisfies never}`);
     }
@@ -391,6 +393,167 @@ async function runImportToSub2api(
       health: "healthy",
       encRefreshToken: crypto.encryptOptional(refreshed.refresh_token),
       egressNodeHash: null
+    });
+    repo.upsertAccount(fresh);
+  }
+}
+
+/**
+ * P5-AK/3c: import_codex_tool_account —— 从 codex-tool 上传的 envelope 接管账号。
+ *
+ * payload 由 router.adoption.codexTool.import 注入，含一条 plan item：
+ * ```
+ * {
+ *   action: "upgrade_recovered" | "register_new" | "observed_only",
+ *   sub2apiAccountId: number | null,
+ *   reason: string,
+ *   source: CodexAccountFromExport  // phone/password/email/refreshToken/...
+ * }
+ * ```
+ *
+ * 三分支处理（与 packages/core/codex-tool-adoption.ts:planCodexToolAdoption 对齐）：
+ *   upgrade_recovered: Sub2API 已有，本地缺 enc_phone+password 或本地无
+ *     → patchAccount（若 hiveLocalId）或 upsertAccount，回填凭据 + origin=adopted_recovered
+ *   register_new:      Sub2API 无，codex-tool 有 refresh_token
+ *     → 复用 import_to_sub2api 流程（refresh + create），落 hive_registered 同时回填 phone/password
+ *   observed_only:     Sub2API 无 + codex-tool 无 refresh_token
+ *     → 本地 upsert origin=adopted_observing，不调 Sub2API；提示用户后续手动跑 codex_login
+ */
+async function runImportCodexToolAccount(
+  repo: HiveRepository,
+  crypto: AccountCrypto,
+  spec: AccountFleetSpec,
+  job: AccountJob
+): Promise<void> {
+  const payload = JSON.parse(job.payloadJson) as {
+    action: "upgrade_recovered" | "register_new" | "observed_only";
+    sub2apiAccountId: number | null;
+    reason: string;
+    source: {
+      id: number;
+      phone: string;
+      password: string;
+      email: string | null;
+      batchId: string | null;
+      status: string;
+      idToken: string | null;
+      accessToken: string | null;
+      refreshToken: string | null;
+      chatgptAccountId: string | null;
+      lastRefresh: string | null;
+    };
+  };
+  const src = payload.source;
+  const existing = job.accountId ? repo.getAccountById(job.accountId) : undefined;
+  const now = new Date().toISOString();
+
+  if (payload.action === "upgrade_recovered") {
+    // Sub2API 远端已经有这账号，只需要：(a) 回填 codex-tool 给的凭据，(b) 升级 origin
+    const encPhone = crypto.encryptOptional(src.phone);
+    const encPassword = crypto.encryptOptional(src.password);
+    const encRefresh = src.refreshToken ? crypto.encryptOptional(src.refreshToken) : null;
+    if (existing) {
+      repo.patchAccount(existing.id, {
+        externalId: payload.sub2apiAccountId,
+        origin: "adopted_recovered",
+        intent: "active",
+        health: "healthy",
+        encPhone,
+        encPassword,
+        ...(encRefresh ? { encRefreshToken: encRefresh } : {}),
+        ...(src.batchId ? { batchId: src.batchId } : {}),
+        lastRecoveryError: null,
+        lastRecoveryFailureCategory: null,
+        recoveryAttempts: 0,
+        nextRecoveryAfter: null
+      });
+    } else {
+      // 本地完全没记录，新建一条
+      const fresh = makeFreshAccount({
+        externalId: payload.sub2apiAccountId,
+        email: src.email ?? `codex-${src.id}@adopted.local`,
+        origin: "adopted_recovered",
+        intent: "active",
+        health: "healthy",
+        encPhone,
+        encPassword,
+        encRefreshToken: encRefresh,
+        batchId: src.batchId,
+        registeredAt: src.lastRefresh ?? now
+      });
+      repo.upsertAccount(fresh);
+    }
+    return;
+  }
+
+  if (payload.action === "register_new") {
+    if (!src.refreshToken) {
+      throw new Error("register_new 路径要求 codex-tool 给的 refresh_token 存在（与 plan 不一致）");
+    }
+    // 复用 import_to_sub2api 流程：refresh → create → 落 Hive。本路径不走 codex-tool spawn，
+    // proxy_id 用 spec.intake 兜底（codex-tool 出口节点信息 Hive 这边没有）。
+    const proxyId = resolveCreationProxyId(repo, null);
+    const sub2api = requireSub2apiClient(repo);
+    const refreshed = await sub2api.refreshOpenaiToken({ refreshToken: src.refreshToken, proxyId });
+    const created = await sub2api.createAccount(
+      makeCreatePayload({
+        spec,
+        proxyId,
+        tokens: {
+          accessToken: refreshed.access_token,
+          refreshToken: refreshed.refresh_token,
+          idToken: refreshed.id_token
+        },
+        email: refreshed.email,
+        organizationId: refreshed.organization_id,
+        clientId: refreshed.client_id,
+        expiresAt: refreshed.expires_at,
+        name: synthesizeName(spec, refreshed.email)
+      })
+    );
+    const fresh = makeFreshAccount({
+      externalId: created.id,
+      email: refreshed.email,
+      organizationId: refreshed.organization_id,
+      clientId: refreshed.client_id,
+      origin: "hive_registered", // 接管自 codex-tool 注册的账号 → 视作 hive_registered
+      intent: "active",
+      health: "healthy",
+      encPhone: crypto.encryptOptional(src.phone),
+      encPassword: crypto.encryptOptional(src.password),
+      encRefreshToken: crypto.encryptOptional(refreshed.refresh_token),
+      batchId: src.batchId,
+      registeredAt: src.lastRefresh ?? now,
+      lastRecoveryPath: null
+    });
+    repo.upsertAccount(fresh);
+    return;
+  }
+
+  // observed_only：codex-tool 知道凭据但没活的 refresh_token，Sub2API 也没绑。
+  // 落 Hive observed-only —— 不调 Sub2API、不入 codex_login 队列；用户在 UI 上手动
+  // 触发一次 codex_login 即可救活（会用我们回填的 phone+password）。
+  const encPhone = crypto.encryptOptional(src.phone);
+  const encPassword = crypto.encryptOptional(src.password);
+  if (existing) {
+    repo.patchAccount(existing.id, {
+      origin: "adopted_observing",
+      intent: "active",
+      health: "unknown",
+      encPhone,
+      encPassword,
+      ...(src.batchId ? { batchId: src.batchId } : {})
+    });
+  } else {
+    const fresh = makeFreshAccount({
+      email: src.email ?? `codex-${src.id}@adopted.local`,
+      origin: "adopted_observing",
+      intent: "active",
+      health: "unknown",
+      encPhone,
+      encPassword,
+      batchId: src.batchId,
+      registeredAt: src.lastRefresh ?? now
     });
     repo.upsertAccount(fresh);
   }

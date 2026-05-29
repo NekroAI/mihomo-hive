@@ -16,6 +16,7 @@ import {
 } from "../features/system/CodexToolConnectionPanel.js";
 import { ExportPanel } from "../features/export/ExportPanel.js";
 import { Badge, Button, CollapsiblePanel, Panel } from "../components/ui.js";
+import { CodexToolAdoptionPanel } from "../features/system/CodexToolAdoptionPanel.js";
 import type { ConfirmAction } from "../hooks/useConfirmAction.js";
 
 interface PendingMutation {
@@ -136,7 +137,10 @@ export function SystemRoute(props: SystemRouteProps) {
           onCleanupEmpty={() => m.cleanupEmpty.mutate()}
         />
 
-        <CodexToolAdoptionPanel />
+        <CodexToolAdoptionPanel
+          sub2apiConnected={sub2apiConnected}
+          requestConfirmation={props.requestConfirmation}
+        />
 
         <ExportPanel
           host={props.exportHost}
@@ -261,60 +265,6 @@ function Sub2ApiMaintenancePanel(props: {
           </Button>
         </div>
       </div>
-    </CollapsiblePanel>
-  );
-}
-
-/**
- * codex-tool 账号接管面板（P5-AK/3 实现，本期占位）。
- *
- * 待 codex-tool 完成 `accounts list --include-tokens` 改造后实装。
- * 详见 notes/codex-tool-needs.md §4。
- */
-function CodexToolAdoptionPanel() {
-  return (
-    <CollapsiblePanel
-      title="codex-tool 账号接管"
-      storageKey="system-codex-adopt"
-      actions={<Badge tone="neutral">待 codex-tool 改造</Badge>}
-      hint="把 codex-tool 主机上 SQLite 里的账号一次性导入 Hive + 关联 Sub2API + 回填 phone/password 凭据。"
-    >
-      <p className="muted small" style={{ marginTop: 0 }}>
-        本功能依赖 codex-tool 新增 <code>accounts list --include-tokens</code>{" "}
-        选项（envelope 含 refresh_token 等字段）。接管走<strong>文件上传</strong>路径，
-        不在 Hive 容器内 spawn codex-tool 读你的 stateful 库——你的账号数据无需暴露给 Hive 主机。
-      </p>
-      <div className="muted small" style={{ marginBottom: 8 }}>
-        <strong>使用流程（codex-tool 改造完成后）：</strong>
-      </div>
-      <ol className="muted small">
-        <li>
-          在 codex-tool 数据所在主机执行：
-          <pre style={{ marginTop: 4, marginBottom: 4 }}>
-            <code>{`codex-tool accounts list --include-tokens \\
-  --json --no-color --reveal-secrets \\
-  --data-dir ~/.local/share/codex-tool \\
-  > codex-export.json`}</code>
-          </pre>
-        </li>
-        <li>scp / 网盘 / 拷贝到能访问 Hive Web UI 的设备上</li>
-        <li>本面板上传 JSON → 预览三分支去重 → 一键导入</li>
-      </ol>
-      <div className="muted small">三分支去重逻辑：</div>
-      <ul className="muted small">
-        <li>
-          <strong>Sub2API 已有 × codex-tool 有凭据</strong> →
-          升级 adopted_recovered，回填 phone+password，未来可自动 codex_login 自愈
-        </li>
-        <li>
-          <strong>Sub2API 无 × codex-tool 有 refresh_token</strong> →
-          走 refreshOpenaiToken + createAccount，新增 hive_registered
-        </li>
-        <li>
-          <strong>Sub2API 无 × codex-tool 仅 phone+pwd 无 refresh_token</strong> →
-          落 Hive observed-only，提示跳 codex_login 一次救活
-        </li>
-      </ul>
     </CollapsiblePanel>
   );
 }
