@@ -63,15 +63,16 @@ export function AccountFleetStatusPanel(props: {
 
   return (
     <div className="orchestration-status-panel account-fleet-status-panel">
-      {/* 左：账号矩阵（主视野，宽屏占满整列高度，内部滚动）
-          右：KPI / 短信成本 / 调和 / jobs 堆成独立滚动列 —— 高度与矩阵解耦，
-          jobs 再长也只在右列内滚，不会撑高、也不挤压矩阵。 */}
-      <AccountMatrix accounts={snap.accounts} />
-      <div className="account-fleet-side">
-        <KpiCards snapshot={snap} />
-        <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
-        <RecentTicksCard ticks={snap.recentTicks} />
-        <RecentJobsCard jobs={snap.recentJobs} />
+      {/* 顶部 KPI 横条占满整宽（6 卡一行）；下方双列：左账号矩阵满高内滚 /
+          右信息列（短信成本 / 调和 / jobs）独立内滚 —— 高度与矩阵解耦。 */}
+      <KpiCards snapshot={snap} />
+      <div className="account-fleet-main">
+        <AccountMatrix accounts={snap.accounts} />
+        <div className="account-fleet-side">
+          <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
+          <RecentTicksCard ticks={snap.recentTicks} />
+          <RecentJobsCard jobs={snap.recentJobs} />
+        </div>
       </div>
     </div>
   );
@@ -164,37 +165,51 @@ function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
 
   const brokenTone: KpiTone = kpis.brokenCount === 0 ? "success" : kpis.brokenCount < 3 ? "warning" : "danger";
   const recoveringTone: KpiTone = kpis.recoveringCount === 0 ? "neutral" : "warning";
+  const monthlyRatioPct =
+    kpis.monthlyRegistrationsBudget > 0
+      ? Math.round((kpis.monthlyRegistrationsUsed / kpis.monthlyRegistrationsBudget) * 100)
+      : 0;
 
   return (
-    <section className="kpi-grid">
-      <KpiCard
-        title="健康账号"
-        primary={`${kpis.healthyCount} / ${kpis.target}`}
-        secondary={kpis.target === 0 ? "未设目标" : describeTargetGap(kpis.healthyCount, kpis.target)}
-        tone={healthTone}
-      />
-      <KpiCard
-        title="掉线 / 修复中"
-        primary={`${kpis.brokenCount} / ${kpis.recoveringCount}`}
-        secondary={kpis.brokenCount + kpis.recoveringCount === 0 ? "无故障" : "broken / recovering"}
-        tone={brokenTone === "danger" ? "danger" : recoveringTone === "warning" ? "warning" : "success"}
-      />
-      <KpiCard
-        title="今日注册（SMS 预算）"
-        primary={`${kpis.todayRegistrationsUsed} / ${kpis.todayRegistrationsBudget}`}
-        secondary={describeBudgetTone(budgetTone, dailyRatio)}
-        tone={budgetTone}
-      />
-      <KpiCard
-        title="本月注册"
-        primary={`${kpis.monthlyRegistrationsUsed} / ${kpis.monthlyRegistrationsBudget}`}
-        secondary={
-          kpis.monthlyRegistrationsBudget === 0
-            ? "未设月预算"
-            : `占月预算 ${Math.round((kpis.monthlyRegistrationsUsed / kpis.monthlyRegistrationsBudget) * 100)}%`
-        }
-        tone="neutral"
-      />
+    <>
+      <section className="kpi-grid kpi-grid-fleet">
+        <KpiCard
+          title="健康账号"
+          primary={`${kpis.healthyCount} / ${kpis.target}`}
+          secondary={kpis.target === 0 ? "未设目标" : describeTargetGap(kpis.healthyCount, kpis.target)}
+          tone={healthTone}
+        />
+        <KpiCard
+          title="掉线"
+          primary={String(kpis.brokenCount)}
+          secondary={kpis.brokenCount === 0 ? "无掉线" : "需重登 / 修复"}
+          tone={brokenTone}
+        />
+        <KpiCard
+          title="修复中"
+          primary={String(kpis.recoveringCount)}
+          secondary={kpis.recoveringCount === 0 ? "无任务" : "codex 登录/注册中"}
+          tone={recoveringTone}
+        />
+        <KpiCard
+          title="账号总数"
+          primary={String(kpis.totalAccounts)}
+          secondary={kpis.pendingCount > 0 ? `待落地 ${kpis.pendingCount}` : "全部已落地"}
+          tone="neutral"
+        />
+        <KpiCard
+          title="今日注册"
+          primary={`${kpis.todayRegistrationsUsed} / ${kpis.todayRegistrationsBudget}`}
+          secondary={describeBudgetTone(budgetTone, dailyRatio)}
+          tone={budgetTone}
+        />
+        <KpiCard
+          title="本月注册"
+          primary={`${kpis.monthlyRegistrationsUsed} / ${kpis.monthlyRegistrationsBudget}`}
+          secondary={kpis.monthlyRegistrationsBudget === 0 ? "未设月预算" : `占月预算 ${monthlyRatioPct}%`}
+          tone="neutral"
+        />
+      </section>
       <div className="kpi-meta">
         <Badge tone={spec.enabled ? "success" : "warning"}>
           {spec.enabled ? "自动维护运行中" : "已暂停"}
@@ -209,11 +224,8 @@ function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
         ) : (
           <span className="muted small">尚未跑过调和</span>
         )}
-        <span className="muted small kpi-meta-totals">
-          账号总数 {kpis.totalAccounts} · 待落地 {kpis.pendingCount}
-        </span>
       </div>
-    </section>
+    </>
   );
 }
 

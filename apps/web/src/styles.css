@@ -1262,19 +1262,26 @@ select {
   overflow-x: auto;
 }
 
-/* 账号编排状态面板（P5-AN 修订）——
-   结构：左账号矩阵 + 右信息列 .account-fleet-side（KPI / 短信成本 / 调和 / jobs）。
-   目标：保留代理编排那种"矩阵占满整列高度 + 右侧栏"的纵深双列观感（不要拍成超扁
-   大宽条），同时让高度真正解耦 —— jobs 再长也只在右列内部滚动，绝不撑高页面或挤压矩阵。
-
-   窄/中宽屏（<1400）：单列堆叠，整面板滚动（矩阵在上，信息列在下）。 */
+/* 账号编排状态面板（P5-AN 修订 2）——
+   结构：顶部 KPI 横条（占满整宽，6 卡一行）→ 下方双列：左账号矩阵满高内滚 /
+   右信息列 .account-fleet-side（短信成本 / 调和 / jobs）独立内滚。
+   高度解耦：jobs 再长也只在右列内滚，不撑高页面、不挤压矩阵；KPI 不被压成孤儿。 */
 .account-fleet-status-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+.account-fleet-status-panel > .kpi-grid {
+  flex: 0 0 auto;
+}
+.account-fleet-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 .account-fleet-side {
   display: flex;
@@ -1283,32 +1290,44 @@ select {
   min-width: 0;
 }
 
-/* 宽屏（≥1400px）：双列，左矩阵满高内滚，右信息列整体内滚，互不撑高 */
+/* KPI 横条：账号编排用 6 卡一行，全宽自适应（覆盖代理编排的 2 列规则）。
+   窄屏 auto-fit 自然回流成 3×2 / 2×3。 */
+.kpi-grid-fleet {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 @media (min-width: 1400px) {
+  /* 整面板不再整体滚动，改为 KPI 固定 + main 双列内部各自滚 */
   .orchestration-status-panel.account-fleet-status-panel {
+    overflow: hidden;
+    padding-right: 0;
+  }
+  .orchestration-status-panel.account-fleet-status-panel > .kpi-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .account-fleet-main {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     gap: 12px;
     overflow: hidden;
-    padding-right: 0;
   }
-  .account-fleet-status-panel > .status-pane-matrix {
+  .account-fleet-main > .status-pane-matrix {
     grid-column: 1;
-    grid-row: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
-  .account-fleet-status-panel > .status-pane-matrix > .panel-body {
+  .account-fleet-main > .status-pane-matrix > .panel-body {
     flex: 1;
     min-height: 0;
     overflow: auto;
   }
   .account-fleet-side {
     grid-column: 2;
-    grid-row: 1;
     min-height: 0;
     overflow: auto;
     padding-right: 4px;
@@ -1319,8 +1338,7 @@ select {
 .account-fleet-status-panel .node-matrix-scroll {
   overflow: auto;
 }
-/* feed 不单独内滚：右信息列 .account-fleet-side 整体 overflow:auto 已承载所有溢出，
-   单一滚动上下文，避免"列滚动 + feed 内滚"的嵌套滚动陷阱。 */
+/* feed 不单独内滚：右信息列整体 overflow:auto 承载溢出，单一滚动上下文。 */
 
 /* 账号编排页（沿用 orchestration-* 容器规则，仅小补丁）
    设计：notes/account-fleet-design.md §10 */
@@ -1436,9 +1454,11 @@ select {
   opacity: 0.7;
 }
 
+/* flex 而非刚性 grid —— tick 行 4 元素(无 chevron) / jobs 行 5 元素(有 chevron)
+   共用此 class，固定列数会让 tick 行时间被挤进 icon 列重叠、badge 落到 1fr 列撑成
+   超宽条。flex 自适应元素数，badge 用 margin-left:auto 始终靠右。 */
 .reconcile-row-head {
-  display: grid;
-  grid-template-columns: 14px 14px auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -1449,6 +1469,14 @@ select {
   cursor: pointer;
   color: inherit;
   font: inherit;
+}
+/* 图标不被压缩；摘要文字占据弹性空间；状态徽标永远靠右 */
+.reconcile-row-head > svg {
+  flex: 0 0 auto;
+}
+.reconcile-row-head > .badge {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .reconcile-row-head:hover {
@@ -2719,18 +2747,23 @@ select {
 }
 
 .form-error {
+  /* display:block 必须 —— jobs 列表里 .form-error 是 <span>(inline)，inline 元素
+     不响应 max-height/overflow/上下 padding，导致多行报错(含换行的 Playwright box)
+     重叠、截断。block 后下面这些才生效。 */
+  display: block;
   border-radius: 7px;
   background: var(--danger-soft);
   color: var(--danger);
   padding: 9px 10px;
-  font-size: 13px;
+  font-size: 12px;
   /* 错误文案可能含换行 / 制表框字符（如 codex-tool 的 Playwright 报错），
      需保留换行并正常折行，否则行高塌缩导致上下行半重叠。超长再内滚。 */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.5;
-  max-height: 220px;
+  line-height: 1.55;
+  max-height: 240px;
   overflow: auto;
+  font-family: var(--font-mono, monospace);
 }
 
 @media (max-width: 1280px) {
