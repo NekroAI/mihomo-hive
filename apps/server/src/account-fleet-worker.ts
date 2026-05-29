@@ -198,25 +198,13 @@ async function runCodexLogin(
   const egress = resolveEgressForLogin(repo, spec, account);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
   const outcome = await adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs });
-  // P5-AI: login 失败拿到分类信号 → 早期分流：
-  //   account_unusable → 把账号直接 retire，不再消耗后续修复 quota
-  //   network_or_proxy → 保留账号 + 标错误分类（worker 上层会根据 intent=recovering 继续退避）
-  //   oauth_failed     → 跟旧行为一致，抛错由 handleRecoveryFailure 统一退避
+  // login 失败统一抛错，由 executor catch → applyRecoveryFailure 按错误消息分类处理
+  // （account_unusable 退役 / network_or_proxy 换出口重试 / oauth_failed 退避）。
+  // 不在这里 patch —— 否则会和 applyRecoveryFailure 的 intent 写回打架（先退役又被翻回）。
+  // outcome.classification 若有则拼进消息，让分类器也能命中 codex-tool 的判定。
   if (outcome.kind === "failed") {
-    const category = outcome.classification.failureCategory ?? "oauth_failed";
-    if (category === "account_unusable") {
-      repo.patchAccount(account.id, {
-        intent: "retired",
-        health: "broken",
-        lastRecoveryError: redactErrorMessage(outcome.error),
-        lastRecoveryPath: "codex_login",
-        lastRecoveryFailureCategory: "account_unusable"
-      });
-      throw new Error(`login failed [account_unusable]: ${outcome.error}`);
-    }
-    // network_or_proxy / oauth_failed → 把分类标到账号，让 handleRecoveryFailure 接管退避
-    repo.patchAccount(account.id, { lastRecoveryFailureCategory: category });
-    throw new Error(`login failed [${category}]: ${outcome.error}`);
+    const cat = outcome.classification.failureCategory;
+    throw new Error(cat ? `${outcome.error} [${cat}]` : outcome.error);
   }
   await landOnSub2api({
     repo,
@@ -830,6 +818,32 @@ function synthesizeName(spec: AccountFleetSpec, email: string): string {
     .replace("{email}", email);
 }
 
+/**
+ * 按错误消息字符串分类 codex 修复失败（P5-AP）。
+ *
+ * 为什么不用 codex-tool 的 failure_category：实测 codex-tool 这些失败多以非零退出码 /
+ * 超时抛出，被 runEnvelope 当 CodexToolError 抛，绕过了 {kind:failed} 信封分类，
+ * 所以 Hive 拿不到 failure_category（实测 323 账号 category 全 null）。改为 Hive 侧
+ * 按消息 marker 自己判（marker 取自 codex-tool 的 _oauth_failure_details + 补 Sentinel）。
+ *
+ *   account_unusable —— OAuth 授权链终态缺失（缺少目标 URL）：账号废了，退役不重试。
+ *   network_or_proxy —— 超时/代理/连接/TLS/Sentinel 提取失败：代理或网络问题，
+ *                       换个出口重试就可能成功，不该算账号的错、不轻易退役。
+ *   oauth_failed     —— 其它 OAuth 失败：按常规退避，达上限退役。
+ */
+function classifyCodexFailure(message: string): "account_unusable" | "network_or_proxy" | "oauth_failed" {
+  const m = message.toLowerCase();
+  if (m.includes("缺少目标") || m.includes("missing target url") || m.includes("account_unusable") || m.includes("没有 code")) {
+    return "account_unusable";
+  }
+  const networkMarkers = [
+    "timed out", "timeout", "curl", "代理", "proxy", "connection", "connect",
+    "tls", "ssl", "network", "网络", "sentinel", "环境校验", "econn", "socket"
+  ];
+  if (networkMarkers.some((k) => m.includes(k))) return "network_or_proxy";
+  return "oauth_failed";
+}
+
 function applyRecoveryFailure(
   repo: HiveRepository,
   spec: AccountFleetSpec,
@@ -839,14 +853,50 @@ function applyRecoveryFailure(
   if (!job.accountId) return;
   const account = repo.getAccountById(job.accountId);
   if (!account) return;
+  const category = classifyCodexFailure(message);
+  const path = job.kind === "codex_login" ? "codex_login" : "codex_register";
+  const redacted = redactErrorMessage(message);
+
+  // account_unusable：账号 OAuth 链终态废了，直接退役、不再消耗修复配额。
+  if (category === "account_unusable") {
+    repo.patchAccount(account.id, {
+      intent: "retired",
+      health: "broken",
+      lastRecoveryError: redacted,
+      lastRecoveryPath: path,
+      lastRecoveryFailureCategory: "account_unusable"
+    });
+    return;
+  }
+
   const attempts = account.recoveryAttempts + 1;
   const backoffIdx = Math.min(attempts - 1, spec.recovery.backoffSequenceMs.length - 1);
   const backoffMs = spec.recovery.backoffSequenceMs[backoffIdx] ?? 60_000;
+
+  // network_or_proxy：代理/网络问题不是账号的错。清出口软粘性 → 下个 tick 重新加权
+  // 随机选别的出口（"换代理重试"）；用更宽松上限（maxAttempts × 3）避免因一串代理
+  // 抖动把本可恢复的账号过早退役。
+  if (category === "network_or_proxy") {
+    const cap = spec.recovery.maxAttemptsPerAccount * 3;
+    repo.patchAccount(account.id, {
+      recoveryAttempts: attempts,
+      nextRecoveryAfter: new Date(Date.now() + backoffMs).toISOString(),
+      lastRecoveryError: redacted,
+      lastRecoveryPath: path,
+      lastRecoveryFailureCategory: "network_or_proxy",
+      egressNodeHash: null,
+      intent: attempts >= cap ? "retired" : "recovering"
+    });
+    return;
+  }
+
+  // oauth_failed：常规退避，达 maxAttemptsPerAccount 退役。
   repo.patchAccount(account.id, {
     recoveryAttempts: attempts,
     nextRecoveryAfter: new Date(Date.now() + backoffMs).toISOString(),
-    lastRecoveryError: redactErrorMessage(message),
-    lastRecoveryPath: job.kind === "codex_login" ? "codex_login" : "codex_register",
+    lastRecoveryError: redacted,
+    lastRecoveryPath: path,
+    lastRecoveryFailureCategory: "oauth_failed",
     intent: attempts >= spec.recovery.maxAttemptsPerAccount ? "retired" : "recovering"
   });
 }
@@ -899,7 +949,13 @@ export async function buildCodexToolAdapter(
   // 兼容"明文存储"与"未来加密存储"两种形态。
   const skymailPassword = readMaybeEncrypted(crypto, spec.codexTool.skymail.adminPasswordRef);
   const smsApiKey = readMaybeEncrypted(crypto, spec.codexTool.phoneSms.apiKeyRef);
-  const proxyDefault = egress ? `socks5://127.0.0.1:${egress.port}` : resolveLegacyEgressProxyUrl(repo, spec);
+  // P5-AP: 必须用 http:// 而非 socks5:// —— mihomo listener 是 mixed(http+socks)。
+  // 实测 socks5:// 走"本地 DNS"(容器本地把域名解析成 IP 再发给代理)，代理出口连不上
+  // 那个 IP → 全部超时(codex_login 0 成功)。http:// 代理走"远程 DNS"(代理自己解析)，
+  // curl + chromium 都正常通(实测 gstatic 204 / auth.openai.com 403 reached)。
+  const proxyDefault = egress
+    ? `http://127.0.0.1:${egress.port}`
+    : resolveLegacyEgressProxyUrl(repo, spec);
   // P5-AI: 透明回灌 region_hint —— 上次注册成功的 sms_region_result blob 原样塞给
   // codex-tool 让它优先尝试该地区，Hive 不解析 blob 字段。第一次跑时没有，为 null。
   const hintMemory = repo.getSmsRegionHint();
@@ -952,7 +1008,7 @@ function resolveLegacyEgressProxyUrl(repo: HiveRepository, spec: AccountFleetSpe
         `egress pinned node ${spec.codexTool.egress.pinnedNodeHash} not found or has no assigned port`
       );
     }
-    return `socks5://127.0.0.1:${node.assignedPort}`;
+    return `http://127.0.0.1:${node.assignedPort}`;
   }
   // 兜底：第一个可用节点（保守，跟 P4 旧行为兼容）
   const candidates: ProxyNode[] = repo
@@ -962,7 +1018,7 @@ function resolveLegacyEgressProxyUrl(repo: HiveRepository, spec: AccountFleetSpe
   if (!pick?.assignedPort) {
     throw new Error("no healthy + schedulable + ported node available for egress");
   }
-  return `socks5://127.0.0.1:${pick.assignedPort}`;
+  return `http://127.0.0.1:${pick.assignedPort}`;
 }
 
 /**
