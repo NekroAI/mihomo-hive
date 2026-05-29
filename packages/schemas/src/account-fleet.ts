@@ -570,6 +570,11 @@ export const accountFleetStatusSnapshotSchema = z.object({
     brokenCount: z.number().int().nonnegative(),
     recoveringCount: z.number().int().nonnegative(),
     pendingCount: z.number().int().nonnegative(),
+    // P6-02 池子分段计数（默认 0 向后兼容）
+    quotaExhaustedCount: z.number().int().nonnegative().default(0),
+    rateLimitedCount: z.number().int().nonnegative().default(0),
+    recoverableCount: z.number().int().nonnegative().default(0),
+    deadCount: z.number().int().nonnegative().default(0),
     todayRegistrationsUsed: z.number().int().nonnegative(),
     todayRegistrationsBudget: z.number().int().nonnegative(),
     monthlyRegistrationsUsed: z.number().int().nonnegative(),

@@ -702,6 +702,113 @@ select {
   overflow: auto;
 }
 
+/* P6-03 账号编排页：顶部满宽操作条 + 主体（默认满宽监控，展开策略时桌面 2 列） */
+.account-fleet-route {
+  height: 100%;
+  min-height: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.fleet-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fleet-toolbar-main,
+.fleet-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.account-fleet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.account-fleet-body > .orchestration-status-panel {
+  flex: 1;
+  min-width: 0;
+}
+/* 展开维护策略：桌面 2 列，监控仍占主导，策略固定 420px 列 */
+@media (min-width: 1100px) {
+  .account-fleet-body.spec-open {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 12px;
+    overflow: hidden;
+  }
+}
+.fleet-spec-drawer {
+  min-height: 0;
+}
+.fleet-spec-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fleet-spec-header > h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* P6-04 账号矩阵筛选条：chips + 搜索 */
+.matrix-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.matrix-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.matrix-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-subtle);
+  color: var(--text, inherit);
+  font-size: 12px;
+  cursor: pointer;
+}
+.matrix-chip:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.matrix-chip.is-active {
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+  color: #fff;
+}
+.matrix-chip-count { font-variant-numeric: tabular-nums; opacity: 0.8; font-size: 11px; }
+.matrix-chip.is-active .matrix-chip-count { opacity: 0.95; }
+.matrix-search {
+  flex: 0 1 220px;
+  min-width: 140px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: inherit;
+  font-size: 13px;
+}
+.matrix-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
 .metric-grid.compact {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1290,10 +1397,60 @@ select {
   min-width: 0;
 }
 
-/* KPI 横条：账号编排用 6 卡一行，全宽自适应（覆盖代理编排的 2 列规则）。
-   窄屏 auto-fit 自然回流成 3×2 / 2×3。 */
+/* KPI 横条：账号编排成本/吞吐 4 卡一行，全宽自适应（覆盖代理编排的 2 列规则）。 */
 .kpi-grid-fleet {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* P6-02 池子健康 Hero —— 满宽横条，桌面三段式：定性 | 分段条 | 状态 */
+.pool-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.pool-hero-danger { border-left-color: var(--danger, #dc2626); background: color-mix(in srgb, var(--danger, #dc2626) 6%, var(--panel)); }
+.pool-hero-warning { border-left-color: var(--warning, #d97706); }
+.pool-hero-success { border-left-color: var(--success, #16a34a); }
+.pool-hero-neutral { border-left-color: var(--border); }
+
+.pool-hero-headline { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
+.pool-hero-figure { display: flex; align-items: baseline; gap: 4px; }
+.pool-hero-num { font-size: 34px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.pool-hero-target { font-size: 16px; color: var(--text-muted, #888); font-variant-numeric: tabular-nums; }
+.pool-hero-caption { display: flex; flex-direction: column; gap: 3px; }
+
+.pool-hero-bar-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pool-hero-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--panel-subtle);
+}
+.pool-seg { height: 100%; transition: width 0.3s ease; }
+.pool-seg + .pool-seg { box-shadow: inset 1px 0 0 rgba(0,0,0,0.12); }
+.seg-healthy { background: var(--success, #16a34a); }
+.seg-recoverable { background: var(--accent, #2563eb); }
+.seg-cooling { background: var(--warning, #d97706); }
+.seg-dead { background: var(--danger, #dc2626); }
+.seg-unknown { background: color-mix(in srgb, var(--text-muted, #888) 50%, transparent); }
+
+.pool-hero-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; align-items: center; }
+.pool-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pool-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+.pool-hero-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; white-space: nowrap; text-align: right; }
+
+/* 窄屏（控制台缩窗）回退为纵向堆叠，但仍是桌面密度，不是手机卡片 */
+@media (max-width: 1100px) {
+  .pool-hero { grid-template-columns: 1fr; gap: 10px; }
+  .pool-hero-meta { align-items: flex-start; text-align: left; }
 }
 
 @media (min-width: 1400px) {
@@ -1303,7 +1460,7 @@ select {
     padding-right: 0;
   }
   .orchestration-status-panel.account-fleet-status-panel > .kpi-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .account-fleet-main {
     flex: 1;

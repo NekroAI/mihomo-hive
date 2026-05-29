@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, CheckCircle2, Pause, Play, Save, Wand2, XCircle, Zap } from "lucide-react";
+import { Activity, Save, Wand2, X } from "lucide-react";
 import type { AccountFleetSpec } from "@mihomo-hive/schemas";
 import {
   Badge,
@@ -34,6 +34,8 @@ export function AccountFleetSpecPanel(props: {
   canTrigger?: boolean;
   onSaveSpec: (next: AccountFleetSpec) => void;
   onTriggerNow: () => void;
+  /** P6-03：作为可收起的策略列时，提供收起回调。 */
+  onClose?: () => void;
 }) {
   const [draft, setDraft] = React.useState<AccountFleetSpec>(props.spec);
   const [dirty, setDirty] = React.useState(false);
@@ -81,55 +83,21 @@ export function AccountFleetSpecPanel(props: {
   );
 
   return (
-    <aside className="orchestration-spec-panel">
-      <Panel
-        title="自动维护"
-        actions={
-          <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "已开启" : "未开启"}</Badge>
-        }
-        hint="默认所有调度功能都关闭，scheduler 只观察账号池状态、不做任何修改。点'开启自动维护'后，按 Spec 周期性自动注册补给 / 自动修复掉登录账号 / 自动退役死号。注册/修复每个子能力都可单独开关。"
-      >
-        <div className="button-row wrap">
-          {enabled ? (
-            <Button
-              variant="secondary"
-              icon={<Pause size={16} />}
-              onClick={() => {
-                const next = { ...draft, enabled: false };
-                setDraft(next);
-                setDirty(false);
-                props.onSaveSpec(next);
-              }}
-              title="关闭后 scheduler 仍跑 sense + diagnose 刷新账号视图，但不会再产出任何 jobs，也不调用 codex-tool / 不写 Sub2API。"
-            >
-              关闭自动维护
+    <aside className="orchestration-spec-panel fleet-spec-drawer">
+      <div className="fleet-spec-header">
+        <h2>维护策略</h2>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <Badge tone={enabled ? "success" : "neutral"}>{enabled ? "运行中" : "已暂停"}</Badge>
+          {props.onClose ? (
+            <Button variant="ghost" size="sm" icon={<X size={15} />} onClick={props.onClose} title="收起策略">
+              收起
             </Button>
-          ) : (
-            <Button
-              icon={<Play size={16} />}
-              onClick={() => {
-                const next = { ...draft, enabled: true };
-                setDraft(next);
-                setDirty(false);
-                props.onSaveSpec(next);
-              }}
-              title="开启自动维护。下一次调和周期立即生效。下面 ③ 修复策略 / ④ 出生策略 各自还有独立开关。"
-            >
-              开启自动维护
-            </Button>
-          )}
-          <Button
-            variant="secondary"
-            icon={<Zap size={16} />}
-            loading={props.triggering}
-            disabled={props.canTrigger === false}
-            onClick={props.onTriggerNow}
-            title="立即触发一次完整调和：sense → diagnose → plan → gate（apply 模式还会入队 jobs）。"
-          >
-            立即调和一次
-          </Button>
+          ) : null}
         </div>
-      </Panel>
+      </div>
+      <p className="muted small" style={{ margin: "0 0 4px" }}>
+        开启/暂停自动维护与「立即巡检」在页面顶部操作条；这里调具体策略。注册、修复可各自单独开关。
+      </p>
 
       {/* P5-AK: codex-tool 连接已搬到「系统」tab。账号编排页只保留策略 + 账号矩阵。 */}
       {!codexConfigured ? (

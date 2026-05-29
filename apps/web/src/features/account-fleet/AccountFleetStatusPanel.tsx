@@ -65,14 +65,20 @@ export function AccountFleetStatusPanel(props: {
 
   return (
     <div className="orchestration-status-panel account-fleet-status-panel">
-      {/* 顶部 KPI 横条占满整宽（6 卡一行）；下方双列：左账号矩阵满高内滚 /
-          右信息列（短信成本 / 调和 / jobs）独立内滚 —— 高度与矩阵解耦。 */}
+      {/* 顶部满宽 Hero：一眼定性"池子行不行" + 分段条；下方成本/吞吐 KPI 条；
+          再下双列：左账号矩阵满高内滚 / 右信息列独立内滚（高度解耦）。 */}
+      <PoolHealthHero snapshot={snap} />
       <KpiCards snapshot={snap} />
       <div className="account-fleet-main">
         <AccountMatrix accounts={snap.accounts} />
         <div className="account-fleet-side">
           <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
-          <RunningJobsCard running={snap.runningJobs} queuedCount={snap.queuedJobCount} accounts={snap.accounts} />
+          <RunningJobsCard
+            running={snap.runningJobs}
+            queuedCount={snap.queuedJobCount}
+            accounts={snap.accounts}
+            unitCostUsd={snap.spec.registration.maxCostPerAccountUsd}
+          />
           <RecentFinishedJobsCard jobs={snap.recentFinishedJobs} accounts={snap.accounts} />
           <RecentTicksCard ticks={snap.recentTicks} />
         </div>
@@ -142,18 +148,91 @@ function SmsRegionHintCard(props: {
   );
 }
 
-function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
+/**
+ * P6-02 池子健康 Hero —— 满宽横条，一眼回答"池子行不行"。
+ * 左：健康 N/目标 M + 定性；中：分段条(健康/可恢复/冷却中/真死/未知) + 图例；
+ * 右：自动维护状态 + 上次巡检。充分利用桌面横向空间。
+ */
+function PoolHealthHero(props: { snapshot: AccountFleetStatusSnapshot }) {
   const { kpis, lastTick, spec } = props.snapshot;
-
-  const healthRatio = kpis.target > 0 ? kpis.healthyCount / kpis.target : 0;
-  const healthTone: KpiTone =
+  const ratio = kpis.target > 0 ? kpis.healthyCount / kpis.target : 1;
+  const verdict =
     kpis.target === 0
-      ? "neutral"
-      : healthRatio >= 0.8
-        ? "success"
-        : healthRatio >= 0.5
-          ? "warning"
-          : "danger";
+      ? { label: "未设目标", tone: "neutral" as const }
+      : ratio >= 0.9
+        ? { label: "充足", tone: "success" as const }
+        : ratio >= 0.5
+          ? { label: "偏紧", tone: "warning" as const }
+          : { label: "严重不足", tone: "danger" as const };
+
+  const cooling = kpis.quotaExhaustedCount + kpis.rateLimitedCount;
+  const unknown = Math.max(
+    0,
+    kpis.totalAccounts - kpis.healthyCount - kpis.recoverableCount - kpis.deadCount - cooling
+  );
+  const segments = [
+    { key: "healthy", label: "健康", count: kpis.healthyCount, cls: "seg-healthy" },
+    { key: "recoverable", label: "可恢复", count: kpis.recoverableCount, cls: "seg-recoverable" },
+    { key: "cooling", label: "冷却中", count: cooling, cls: "seg-cooling" },
+    { key: "dead", label: "真死", count: kpis.deadCount, cls: "seg-dead" },
+    { key: "unknown", label: "未知", count: unknown, cls: "seg-unknown" }
+  ].filter((s) => s.count > 0);
+  const total = Math.max(1, kpis.totalAccounts);
+
+  return (
+    <section className={`pool-hero pool-hero-${verdict.tone}`}>
+      <div className="pool-hero-headline">
+        <div className="pool-hero-figure">
+          <span className="pool-hero-num">{kpis.healthyCount}</span>
+          <span className="pool-hero-target">/ {kpis.target || "—"}</span>
+        </div>
+        <div className="pool-hero-caption">
+          <Badge tone={verdict.tone}>{verdict.label}</Badge>
+          <span className="muted small">健康账号 / 目标</span>
+        </div>
+      </div>
+
+      <div className="pool-hero-bar-wrap">
+        <div className="pool-hero-bar" role="img" aria-label="账号池健康分布">
+          {segments.map((s) => (
+            <span
+              key={s.key}
+              className={`pool-seg ${s.cls}`}
+              style={{ width: `${(s.count / total) * 100}%` }}
+              title={`${s.label} ${s.count}`}
+            />
+          ))}
+        </div>
+        <div className="pool-hero-legend">
+          {segments.map((s) => (
+            <span key={s.key} className="pool-legend-item">
+              <span className={`pool-legend-dot ${s.cls}`} />
+              {s.label} <strong>{s.count}</strong>
+            </span>
+          ))}
+          <span className="pool-legend-item muted">共 {kpis.totalAccounts}</span>
+          {cooling > 0 ? <span className="pool-legend-item muted">· 冷却中会自然恢复</span> : null}
+        </div>
+      </div>
+
+      <div className="pool-hero-meta">
+        <Badge tone={spec.enabled ? "success" : "warning"}>
+          {spec.enabled ? "自动维护运行中" : "已暂停"}
+        </Badge>
+        {lastTick ? (
+          <span className="muted small">
+            上次巡检 {new Date(lastTick.startedAt).toLocaleTimeString()} · 计划 {lastTick.plannedTotal} · 入队 {lastTick.appliedTotal}
+          </span>
+        ) : (
+          <span className="muted small">尚未巡检</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
+  const { kpis } = props.snapshot;
 
   const dailyRatio =
     kpis.todayRegistrationsBudget > 0 ? kpis.todayRegistrationsUsed / kpis.todayRegistrationsBudget : 0;
@@ -165,77 +244,41 @@ function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
         : dailyRatio >= 0.8
           ? "warning"
           : "success";
-
-  const brokenTone: KpiTone = kpis.brokenCount === 0 ? "success" : kpis.brokenCount < 3 ? "warning" : "danger";
   const recoveringTone: KpiTone = kpis.recoveringCount === 0 ? "neutral" : "warning";
   const monthlyRatioPct =
     kpis.monthlyRegistrationsBudget > 0
       ? Math.round((kpis.monthlyRegistrationsUsed / kpis.monthlyRegistrationsBudget) * 100)
       : 0;
 
+  // 健康分布已在 Hero 呈现，这里只留"活动 / 成本 / 吞吐"，避免卡片汤。
   return (
-    <>
-      <section className="kpi-grid kpi-grid-fleet">
-        <KpiCard
-          title="健康账号"
-          primary={`${kpis.healthyCount} / ${kpis.target}`}
-          secondary={kpis.target === 0 ? "未设目标" : describeTargetGap(kpis.healthyCount, kpis.target)}
-          tone={healthTone}
-        />
-        <KpiCard
-          title="掉线"
-          primary={String(kpis.brokenCount)}
-          secondary={kpis.brokenCount === 0 ? "无掉线" : "需重登 / 修复"}
-          tone={brokenTone}
-        />
-        <KpiCard
-          title="修复中"
-          primary={String(kpis.recoveringCount)}
-          secondary={kpis.recoveringCount === 0 ? "无任务" : "codex 登录/注册中"}
-          tone={recoveringTone}
-        />
-        <KpiCard
-          title="账号总数"
-          primary={String(kpis.totalAccounts)}
-          secondary={kpis.pendingCount > 0 ? `待落地 ${kpis.pendingCount}` : "全部已落地"}
-          tone="neutral"
-        />
-        <KpiCard
-          title="今日注册"
-          primary={`${kpis.todayRegistrationsUsed} / ${kpis.todayRegistrationsBudget}`}
-          secondary={describeBudgetTone(budgetTone, dailyRatio)}
-          tone={budgetTone}
-        />
-        <KpiCard
-          title="本月注册"
-          primary={`${kpis.monthlyRegistrationsUsed} / ${kpis.monthlyRegistrationsBudget}`}
-          secondary={kpis.monthlyRegistrationsBudget === 0 ? "未设月预算" : `占月预算 ${monthlyRatioPct}%`}
-          tone="neutral"
-        />
-      </section>
-      <div className="kpi-meta">
-        <Badge tone={spec.enabled ? "success" : "warning"}>
-          {spec.enabled ? "自动维护运行中" : "已暂停"}
-        </Badge>
-        {lastTick ? (
-          <span className="muted small">
-            上次调和 {new Date(lastTick.startedAt).toLocaleTimeString()} · 计划 {lastTick.plannedTotal} · 入队 {lastTick.appliedTotal}
-            {lastTick.skippedReason !== "applied" && lastTick.skippedReason !== "no_change"
-              ? ` · ${formatSkipReason(lastTick.skippedReason)}`
-              : ""}
-          </span>
-        ) : (
-          <span className="muted small">尚未跑过调和</span>
-        )}
-      </div>
-    </>
+    <section className="kpi-grid kpi-grid-fleet">
+      <KpiCard
+        title="修复中"
+        primary={String(kpis.recoveringCount)}
+        secondary={kpis.recoveringCount === 0 ? "无任务" : "登录/注册修复中"}
+        tone={recoveringTone}
+      />
+      <KpiCard
+        title="今日注册"
+        primary={`${kpis.todayRegistrationsUsed} / ${kpis.todayRegistrationsBudget}`}
+        secondary={describeBudgetTone(budgetTone, dailyRatio)}
+        tone={budgetTone}
+      />
+      <KpiCard
+        title="今日花费"
+        primary={`$${(kpis.todaySmsCostCents / 100).toFixed(2)}`}
+        secondary={`本月 $${(kpis.monthlySmsCostCents / 100).toFixed(2)}`}
+        tone="neutral"
+      />
+      <KpiCard
+        title="本月注册"
+        primary={`${kpis.monthlyRegistrationsUsed} / ${kpis.monthlyRegistrationsBudget}`}
+        secondary={kpis.monthlyRegistrationsBudget === 0 ? "未设月预算" : `占月预算 ${monthlyRatioPct}%`}
+        tone="neutral"
+      />
+    </section>
   );
-}
-
-function describeTargetGap(have: number, want: number): string {
-  if (have >= want) return "已达目标";
-  const gap = want - have;
-  return `缺口 ${gap}，按出生策略补给`;
 }
 
 function describeBudgetTone(tone: KpiTone, ratio: number): string {
@@ -245,37 +288,108 @@ function describeBudgetTone(tone: KpiTone, ratio: number): string {
   return `占 ${Math.round(ratio * 100)}%，充裕`;
 }
 
+type MatrixFilterKey = "attention" | "all" | "healthy" | "broken" | "recovering" | "cooling";
+
+const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountRecordView) => boolean }[] = [
+  {
+    key: "attention",
+    label: "需关注",
+    match: (a) => a.health === "broken" || a.intent === "recovering" || a.health === "rate_limited"
+  },
+  { key: "all", label: "全部", match: () => true },
+  { key: "healthy", label: "健康", match: (a) => a.health === "healthy" },
+  { key: "broken", label: "掉线", match: (a) => a.health === "broken" },
+  { key: "recovering", label: "修复中", match: (a) => a.intent === "recovering" },
+  { key: "cooling", label: "冷却中", match: (a) => a.health === "quota_exhausted" || a.health === "rate_limited" }
+];
+
+const MATRIX_PAGE_SIZE = 50;
+
 function AccountMatrix(props: { accounts: AccountRecordView[] }) {
+  const [filter, setFilter] = React.useState<MatrixFilterKey>("attention");
+  const [query, setQuery] = React.useState("");
+  const [page, setPage] = React.useState(0);
+
+  const q = query.trim().toLowerCase();
+  const activeMatch = (MATRIX_FILTERS.find((f) => f.key === filter) ?? MATRIX_FILTERS[1]!).match;
+  const filtered = React.useMemo(() => {
+    const base = props.accounts.filter((a) => activeMatch(a));
+    const searched = q
+      ? base.filter(
+          (a) => a.email.toLowerCase().includes(q) || (a.externalId ? String(a.externalId).includes(q) : false)
+        )
+      : base;
+    // 排序：broken / recovering 在前，retired 在后；同状态下 quota 高的靠前
+    return [...searched].sort((a, b) => intentRank(a) - intentRank(b) || healthRank(a) - healthRank(b));
+  }, [props.accounts, activeMatch, q]);
+
+  // filter/search 变化时回到第 1 页
+  React.useEffect(() => setPage(0), [filter, q]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / MATRIX_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRows = filtered.slice(safePage * MATRIX_PAGE_SIZE, (safePage + 1) * MATRIX_PAGE_SIZE);
+
+  const chipBar = (
+    <div className="matrix-toolbar">
+      <div className="matrix-chips">
+        {MATRIX_FILTERS.map((f) => {
+          const count = props.accounts.filter((a) => f.match(a)).length;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              className={`matrix-chip${filter === f.key ? " is-active" : ""}`}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label} <span className="matrix-chip-count">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      <input
+        type="search"
+        className="matrix-search"
+        placeholder="搜索邮箱 / 账号 ID"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        aria-label="搜索账号"
+      />
+    </div>
+  );
+
   if (props.accounts.length === 0) {
     return (
       <Panel title="账号矩阵" className="status-pane-matrix">
         <EmptyState
           title="账号池为空"
-          description="启用 apply 模式后，scheduler 会按出生策略自动注册；也可在收编工作台导入存量 Sub2API 账号。"
+          description="开启自动维护后会按策略自动注册补给；也可在「设置与工具」导入存量 Sub2API 账号，或用上方「注册一批」立即补给。"
         />
       </Panel>
     );
   }
-  // 排序：broken / recovering 在前，retired 在后；同状态下 quota 高的靠前
-  const sorted = [...props.accounts].sort((a, b) => intentRank(a) - intentRank(b) || healthRank(a) - healthRank(b));
 
   return (
-    <Panel title={`账号矩阵 (${props.accounts.length})`} className="status-pane-matrix">
-      <div className="node-matrix-scroll">
-        <table className="node-matrix-table account-matrix-table">
-          <thead>
-            <tr>
-              <th>邮箱</th>
-              <th>来源</th>
-              <th>状态</th>
-              <th>健康</th>
-              <th className="num">配额 5h/7d</th>
-              <th className="num">存活/重登</th>
-              <th>出口节点</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((acc) => {
+    <Panel title={`账号矩阵 ${filtered.length}/${props.accounts.length}`} className="status-pane-matrix">
+      {chipBar}
+      {filtered.length === 0 ? (
+        <EmptyState title="没有符合条件的账号" description="换个筛选或清空搜索试试。" />
+      ) : (
+        <div className="node-matrix-scroll">
+          <table className="node-matrix-table account-matrix-table">
+            <thead>
+              <tr>
+                <th>邮箱</th>
+                <th>来源</th>
+                <th>状态</th>
+                <th>健康</th>
+                <th className="num">配额 5h/7d</th>
+                <th className="num">存活/重登</th>
+                <th>出口节点</th>
+              </tr>
+            </thead>
+            <tbody>
+            {pageRows.map((acc) => {
               const split = splitOrigin(acc.origin);
               const egressTitle = formatEgressTooltip(acc);
               return (
@@ -360,9 +474,23 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
               </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pageCount > 1 ? (
+        <div className="matrix-pager">
+          <Button size="sm" variant="ghost" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
+            上一页
+          </Button>
+          <span className="muted small">
+            {safePage * MATRIX_PAGE_SIZE + 1}–{Math.min((safePage + 1) * MATRIX_PAGE_SIZE, filtered.length)} / {filtered.length}
+          </span>
+          <Button size="sm" variant="ghost" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
+            下一页
+          </Button>
+        </div>
+      ) : null}
     </Panel>
   );
 }
@@ -573,12 +701,42 @@ function tickActionLabel(kind: AccountFleetTick["plannedActions"][number]["kind"
  * P5-AW 手动注册控件 —— 立刻入队一批 codex_register 并插队到所有任务前面
  * (priority=5)，不受自动注册开关门控。用于"现在就补一批健康账号"。
  */
-function RegisterControl() {
+function RegisterControl(props: { unitCostUsd: number }) {
   const [count, setCount] = React.useState(5);
+  const [confirming, setConfirming] = React.useState(false);
   const utils = trpc.useUtils();
   const refresh = () => void utils.accountFleet.status.invalidate();
-  const reg = trpc.accountFleet.actions.enqueueRegisterNew.useMutation({ onSuccess: refresh });
+  const reg = trpc.accountFleet.actions.enqueueRegisterNew.useMutation({
+    onSuccess: () => {
+      setConfirming(false);
+      refresh();
+    }
+  });
   const regen = trpc.accountFleet.actions.regenerateQueue.useMutation({ onSuccess: refresh });
+  const estCost = (count * props.unitCostUsd).toFixed(2);
+
+  // 二次确认态：花真金白银取号，必须让用户确认数量与预计花费
+  if (confirming) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span className="small">
+          注册 <strong>{count}</strong> 个 · 预计接码 ≤ <strong>${estCost}</strong>?
+        </span>
+        <Button
+          size="sm"
+          variant="primary"
+          loading={reg.isPending}
+          onClick={() => reg.mutate({ count, jumpQueue: true })}
+        >
+          确认注册
+        </Button>
+        <Button size="sm" variant="ghost" disabled={reg.isPending} onClick={() => setConfirming(false)}>
+          取消
+        </Button>
+      </span>
+    );
+  }
+
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       <input
@@ -588,16 +746,16 @@ function RegisterControl() {
         value={count}
         onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
         style={{ width: 52 }}
-        title="一次注册几个"
+        aria-label="注册数量"
+        title="一次注册几个新账号"
       />
       <Button
         size="sm"
         variant="secondary"
-        loading={reg.isPending}
-        title="立刻入队 N 个注册任务并插队到所有队列任务前面（priority=5）。手动下发不受自动注册开关限制。"
-        onClick={() => reg.mutate({ count, jumpQueue: true })}
+        title="立刻注册 N 个新账号并插队到所有队列任务前面。每个账号都会向接码平台取号、产生费用。"
+        onClick={() => setConfirming(true)}
       >
-        注册插队
+        注册一批…
       </Button>
       <Button
         size="sm"
@@ -621,6 +779,7 @@ function RunningJobsCard(props: {
   running: AccountJob[];
   queuedCount: number;
   accounts: AccountRecordView[];
+  unitCostUsd: number;
 }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -640,7 +799,7 @@ function RunningJobsCard(props: {
 
   if (props.running.length === 0) {
     return (
-      <Panel title={title} actions={<RegisterControl />}>
+      <Panel title={title} actions={<RegisterControl unitCostUsd={props.unitCostUsd} />}>
         <EmptyState
           title="当前无运行中的 job"
           description={
@@ -654,7 +813,7 @@ function RunningJobsCard(props: {
   }
 
   return (
-    <Panel title={title} actions={<RegisterControl />}>
+    <Panel title={title} actions={<RegisterControl unitCostUsd={props.unitCostUsd} />}>
       <div className="reconcile-feed">
         {props.running.map((job) => {
           const email = job.accountId ? emailById.get(job.accountId) : undefined;

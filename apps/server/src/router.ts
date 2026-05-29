@@ -1422,6 +1422,14 @@ export const appRouter = t.router({
       const brokenCount = accountViews.filter((a) => a.health === "broken").length;
       const recoveringCount = accountViews.filter((a) => a.intent === "recovering").length;
       const pendingCount = accountViews.filter((a) => a.intent === "pending").length;
+      // P6-02 池子分段：把 broken 拆成"可恢复"(有凭据、未退役 → 还能救) vs "真死"
+      //   (已退役 / 无凭据救不了)；quota/rate 单列 → 让用户区分"冷却中(等会儿好)"。
+      const quotaExhaustedCount = accountViews.filter((a) => a.health === "quota_exhausted").length;
+      const rateLimitedCount = accountViews.filter((a) => a.health === "rate_limited").length;
+      const recoverableCount = accountViews.filter(
+        (a) => a.health === "broken" && a.intent !== "retired" && (a.hasPhonePassword || a.hasRefreshToken)
+      ).length;
+      const deadCount = brokenCount - recoverableCount;
       const dayKey = budgetWindowKeyUtc(new Date(), "day");
       const monthKey = budgetWindowKeyUtc(new Date(), "month");
       const dayBudget = ctx.repo.getAccountBudget(dayKey);
@@ -1442,6 +1450,10 @@ export const appRouter = t.router({
           brokenCount,
           recoveringCount,
           pendingCount,
+          quotaExhaustedCount,
+          rateLimitedCount,
+          recoverableCount,
+          deadCount,
           todayRegistrationsUsed: dayBudget?.registrationsUsed ?? 0,
           todayRegistrationsBudget: spec.registration.dailyBudget,
           monthlyRegistrationsUsed: monthBudget?.registrationsUsed ?? 0,
