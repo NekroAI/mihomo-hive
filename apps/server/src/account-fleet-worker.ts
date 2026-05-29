@@ -342,9 +342,18 @@ async function runCodexRegister(
   };
 
   if (outcome.kind === "registration_failed") {
-    // 接码失败一般不收费（cost=0），但仍把 attempts 经验保留下来给 codex-tool 下次参考
+    // 接码失败一般不收费（cost=0），但仍把 sms_region_result 经验回灌给 codex-tool。
     persistSms(outcome.sms, outcome.sms.country);
-    throw new Error(`registration failed: ${outcome.error}`);
+    const attemptCount = Array.isArray(outcome.sms.attempts) ? outcome.sms.attempts.length : 0;
+    // P5-AX：归因 —— 注册失败不无脑透传原始错误。取不到号 / 取到号收不到验证码都归为
+    // "地区不可用"（不是账号/节点问题，不退役账号、不罚节点）。带上尝试地区数便于判断。
+    const reason = describeRegistrationFailure(outcome.error, attemptCount);
+    appendJobLog(job.id, `归因：${reason}`);
+    if (outcome.sms.result == null && attemptCount > 0) {
+      // codex-tool 试了多个地区却没回灌 sms_region_result → 经验没法持久化，记一笔提醒
+      appendJobLog(job.id, `注意：codex-tool 未返回 sms_region_result，本次 ${attemptCount} 次地区尝试经验无法持久化`);
+    }
+    throw new Error(reason);
   }
   if (outcome.kind === "oauth_failed") {
     const { costCents, country } = persistSms(outcome.recoverable.sms, outcome.recoverable.sms.country);
@@ -947,11 +956,44 @@ function synthesizeName(spec: AccountFleetSpec, email: string): string {
  *                       换个出口重试就可能成功，不该算账号的错、不轻易退役。
  *   oauth_failed     —— 其它 OAuth 失败：按常规退避，达上限退役。
  */
-function classifyCodexFailure(message: string): "account_unusable" | "network_or_proxy" | "oauth_failed" {
+/**
+ * 注册失败归因（P5-AX）。codex-tool 的注册失败大多是接码侧问题，归成人话：
+ *   - 取不到号(NO_NUMBERS/没有可用号码/取号失败) 与 取到号收不到验证码('timeouts'/
+ *     验证码超时) —— 用户明确：两者都属"地区不可用"，换地区/稍后重试可能就好，
+ *     不是账号或节点的问题。
+ *   - 余额不足 —— 接码平台没钱了。
+ *   - 其它 —— 原样带出，至少标成注册失败。
+ */
+export function describeRegistrationFailure(error: string, attemptCount: number): string {
+  const e = (error || "").toLowerCase();
+  const suffix = attemptCount > 0 ? `（已尝试 ${attemptCount} 个地区/号码）` : "";
+  const regionMarkers = [
+    "timeout", // 'timeouts' 等待验证码超时
+    "no_numbers",
+    "no numbers",
+    "没有可用号码",
+    "取号失败",
+    "无可用",
+    "otp",
+    "验证码"
+  ];
+  if (regionMarkers.some((k) => e.includes(k))) {
+    return `地区不可用（取不到号或收不到验证码）${suffix}`;
+  }
+  if (e.includes("余额") || e.includes("balance") || e.includes("insufficient")) {
+    return `接码平台余额不足${suffix}`;
+  }
+  return `注册失败：${error}${suffix}`;
+}
+
+export function classifyCodexFailure(message: string): "account_unusable" | "network_or_proxy" | "oauth_failed" {
   const m = message.toLowerCase();
   if (m.includes("缺少目标") || m.includes("missing target url") || m.includes("account_unusable") || m.includes("没有 code")) {
     return "account_unusable";
   }
+  // P5-AX：地区不可用（取不到号/收不到验证码）也算可重试的瞬时类，不退役账号
+  const regionMarkers = ["地区不可用", "取不到号", "收不到验证码", "no_numbers", "没有可用号码"];
+  if (regionMarkers.some((k) => m.includes(k))) return "network_or_proxy";
   const networkMarkers = [
     "timed out", "timeout", "curl", "代理", "proxy", "connection", "connect",
     "tls", "ssl", "network", "网络", "sentinel", "环境校验", "econn", "socket"
