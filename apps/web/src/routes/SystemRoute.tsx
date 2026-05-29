@@ -94,7 +94,7 @@ export function SystemRoute(props: SystemRouteProps) {
   const sub2apiConnected = Boolean(props.sub2apiConnection?.configured);
 
   return (
-    <section className="workspace-grid system-grid">
+    <section className="workspace-grid system-workspace">
       <div className="system-stack">
         <Sub2ApiConnectionPanel
           connection={props.sub2apiConnection}

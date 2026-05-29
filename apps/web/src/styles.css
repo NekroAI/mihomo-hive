@@ -497,6 +497,31 @@ select {
   margin: 0 auto;
 }
 
+/* 系统页（P5-AK）—— 多个 Panel 纵向堆叠，整页可滚。
+   参考 .orchestration-spec-panel 的稳定模式：flex column + overflow auto + min-height: 0。
+   大屏限制最大宽度避免内容过宽（系统配置是低密度内容）。 */
+.system-workspace {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.system-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+/* 系统页内每个 panel 的 body 给点呼吸感（接管面板 / 维护工具 / 导出篮子 内容较密） */
+.system-stack > .panel,
+.system-stack > details {
+  flex-shrink: 0;
+}
+
 .automation-grid {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
