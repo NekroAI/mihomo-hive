@@ -622,6 +622,22 @@ function truncate(s: string, n: number): string {
 
 // ─── 默认 spawner（封装 child_process.spawn）───
 
+/**
+ * 构造 codex-tool 子进程的 env —— PATH + HOME + 非敏感运行时白名单。
+ * 绝不透传 Hive 的密钥类 env（HIVE_ACCOUNT_KEY 等），避免泄漏给子进程。
+ */
+function buildChildEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? ""
+  };
+  for (const key of ["PLAYWRIGHT_BROWSERS_PATH", "TZ", "LANG", "LC_ALL"]) {
+    const v = process.env[key];
+    if (v) env[key] = v;
+  }
+  return env;
+}
+
 function createDefaultSpawner(binPath: string): CodexToolSpawner {
   return async ({ args, stdinJson, timeoutMs }) => {
     return new Promise<CodexToolSpawnResult>((resolve, reject) => {
@@ -629,8 +645,13 @@ function createDefaultSpawner(binPath: string): CodexToolSpawner {
       try {
         child = defaultSpawn(binPath, args, {
           stdio: ["pipe", "pipe", "pipe"],
-          // 确保子进程隔离，没法 access Hive 的 env（避免泄漏 HIVE_ACCOUNT_KEY 等）
-          env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" }
+          // 子进程 env 隔离：默认不继承 Hive 全量 env（避免泄漏 HIVE_ACCOUNT_KEY 等密钥）。
+          // 但 codex-tool 自身运行时需要少量非敏感 env，用白名单透传：
+          //   PLAYWRIGHT_BROWSERS_PATH —— 指向挂载进容器的 chromium。不传的话 codex-tool 的
+          //     playwright 会找默认 $HOME/.cache/ms-playwright（容器内 /root/.cache，无浏览器）
+          //     → "Executable doesn't exist / playwright install"。
+          //   TZ / LANG / LC_ALL —— 时区与本地化，影响日志和部分解析，非敏感。
+          env: buildChildEnv()
         });
       } catch (cause) {
         if ((cause as NodeJS.ErrnoException).code === "ENOENT") {

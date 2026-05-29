@@ -1262,6 +1262,43 @@ select {
   overflow-x: auto;
 }
 
+/* 账号编排状态面板（P5-AN）——
+   它复用 .orchestration-status-panel 类，但子块有 5 个（KPI / 短信成本 / 账号矩阵 /
+   最近调和 / 最近 jobs），塞不进代理编排那套"3 格"宽屏网格，会被 jobs 的隐式行撑高、
+   连带挤压账号矩阵。这里覆盖为简单 flex 列：整面板可滚，账号矩阵拿大块高度内部滚动，
+   feed / 短信卡各自有上限内部滚动，互不撑高。 */
+.account-fleet-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+/* 覆盖 ≥1400px 时 orchestration 的 grid 布局 */
+@media (min-width: 1400px) {
+  .orchestration-status-panel.account-fleet-status-panel {
+    display: flex;
+    overflow: auto;
+    padding-right: 4px;
+  }
+  /* 撤销 grid 显式定位（grid-column/row 在 flex 下无意义，但清掉更干净） */
+  .account-fleet-status-panel > .status-pane-matrix,
+  .account-fleet-status-panel > .kpi-grid {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+/* 账号矩阵：占主要视野，内部滚动；不被下方 feed 挤压 */
+.account-fleet-status-panel .node-matrix-scroll {
+  max-height: 56vh;
+  overflow: auto;
+}
+/* 最近调和 / 最近 jobs feed：各自封顶内部滚动，避免无限撑高 */
+.account-fleet-status-panel .reconcile-feed {
+  max-height: 320px;
+  overflow: auto;
+}
+
 /* 账号编排页（沿用 orchestration-* 容器规则，仅小补丁）
    设计：notes/account-fleet-design.md §10 */
 .checkbox-stack {
@@ -2664,6 +2701,13 @@ select {
   color: var(--danger);
   padding: 9px 10px;
   font-size: 13px;
+  /* 错误文案可能含换行 / 制表框字符（如 codex-tool 的 Playwright 报错），
+     需保留换行并正常折行，否则行高塌缩导致上下行半重叠。超长再内滚。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow: auto;
 }
 
 @media (max-width: 1280px) {
