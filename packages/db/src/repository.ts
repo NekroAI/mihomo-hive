@@ -1172,58 +1172,57 @@ export class HiveRepository {
       .c;
   }
 
-  /**
-   * 取消某账号所有 queued job（P5-AV）。账号退役 / 判定不可用时调用，避免残留的
-   * 重复 codex_login 继续占用串行槽位死磕。返回取消条数。
-   */
-  cancelQueuedJobsForAccount(accountId: string, reason = "account retired"): number {
-    const now = new Date().toISOString();
-    return this.sqlite
-      .prepare(
-        "UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = ?, updated_at = ? WHERE account_id = ? AND status = 'queued'"
-      )
-      .run(now, reason, now, accountId).changes;
+  /** 删除单个 job（P6-14：执行前发现 stale 任务时直接删，不留 cancelled 墓碑）。 */
+  deleteAccountJob(id: string): boolean {
+    return this.sqlite.prepare("DELETE FROM account_jobs WHERE id = ?").run(id).changes > 0;
   }
 
   /**
-   * 一次性清理：取消所有"账号已退役"的 queued 恢复 job（P5-AV）。worker 启动时调用，
-   * 立刻清掉历史堆积的死账号重复任务，把槽位让出来。返回取消条数。
+   * 删除某账号所有 queued job（P5-AV/P6-14）。账号退役 / 判定不可用时调用，清掉残留的
+   * 重复 codex_login。P6-14：直接删除而非标 cancelled —— 这些是运维清理，不该留墓碑
+   * 污染"最近完成"/堆积 DB。返回删除条数。
    */
+  cancelQueuedJobsForAccount(accountId: string, _reason = ""): number {
+    return this.sqlite
+      .prepare("DELETE FROM account_jobs WHERE account_id = ? AND status = 'queued'")
+      .run(accountId).changes;
+  }
+
+  /** 一次性清理：删除所有"账号已退役"的 queued 恢复 job（P5-AV/P6-14）。worker 启动时调用。 */
   cancelQueuedJobsForRetiredAccounts(): number {
-    const now = new Date().toISOString();
     return this.sqlite
       .prepare(
-        `UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = '账号已退役，启动时清理', updated_at = ?
+        `DELETE FROM account_jobs
          WHERE status = 'queued'
            AND kind IN ('codex_login','codex_register')
            AND account_id IN (SELECT id FROM accounts WHERE intent = 'retired')`
       )
-      .run(now, now).changes;
+      .run().changes;
   }
 
   /**
-   * 取消所有 queued 的恢复类 job（P5-AW "重新编排"）。不动 running。返回取消条数。
-   * 之后由调用方触发一次新 tick 重新规划，避免旧队列里陈旧/重复的任务一直卡着。
+   * 删除所有 queued 的恢复类 job（P5-AW "重新编排"/P6-14）。不动 running。返回删除条数。
+   * 之后由调用方触发一次新 tick 重新规划。
    */
-  cancelAllQueuedRecoveryJobs(reason = "重新编排队列"): number {
-    const now = new Date().toISOString();
+  cancelAllQueuedRecoveryJobs(_reason = ""): number {
     return this.sqlite
-      .prepare(
-        "UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = ?, updated_at = ? WHERE status = 'queued' AND kind IN ('codex_login','codex_register')"
-      )
-      .run(now, reason, now).changes;
+      .prepare("DELETE FROM account_jobs WHERE status = 'queued' AND kind IN ('codex_login','codex_register')")
+      .run().changes;
+  }
+
+  /** 一次性清理：删除已是终态(cancelled)的运维墓碑记录（P6-14），清掉历史积压噪音。 */
+  deleteCancelledJobs(): number {
+    return this.sqlite.prepare("DELETE FROM account_jobs WHERE status = 'cancelled'").run().changes;
   }
 
   /**
-   * 去重历史堆积的 queued 恢复 job（P5-AV）：每个账号只保留最先会被认领的一条
-   * (priority↑, scheduled_at↑)，其余 queued 作废。清掉上线前积累的重复任务。
-   * 返回作废条数。
+   * 去重历史堆积的 queued 恢复 job（P5-AV/P6-14）：每个账号只保留最先会被认领的一条
+   * (priority↑, scheduled_at↑)，其余直接删除。返回删除条数。
    */
   dedupeQueuedRecoveryJobs(): number {
-    const now = new Date().toISOString();
     return this.sqlite
       .prepare(
-        `UPDATE account_jobs SET status='cancelled', finished_at=?, error_message='去重清理', updated_at=?
+        `DELETE FROM account_jobs
          WHERE status='queued' AND kind IN ('codex_login','codex_register') AND account_id IS NOT NULL
            AND id NOT IN (
              SELECT id FROM (
@@ -1233,7 +1232,7 @@ export class HiveRepository {
              ) WHERE rn = 1
            )`
       )
-      .run(now, now).changes;
+      .run().changes;
   }
 
   /** 当前有 queued 或 running job 的账号 id 集合（P5-AV：调度器据此去重，避免重复入队）。 */
@@ -1264,6 +1263,8 @@ export class HiveRepository {
    * 区别于 listAccountJobs（按 created_at，会被一堆刚入队的 queued 淹没，看不到执行结果）。
    */
   listRecentFinishedAccountJobs(limit = 30): AccountJob[] {
+    // P6-14：含 cancelled —— 不隐藏。运维清理已改为"直接删除"不再产生 cancelled 墓碑，
+    // 所以这里出现的 cancelled 必是真实取消，应当暴露而非掩盖（免得忽视真问题）。
     const rows = this.sqlite
       .prepare(
         "SELECT * FROM account_jobs WHERE status IN ('succeeded','failed','cancelled') AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?"

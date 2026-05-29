@@ -289,24 +289,34 @@ describe("HiveRepository account-fleet", () => {
       repo.updateAccountJob("j3", { status: "running" });
       expect(repo.accountIdsWithPendingJobs()).toEqual(new Set(["acc-x", "acc-y"]));
 
-      const cancelled = repo.cancelQueuedJobsForAccount("acc-x");
-      expect(cancelled).toBe(2);
-      expect(repo.getAccountJob("j1")?.status).toBe("cancelled");
+      const removed = repo.cancelQueuedJobsForAccount("acc-x");
+      expect(removed).toBe(2);
+      expect(repo.getAccountJob("j1")).toBeUndefined(); // P6-14 直接删除，不留墓碑
       // running 的不动；acc-y 仍有 running
       expect(repo.accountIdsWithPendingJobs()).toEqual(new Set(["acc-y"]));
     });
 
-    it("dedupeQueuedRecoveryJobs keeps one per account (P5-AV)", () => {
+    it("dedupeQueuedRecoveryJobs keeps one per account, deletes rest (P5-AV/P6-14)", () => {
       const t = (s: number) => new Date(2026, 0, 1, 0, 0, s).toISOString();
       repo.enqueueAccountJob(makeJob({ id: "d1", accountId: "acc-d", status: "queued", scheduledAt: t(1) }));
       repo.enqueueAccountJob(makeJob({ id: "d2", accountId: "acc-d", status: "queued", scheduledAt: t(2) }));
       repo.enqueueAccountJob(makeJob({ id: "d3", accountId: "acc-d", status: "queued", scheduledAt: t(3) }));
       repo.enqueueAccountJob(makeJob({ id: "e1", accountId: "acc-e", status: "queued", scheduledAt: t(1) }));
-      const cancelled = repo.dedupeQueuedRecoveryJobs();
-      expect(cancelled).toBe(2); // acc-d 保留 1 取消 2，acc-e 不动
+      const removed = repo.dedupeQueuedRecoveryJobs();
+      expect(removed).toBe(2);
       expect(repo.getAccountJob("d1")?.status).toBe("queued"); // 最早的留下
-      expect(repo.getAccountJob("d2")?.status).toBe("cancelled");
+      expect(repo.getAccountJob("d2")).toBeUndefined(); // 其余删除
       expect(repo.getAccountJob("e1")?.status).toBe("queued");
+    });
+
+    it("deleteCancelledJobs purges tombstones (P6-14)", () => {
+      repo.enqueueAccountJob(makeJob({ id: "c1", status: "queued" }));
+      repo.updateAccountJob("c1", { status: "cancelled", finishedAt: new Date().toISOString() });
+      repo.enqueueAccountJob(makeJob({ id: "ok1", status: "queued" }));
+      repo.updateAccountJob("ok1", { status: "succeeded", finishedAt: new Date().toISOString() });
+      expect(repo.deleteCancelledJobs()).toBe(1);
+      expect(repo.getAccountJob("c1")).toBeUndefined();
+      expect(repo.getAccountJob("ok1")?.status).toBe("succeeded");
     });
 
     it("listRunningAccountJobs + countQueuedAccountJobs", () => {

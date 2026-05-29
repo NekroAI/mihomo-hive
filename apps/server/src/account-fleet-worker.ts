@@ -100,11 +100,10 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
     if (job.accountId && (job.kind === "codex_login" || job.kind === "codex_register")) {
       const acc = repo.getAccountById(job.accountId);
       if (acc && acc.intent === "retired") {
-        repo.updateAccountJob(job.id, {
-          status: "cancelled",
-          finishedAt: new Date().toISOString(),
-          errorMessage: `账号已退役（${acc.lastRecoveryFailureCategory ?? "retired"}），跳过`
-        });
+        // P6-14：直接删除这条 stale 任务（不留 cancelled 墓碑污染列表）。打日志保留信号——
+        // 若它频繁触发，说明有"给已退役账号入队"的真问题需要排查（正常情况几乎不该发生）。
+        repo.deleteAccountJob(job.id);
+        console.log(`AccountJobsWorker: 删除已退役账号 ${job.accountId} 的 stale ${job.kind} 任务（执行前拦截）。`);
         return true;
       }
     }
@@ -208,6 +207,12 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
       const deduped = repo.dedupeQueuedRecoveryJobs();
       if (deduped > 0) {
         console.log(`AccountJobsWorker: de-duplicated ${deduped} redundant queued recovery job(s) on startup.`);
+      }
+      // P6-14：清掉历史 cancelled 墓碑（之前用 UPDATE→cancelled 留下的运维清理记录，
+      // 现已改为直接删除；这里把存量墓碑一次性清掉，让"最近完成"回归真实执行结果）。
+      const purgedTombstones = repo.deleteCancelledJobs();
+      if (purgedTombstones > 0) {
+        console.log(`AccountJobsWorker: purged ${purgedTombstones} legacy cancelled tombstone job(s) on startup.`);
       }
     } catch (err) {
       console.warn("AccountJobsWorker: failed to reset stale running jobs:", err);
