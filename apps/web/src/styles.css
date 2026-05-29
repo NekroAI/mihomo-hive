@@ -1262,42 +1262,65 @@ select {
   overflow-x: auto;
 }
 
-/* 账号编排状态面板（P5-AN）——
-   它复用 .orchestration-status-panel 类，但子块有 5 个（KPI / 短信成本 / 账号矩阵 /
-   最近调和 / 最近 jobs），塞不进代理编排那套"3 格"宽屏网格，会被 jobs 的隐式行撑高、
-   连带挤压账号矩阵。这里覆盖为简单 flex 列：整面板可滚，账号矩阵拿大块高度内部滚动，
-   feed / 短信卡各自有上限内部滚动，互不撑高。 */
+/* 账号编排状态面板（P5-AN 修订）——
+   结构：左账号矩阵 + 右信息列 .account-fleet-side（KPI / 短信成本 / 调和 / jobs）。
+   目标：保留代理编排那种"矩阵占满整列高度 + 右侧栏"的纵深双列观感（不要拍成超扁
+   大宽条），同时让高度真正解耦 —— jobs 再长也只在右列内部滚动，绝不撑高页面或挤压矩阵。
+
+   窄/中宽屏（<1400）：单列堆叠，整面板滚动（矩阵在上，信息列在下）。 */
 .account-fleet-status-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: auto;
+  padding-right: 4px;
 }
-/* 覆盖 ≥1400px 时 orchestration 的 grid 布局 */
+.account-fleet-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 宽屏（≥1400px）：双列，左矩阵满高内滚，右信息列整体内滚，互不撑高 */
 @media (min-width: 1400px) {
   .orchestration-status-panel.account-fleet-status-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+    overflow: hidden;
+    padding-right: 0;
+  }
+  .account-fleet-status-panel > .status-pane-matrix {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 0;
     display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .account-fleet-status-panel > .status-pane-matrix > .panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  .account-fleet-side {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 0;
     overflow: auto;
     padding-right: 4px;
   }
-  /* 撤销 grid 显式定位（grid-column/row 在 flex 下无意义，但清掉更干净） */
-  .account-fleet-status-panel > .status-pane-matrix,
-  .account-fleet-status-panel > .kpi-grid {
-    grid-column: auto;
-    grid-row: auto;
-  }
 }
-/* 账号矩阵：占主要视野，内部滚动；不被下方 feed 挤压 */
+
+/* 账号矩阵表格横向滚动（保持）；宽屏下竖向由 panel-body flex 接管 */
 .account-fleet-status-panel .node-matrix-scroll {
-  max-height: 56vh;
   overflow: auto;
 }
-/* 最近调和 / 最近 jobs feed：各自封顶内部滚动，避免无限撑高 */
-.account-fleet-status-panel .reconcile-feed {
-  max-height: 320px;
-  overflow: auto;
-}
+/* feed 不单独内滚：右信息列 .account-fleet-side 整体 overflow:auto 已承载所有溢出，
+   单一滚动上下文，避免"列滚动 + feed 内滚"的嵌套滚动陷阱。 */
 
 /* 账号编排页（沿用 orchestration-* 容器规则，仅小补丁）
    设计：notes/account-fleet-design.md §10 */

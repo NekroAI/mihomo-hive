@@ -63,11 +63,16 @@ export function AccountFleetStatusPanel(props: {
 
   return (
     <div className="orchestration-status-panel account-fleet-status-panel">
-      <KpiCards snapshot={snap} />
-      <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
+      {/* 左：账号矩阵（主视野，宽屏占满整列高度，内部滚动）
+          右：KPI / 短信成本 / 调和 / jobs 堆成独立滚动列 —— 高度与矩阵解耦，
+          jobs 再长也只在右列内滚，不会撑高、也不挤压矩阵。 */}
       <AccountMatrix accounts={snap.accounts} />
-      <RecentTicksCard ticks={snap.recentTicks} />
-      <RecentJobsCard jobs={snap.recentJobs} />
+      <div className="account-fleet-side">
+        <KpiCards snapshot={snap} />
+        <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
+        <RecentTicksCard ticks={snap.recentTicks} />
+        <RecentJobsCard jobs={snap.recentJobs} />
+      </div>
     </div>
   );
 }
