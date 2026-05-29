@@ -11,6 +11,7 @@ import {
   XCircle
 } from "lucide-react";
 import type {
+  AccountFleetTick,
   AccountFleetStatusSnapshot,
   AccountFleetTickSummary,
   AccountHealth,
@@ -20,6 +21,7 @@ import type {
   AccountRecordView
 } from "@mihomo-hive/schemas";
 import { Badge, EmptyState, InfoTip, Panel } from "../../components/ui.js";
+import { trpc } from "../../lib/trpc.js";
 
 /**
  * 账号编排状态右栏 —— 跟 OrchestrationStatusPanel 同形：
@@ -449,21 +451,108 @@ function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
 
 function TickRow(props: { tick: AccountFleetTickSummary }) {
   const tick = props.tick;
+  const [open, setOpen] = React.useState(false);
+  // 有计划/入队动作或报错才值得展开；否则保持纯展示行（不给可点的假象）。
+  const expandable = tick.plannedTotal > 0 || tick.appliedTotal > 0 || Boolean(tick.errorMessage);
+  // 展开时才按 id 拉完整 tick（含 plannedActions / appliedActions 明细）
+  const detail = trpc.accountFleet.tick.get.useQuery(
+    { id: tick.id },
+    { enabled: open && expandable, staleTime: 60_000 }
+  );
+
+  const head = (
+    <>
+      {expandable ? open ? <ChevronDown size={14} /> : <ChevronRight size={14} /> : <span style={{ width: 14 }} />}
+      <SkippedIcon skipped={tick.skippedReason} />
+      <span className="font-mono muted small">{new Date(tick.startedAt).toLocaleTimeString()}</span>
+      <span>{summarizeTick(tick)}</span>
+      <SkippedBadge skipped={tick.skippedReason} />
+    </>
+  );
+
   return (
     <article className={`reconcile-row reconcile-${tick.skippedReason}`}>
-      <div className="reconcile-row-head">
-        <SkippedIcon skipped={tick.skippedReason} />
-        <span className="font-mono muted small">{new Date(tick.startedAt).toLocaleTimeString()}</span>
-        <span>{summarizeTick(tick)}</span>
-        <SkippedBadge skipped={tick.skippedReason} />
-      </div>
-      {tick.errorMessage ? (
+      {expandable ? (
+        <button type="button" className="reconcile-row-head" onClick={() => setOpen((o) => !o)}>
+          {head}
+        </button>
+      ) : (
+        <div className="reconcile-row-head">{head}</div>
+      )}
+      {open && expandable ? (
         <div className="reconcile-row-body">
-          <div className="form-error">{tick.errorMessage}</div>
+          {tick.errorMessage ? <div className="form-error">{tick.errorMessage}</div> : null}
+          {detail.isLoading ? <span className="muted small">加载明细…</span> : null}
+          {detail.data ? <TickDetail tick={detail.data} /> : null}
+          {detail.isError ? <span className="muted small">明细加载失败</span> : null}
         </div>
       ) : null}
     </article>
   );
+}
+
+/** tick 展开明细：本轮计划/已入队的账号动作（kind + email + 原因）。 */
+function TickDetail(props: { tick: AccountFleetTick }) {
+  const { tick } = props;
+  // 已入队动作优先展示（真正执行的）；其余落在"已计划未入队"。用 accountId+kind 去重交集。
+  const appliedKeys = new Set(tick.appliedActions.map((a) => `${a.kind}:${a.accountId ?? a.externalId ?? a.email}`));
+  const plannedOnly = tick.plannedActions.filter(
+    (a) => !appliedKeys.has(`${a.kind}:${a.accountId ?? a.externalId ?? a.email}`)
+  );
+  if (tick.appliedActions.length === 0 && plannedOnly.length === 0) {
+    return <span className="muted small">本轮无账号动作（仅观察）。</span>;
+  }
+  return (
+    <div className="tick-detail">
+      {tick.appliedActions.length > 0 ? (
+        <ActionGroup title={`已入队 (${tick.appliedActions.length})`} actions={tick.appliedActions} tone="success" />
+      ) : null}
+      {plannedOnly.length > 0 ? (
+        <ActionGroup title={`已计划未入队 (${plannedOnly.length})`} actions={plannedOnly} tone="neutral" />
+      ) : null}
+    </div>
+  );
+}
+
+function ActionGroup(props: {
+  title: string;
+  actions: AccountFleetTick["plannedActions"];
+  tone: "success" | "neutral";
+}) {
+  return (
+    <div className="tick-action-group">
+      <div className="muted small">
+        <Badge tone={props.tone}>{props.title}</Badge>
+      </div>
+      <ul className="reconcile-change-list">
+        {props.actions.slice(0, 50).map((a, i) => (
+          <li key={i} className="tick-action-item">
+            <span className="font-mono">{tickActionLabel(a.kind)}</span>
+            <span className="muted">{a.email ?? (a.externalId ? `#${a.externalId}` : a.accountId?.slice(0, 8) ?? "—")}</span>
+            <span className="muted small">{a.reason}</span>
+          </li>
+        ))}
+        {props.actions.length > 50 ? (
+          <li className="muted small">…另有 {props.actions.length - 50} 条</li>
+        ) : null}
+      </ul>
+    </div>
+  );
+}
+
+function tickActionLabel(kind: AccountFleetTick["plannedActions"][number]["kind"]): string {
+  const map: Record<string, string> = {
+    demote_to_observing: "降级观察",
+    recover_via_login: "登录修复",
+    recover_via_register: "重注册修复",
+    register_new: "新建注册",
+    retire: "退役",
+    delete_external: "删 Sub2API",
+    toggle_schedulable: "切调度位",
+    observe_usage: "查配额",
+    defer: "延后重试"
+  };
+  return map[kind] ?? kind;
 }
 
 function RecentJobsCard(props: { jobs: AccountJob[] }) {
@@ -576,12 +665,17 @@ function splitOrigin(origin: AccountOrigin): {
           "在 Sub2API 远端列表里发现的存量账号，带 refresh_token 等凭据可自动刷新。Hive 不会去碰它的密码，仅做健康观察 + 配额采样。"
       };
     case "adopted_recovered":
+      // 注意：此 origin 表示"远端发现 + 本地已持有手机号/密码凭据"，可能来自两种途径：
+      //   ① codex_login 登录成功后回写；② 接管时从 codex-tool 导出补全凭据（尚未登录）。
+      // 所以这里**不能**断言"已恢复可用" —— 账号当前是否可用以「健康」列为准
+      // （revoked 的账号补了凭据后仍是掉线，等 codex_login 真正登录成功才转健康）。
       return {
         typeLabel: "远端发现",
         typeTone: "info",
-        subLabel: "已恢复",
-        subTone: "success",
-        tooltip: "来源是远端发现，但凭据掉了后由 Hive 触发 codex-tool 重新登录/注册成功，现已恢复可用。"
+        subLabel: "凭据齐",
+        subTone: "info",
+        tooltip:
+          "Sub2API 发现的账号，本地已补全手机号 + 密码凭据，可由 Hive 自动登录维护。当前是否可用以「健康」列为准：掉线状态会在下次调和尝试 codex_login 修复。"
       };
     case "adopted_observing":
       return {

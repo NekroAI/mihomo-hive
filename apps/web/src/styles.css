@@ -1321,10 +1321,20 @@ select {
     flex-direction: column;
     overflow: hidden;
   }
+  /* panel-body 不再自己滚动：改为 flex 容器，让 node-matrix-scroll 成为唯一滚动层，
+     消除"panel-body + node-matrix-scroll"双层嵌套滚动。 */
   .account-fleet-main > .status-pane-matrix > .panel-body {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+  }
+  .account-fleet-main > .status-pane-matrix .node-matrix-scroll {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
   }
   .account-fleet-side {
     grid-column: 2;
@@ -1334,9 +1344,11 @@ select {
   }
 }
 
-/* 账号矩阵表格横向滚动（保持）；宽屏下竖向由 panel-body flex 接管 */
+/* 账号矩阵：node-matrix-scroll 是唯一滚动容器（双轴），thead 才能 sticky 生效。
+   窄屏给个高度上限避免整表把页面撑得太长；宽屏由上面 flex:1 撑满。 */
 .account-fleet-status-panel .node-matrix-scroll {
   overflow: auto;
+  max-height: 60vh;
 }
 /* feed 不单独内滚：右信息列整体 overflow:auto 承载溢出，单一滚动上下文。 */
 
@@ -1499,6 +1511,29 @@ select {
   gap: 3px;
   font-size: 12px;
   font-family: var(--font-mono, monospace);
+}
+
+/* tick 展开明细：已入队 / 已计划未入队 两组动作 */
+.tick-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tick-action-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tick-action-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+}
+/* reason 跨整行，灰色小字 */
+.tick-action-item > .small {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
 }
 
 /* 节点矩阵 deprecated row 样式 — 兼容旧 className 但实际表格已经接管 */
