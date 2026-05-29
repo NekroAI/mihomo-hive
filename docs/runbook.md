@@ -76,23 +76,81 @@ Web UI 顶部 4 个 tab：节点池 / 代理编排 / 账号编排 / 导出。
 
 #### 0. 部署形态选择
 
-codex-tool 是私有闭源 + Playwright/Chromium 重依赖（镜像 1.5 GB+），不能内嵌主镜像。三种接入：
+codex-tool 是私有闭源 + Playwright/Chromium 重依赖（镜像 1.5 GB+），不能内嵌主镜像。四种接入：
 
 | 方式 | 适用 | 改动 |
 |---|---|---|
-| **A. 私有衍生镜像（推荐）** | 多机部署 / 标准化运维 | 用 `examples/Dockerfile.codex-tool.example` 构建 → `docker-compose.override.yml` 换 image tag |
-| **B. 宿主机直跑 mihomo-hive** | 单机 / 本地开发 | `node apps/server/dist/index.js`，codex-tool 跟 Hive 在同一台机器上的 `PATH` 里 |
-| **C. 暂不接入** | 仅用代理编排 / 只看面板 | 设 `HIVE_DISABLE_ACCOUNT_FLEET=true`，或保持默认 `HIVE_ACCOUNT_FLEET_MODE=dry_run`（spec 编辑可用，jobs 不入队）|
+| **A. 私有衍生镜像** | 多机部署 / 多环境镜像统一 | `examples/Dockerfile.codex-tool.example` 构建私有 image，compose 切 tag |
+| **B. 宿主机直跑 mihomo-hive** | 单机 / 开发 | `node apps/server/dist/index.js`，codex-tool 跟 Hive 同主机 `PATH` 共享 |
+| **C. 暂不接入** | 仅用代理编排 / 只看面板 | 设 `HIVE_DISABLE_ACCOUNT_FLEET=true`，或保持 spec.enabled=false（spec 编辑可用，jobs 不入队） |
+| **D. 宿主机装 + 挂载进容器（推荐）** | 单机生产 / 想 Docker 隔离 mihomo-hive 同时复用主机 codex-tool 升级流 | 见下 |
 
-复制 `examples/docker-compose.override.example.yml → docker-compose.override.yml` 是路径 A 的起点。
+#### 0a. 路径 D：宿主机装 + 挂载（实操，对应 nexus-star 当前部署）
+
+**首次部署**：
+
+```bash
+# 主机装 uv + standalone Python 3.11
+uv python install 3.11
+
+# 拉 codex-tool 源码（私有 repo，先 gh auth login 或 git credential 配好）
+gh auth setup-git
+git clone https://github.com/NekroAI/codex-create.git ~/Projects/codex-create
+
+# editable 安装 codex-tool（自动建独立 venv，pip 拉所有 deps）
+# --with click：codex-tool 有 typer hard-import click 但没声明，必须显式补
+cd ~/Projects/codex-create
+uv tool install -e . --python 3.11 --with click
+
+# Playwright Chromium（codex-tool Sentinel 验证码绕过用）
+uvx --from playwright playwright install chromium
+
+# 验证
+~/.local/bin/codex-tool --help    # 应输出中文帮助
+```
+
+`docker-compose.yml` 加挂载 + PATH（**容器内路径必须与主机一致**，因为 codex-tool 启动脚本的 shebang 是绝对路径 `/home/miose/.local/share/uv/tools/codex-tool/bin/python`）：
+
+```yaml
+services:
+  mihomo-hive:
+    environment:
+      PATH: "/home/miose/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      PLAYWRIGHT_BROWSERS_PATH: "/home/miose/.cache/ms-playwright"
+    volumes:
+      - ./runtime:/data
+      - /home/miose/.local/bin:/home/miose/.local/bin:ro             # codex-tool 启动脚本
+      - /home/miose/.local/share/uv:/home/miose/.local/share/uv:ro   # standalone Python + venv
+      - /home/miose/Projects/codex-create:/home/miose/Projects/codex-create:ro  # editable 源码
+      - /home/miose/.cache/ms-playwright:/home/miose/.cache/ms-playwright:ro    # Chromium
+```
+
+**chromium 系统依赖**（libnss3、libatk 等）目前**未装到容器内**：
+- `sms countries` / `login` 命令不需要 chromium → 不受影响
+- `all` 注册流程在触发 Sentinel 验证码时才需要 → 真触发时容器内 `apt install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-liberation` 一次（重建容器会丢，长期方案是做最小衍生镜像只装 chromium runtime deps）
+
+**升级 codex-tool**：
+
+```bash
+ssh nexus-star
+cd ~/Projects/codex-create && git pull
+uv tool install -e . --python 3.11 --force --with click
+# 容器内 codex-tool 立即指向新版本，不需要 docker restart
+```
+
+**升级 chromium**：`uvx --from playwright playwright install chromium`
+
+**Hive 端 spec.codexTool.binPath 设为绝对路径**：`/home/miose/.local/bin/codex-tool`（不要靠 PATH，避免某天 PATH 漂移）。
 
 #### 1. 设置 env
 
    ```bash
    HIVE_ACCOUNT_KEY=$(openssl rand -base64 32)   # AES-256-GCM 主密钥
-   HIVE_ACCOUNT_FLEET_MODE=apply                  # 默认 dry_run；切到 apply 才真入队 jobs
-   CODEX_TOOL_BIN=/opt/private/bin/codex-tool     # 私有二进制路径
    ```
+
+   > 历史 env `HIVE_ACCOUNT_FLEET_MODE` / `CODEX_TOOL_BIN` 已弃用：
+   > - 启停由 `spec.enabled` 控制（UI "自动维护" 按钮）
+   > - codex-tool 路径由 `spec.codexTool.binPath` 控制
 2. 切到**账号编排** tab → "⑥ codex-tool 连接" 卡填：
    - codex-tool 路径（如果没用 env）
    - SkyMail base_url / admin_email / admin_password
