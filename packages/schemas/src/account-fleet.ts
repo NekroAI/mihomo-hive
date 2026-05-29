@@ -563,6 +563,15 @@ export const accountFleetStatusSnapshotSchema = z.object({
   queuedJobCount: z.number().int().nonnegative().default(0),
   /** 最近"执行完"的 job（P5-AT：按 finished_at 倒序，看执行结果，不被 queued 淹没）。 */
   recentFinishedJobs: z.array(accountJobSchema).default([]),
+  /** P6-05: 最近失败原因聚合（按归类计数，降序），让用户不必逐条考古。 */
+  recentFailureReasons: z
+    .array(
+      z.object({
+        key: z.enum(["region", "proxy", "account_dead", "oauth", "retired", "other"]),
+        count: z.number().int().nonnegative()
+      })
+    )
+    .default([]),
   kpis: z.object({
     totalAccounts: z.number().int().nonnegative(),
     healthyCount: z.number().int().nonnegative(),

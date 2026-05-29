@@ -25,7 +25,7 @@ import { trpc } from "../../lib/trpc.js";
 
 /**
  * 账号编排状态右栏 —— 跟 OrchestrationStatusPanel 同形：
- *   KPI 4 卡 → 账号矩阵 → 最近调和 feed → 最近 jobs feed
+ *   KPI 4 卡 → 账号矩阵 → 最近巡检 feed → 最近 jobs feed
  *
  * 所有操作按钮在左栏；右栏纯展示 + 单条 tick / job 展开详情。
  */
@@ -79,6 +79,7 @@ export function AccountFleetStatusPanel(props: {
             accounts={snap.accounts}
             unitCostUsd={snap.spec.registration.maxCostPerAccountUsd}
           />
+          <FailureReasonsCard reasons={snap.recentFailureReasons} />
           <RecentFinishedJobsCard jobs={snap.recentFinishedJobs} accounts={snap.accounts} />
           <RecentTicksCard ticks={snap.recentTicks} />
         </div>
@@ -549,8 +550,8 @@ function mergeIdleRuns(ticks: AccountFleetTickSummary[]): FleetFeedItem[] {
 function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
   if (props.ticks.length === 0) {
     return (
-      <Panel title="最近调和">
-        <EmptyState title="尚未跑过调和" description="服务启动后会按 reconcileIntervalMs（默认 5 分钟）触发首次。" />
+      <Panel title="最近巡检">
+        <EmptyState title="尚未跑过巡检" description="服务启动后会按 reconcileIntervalMs（默认 5 分钟）触发首次。" />
       </Panel>
     );
   }
@@ -560,7 +561,7 @@ function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
   ).length;
   return (
     <Panel
-      title={`最近调和 (${meaningful} 有变化 / 共 ${props.ticks.length})`}
+      title={`最近巡检 (${meaningful} 有变化 / 共 ${props.ticks.length})`}
       className="status-pane-feed"
     >
       <div className="reconcile-feed">
@@ -805,7 +806,7 @@ function RunningJobsCard(props: {
           description={
             props.queuedCount > 0
               ? `有 ${props.queuedCount} 个任务排队中，worker 受并发上限串行消费，稍候会逐个进入运行。`
-              : "队列为空。掉线账号会在下个调和 tick 入队恢复任务。"
+              : "队列为空。掉线账号会在下个巡检 tick 入队恢复任务。"
           }
         />
       </Panel>
@@ -889,6 +890,52 @@ function JobLogView(props: { jobId: string; live?: boolean }) {
  * P5-AT「最近完成」卡片 —— 按 finished_at 倒序展示执行完的 job（区别于按入队时间
  * 排序、被一堆 queued 淹没的旧"最近 jobs"）。展开看持久化日志 + 错误信息。
  */
+const FAILURE_REASON_META: Record<
+  AccountFleetStatusSnapshot["recentFailureReasons"][number]["key"],
+  { label: string; hint: string; tone: "danger" | "warning" | "neutral" }
+> = {
+  region: { label: "地区不可用", tone: "warning", hint: "接码地区取不到号/收不到码。地区经验会逐步累积避开坏区，或检查接码平台余额。" },
+  proxy: { label: "代理 / 网络", tone: "warning", hint: "出口代理过不了 Cloudflare/超时。考虑导入并标记高质量「保留节点」专供注册登录。" },
+  account_dead: { label: "账号已死", tone: "danger", hint: "OAuth 授权链终态缺失，账号无法救活，已自动退役、不再消耗重试。" },
+  retired: { label: "已退役跳过", tone: "neutral", hint: "死账号的残留任务被执行前拦下跳过，属正常清理，不消耗资源。" },
+  oauth: { label: "OAuth 失败", tone: "warning", hint: "授权环节失败，按退避自动重试，达上限退役。" },
+  other: { label: "其它", tone: "neutral", hint: "未归类的失败，可展开「最近完成」看具体日志。" }
+};
+
+/**
+ * P6-05 失败原因聚合卡 —— 最近失败按归类计数，让用户一眼看出"主要卡在哪"+ 下一步，
+ * 不必逐条展开日志考古。
+ */
+function FailureReasonsCard(props: { reasons: AccountFleetStatusSnapshot["recentFailureReasons"] }) {
+  const reasons = props.reasons.filter((r) => r.count > 0);
+  if (reasons.length === 0) {
+    return (
+      <Panel title="失败原因">
+        <EmptyState title="近期无失败" description="最近的任务都成功或还没失败记录。" />
+      </Panel>
+    );
+  }
+  const total = reasons.reduce((s, r) => s + r.count, 0);
+  return (
+    <Panel title={`失败原因（近 ${total}）`}>
+      <ul className="failure-reason-list">
+        {reasons.map((r) => {
+          const meta = FAILURE_REASON_META[r.key];
+          return (
+            <li key={r.key} className="failure-reason-item">
+              <div className="failure-reason-head">
+                <Badge tone={meta.tone}>{meta.label}</Badge>
+                <strong className="failure-reason-count">{r.count}</strong>
+              </div>
+              <div className="muted small">{meta.hint}</div>
+            </li>
+          );
+        })}
+      </ul>
+    </Panel>
+  );
+}
+
 function RecentFinishedJobsCard(props: { jobs: AccountJob[]; accounts: AccountRecordView[] }) {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const emailById = React.useMemo(() => {
@@ -1019,7 +1066,7 @@ function splitOrigin(origin: AccountOrigin): {
         subLabel: "凭据齐",
         subTone: "info",
         tooltip:
-          "Sub2API 发现的账号，本地已补全手机号 + 密码凭据，可由 Hive 自动登录维护。当前是否可用以「健康」列为准：掉线状态会在下次调和尝试 codex_login 修复。"
+          "Sub2API 发现的账号，本地已补全手机号 + 密码凭据，可由 Hive 自动登录维护。当前是否可用以「健康」列为准：掉线状态会在下次巡检尝试 codex_login 修复。"
       };
     case "adopted_observing":
       return {
@@ -1286,7 +1333,7 @@ function formatSkipReason(reason: AccountFleetTickSummary["skippedReason"]): str
 }
 
 function summarizeTick(tick: AccountFleetTickSummary): string {
-  if (tick.skippedReason === "error") return tick.errorMessage ?? "调和异常";
+  if (tick.skippedReason === "error") return tick.errorMessage ?? "巡检异常";
   if (tick.skippedReason === "no_change") return "状态符合预期，无需变更";
   if (tick.skippedReason === "paused") {
     return `自动维护已暂停（计划 ${tick.plannedTotal} 项）`;

@@ -20,8 +20,8 @@ export type CodexToolTestResult =
  * 账号编排 Spec 编辑左栏。
  *
  * 跟 OrchestrationSpecPanel 同形：
- *   - 顶部 Panel "自动维护"：暂停/恢复 + 立即调和
- *   - codex-tool 连接 / 出生策略 / 修复策略 / 健康判定 / 退役策略 / 出口代理：CollapsiblePanel
+ *   - 顶部 Panel "自动维护"：暂停/恢复 + 立即巡检
+ *   - codex-tool 连接 / 注册新账号 / 修复策略 / 健康判定 / 退役策略 / 出口代理：CollapsiblePanel
  *   - 底部 spec-save-bar：保存 / 放弃 改动
  *
  * 所有编辑暂存 local draft；点保存才写回服务端。
@@ -30,7 +30,7 @@ export function AccountFleetSpecPanel(props: {
   spec: AccountFleetSpec;
   saving: boolean;
   triggering: boolean;
-  /** 决定"立即调和"是否可点（无 codex-tool / Sub2API 连接时禁用并提示）。 */
+  /** 决定"立即巡检"是否可点（无 codex-tool / Sub2API 连接时禁用并提示）。 */
   canTrigger?: boolean;
   onSaveSpec: (next: AccountFleetSpec) => void;
   onTriggerNow: () => void;
@@ -271,7 +271,7 @@ export function AccountFleetSpecPanel(props: {
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="出生策略（接码收费）"
+        title="注册新账号（接码收费）"
         storageKey="account-fleet-registration"
         defaultOpen
         hint="唯一收费路径。三级预算 perTick / daily / monthly 任一耗尽即停。紧急补给 = healthy/target < minHealthyRatio 时自动提升 perTickCap。"
@@ -386,9 +386,9 @@ export function AccountFleetSpecPanel(props: {
       </CollapsiblePanel>
 
       <CollapsiblePanel
-        title="灰度阀"
+        title="放量限制"
         storageKey="account-fleet-grace"
-        hint="单次调和最多影响 min(账号总数×百分比, 绝对值) 个变更。策略 bug 时防止一次性炸全集群。"
+        hint="单次巡检最多影响 min(账号总数×百分比, 绝对值) 个变更。策略 bug 时防止一次性炸全集群。"
       >
         <div className="form-grid">
           <NumberInput
@@ -405,7 +405,7 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patch("graceBatchAbs", v)}
           />
           <NumberInput
-            label="调和周期（分钟）"
+            label="巡检周期（分钟）"
             value={Math.round(draft.reconcileIntervalMs / 60_000)}
             min={1}
             onChange={(v) => patch("reconcileIntervalMs", v * 60_000)}
@@ -423,7 +423,7 @@ export function AccountFleetSpecPanel(props: {
             setDirty(false);
           }}
         >
-          {dirty ? "保存策略并立即调和" : "策略已是最新"}
+          {dirty ? "保存策略并立即巡检" : "策略已是最新"}
         </Button>
         {dirty ? (
           <Button

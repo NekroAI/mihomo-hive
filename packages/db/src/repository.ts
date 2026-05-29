@@ -1272,6 +1272,16 @@ export class HiveRepository {
     return rows.map(accountJobFromRow);
   }
 
+  /** 最近失败 job 的错误消息（P6-05：用于聚合失败原因，窗口内取样）。 */
+  listRecentFailureMessages(limit = 150): string[] {
+    const rows = this.sqlite
+      .prepare(
+        "SELECT error_message FROM account_jobs WHERE status = 'failed' AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?"
+      )
+      .all(limit) as Array<{ error_message: string | null }>;
+    return rows.map((r) => r.error_message ?? "");
+  }
+
   /**
    * worker 启动时调用：把上一进程残留的 running job 重置回 queued。
    *

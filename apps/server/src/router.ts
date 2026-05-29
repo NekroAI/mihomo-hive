@@ -1354,6 +1354,7 @@ export const appRouter = t.router({
       const runningJobs = ctx.repo.listRunningAccountJobs();
       const queuedJobCount = ctx.repo.countQueuedAccountJobs();
       const recentFinishedJobs = ctx.repo.listRecentFinishedAccountJobs(30);
+      const recentFailureReasons = aggregateFailureReasons(ctx.repo.listRecentFailureMessages(150));
       const lastTickSummary = recentTicks[0];
       const lastTick = lastTickSummary ? ctx.repo.getAccountFleetTick(lastTickSummary.id) : undefined;
 
@@ -1443,6 +1444,7 @@ export const appRouter = t.router({
         runningJobs,
         queuedJobCount,
         recentFinishedJobs,
+        recentFailureReasons,
         kpis: {
           totalAccounts: accountViews.length,
           healthyCount,
@@ -1825,6 +1827,41 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     createdAt: a.createdAt,
     updatedAt: a.updatedAt
   };
+}
+
+/**
+ * P6-05 失败原因聚合：把最近失败 job 的(已归因)错误消息归类计数，降序返回。
+ * 让用户一眼看到"主要卡在哪"，不必逐条展开日志。
+ */
+function aggregateFailureReasons(
+  messages: string[]
+): Array<{ key: "region" | "proxy" | "account_dead" | "oauth" | "retired" | "other"; count: number }> {
+  const counts: Record<string, number> = {};
+  for (const raw of messages) {
+    const m = raw.toLowerCase();
+    let key: string;
+    if (m.includes("地区不可用") || m.includes("no_numbers") || m.includes("没有可用号码") || m.includes("接码")) {
+      key = "region";
+    } else if (
+      m.includes("代理") || m.includes("proxy") || m.includes("tls") || m.includes("curl") ||
+      m.includes("timed out") || m.includes("timeout") || m.includes("connection") || m.includes("sentinel") ||
+      m.includes("network") || m.includes("网络")
+    ) {
+      key = "proxy";
+    } else if (m.includes("缺少目标") || m.includes("account_unusable") || m.includes("不可用")) {
+      key = "account_dead";
+    } else if (m.includes("已退役") || m.includes("retired") || m.includes("跳过")) {
+      key = "retired";
+    } else if (m.includes("oauth")) {
+      key = "oauth";
+    } else {
+      key = "other";
+    }
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([key, count]) => ({ key: key as "region" | "proxy" | "account_dead" | "oauth" | "retired" | "other", count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 function budgetWindowKeyUtc(at: Date, kind: "day" | "month"): string {
