@@ -65,6 +65,30 @@ describe("buildCodexToolConfigJson", () => {
     expect((json.phone_sms as Record<string, unknown>).country).toBeUndefined();
   });
 
+  // P5-AI: external-integration.md §"成本上限和选区策略" region_hint 透明回灌
+  it("regionHint 设置时透明嵌入 phone_sms.region_hint（Hive 不解析字段）", () => {
+    const out = buildCodexToolConfigJson({
+      ...baseConfig,
+      phoneSms: {
+        ...baseConfig.phoneSms,
+        regionHint: { country: "12", operator: "any", last_success_at: "2026-05-29T10:20:00Z", ttl_seconds: 1800 }
+      }
+    });
+    const phoneSms = (out as Record<string, Record<string, unknown>>).phone_sms;
+    expect(phoneSms.region_hint).toEqual({
+      country: "12",
+      operator: "any",
+      last_success_at: "2026-05-29T10:20:00Z",
+      ttl_seconds: 1800
+    });
+  });
+
+  it("regionHint 缺省时 phone_sms.region_hint 不出现", () => {
+    const out = buildCodexToolConfigJson(baseConfig);
+    const phoneSms = (out as Record<string, Record<string, unknown>>).phone_sms;
+    expect(phoneSms).not.toHaveProperty("region_hint");
+  });
+
   it("uses snake_case field names matching codex-tool config schema", () => {
     const json = buildCodexToolConfigJson(baseConfig);
     expect(json.skymail).toEqual({
@@ -199,7 +223,9 @@ describe("CodexToolAdapter", () => {
         signal: null
       });
       const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
-      const r = await adapter.login({ phone: "+1234567890", password: "p4ss" });
+      const outcome = await adapter.login({ phone: "+1234567890", password: "p4ss" });
+      if (outcome.kind !== "ok") throw new Error(`expected ok, got ${outcome.kind}`);
+      const r = outcome.result;
       expect(r.phone).toBe("+1234567890");
       expect(r.email).toBe("alice@example.com");
       expect(r.tokens.refreshToken).toBe("ref-tok");
@@ -213,6 +239,36 @@ describe("CodexToolAdapter", () => {
       expect(args).toContain("--phone");
       expect(args[args.indexOf("--phone") + 1]).toBe("+1234567890");
       expect(args[args.indexOf("--password") + 1]).toBe("p4ss");
+    });
+
+    // P5-AI: login 失败时（envelope.ok=false, exit=0）返回 failed kind 带分类
+    it("login envelope ok=false 时返回 kind=failed 带 failureCategory", async () => {
+      const { spawner } = makeRecordingSpawner({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: false,
+          command: "login",
+          run_id: null,
+          data: {
+            failure_category: "network_or_proxy",
+            retryable: true,
+            recommended_action: "retry_later_same_account",
+            reason: "代理超时"
+          },
+          error: "代理超时",
+          warnings: [],
+          paths: {}
+        }),
+        stderr: "",
+        timedOut: false,
+        signal: null
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      const outcome = await adapter.login({ phone: "+1", password: "p" });
+      if (outcome.kind !== "failed") throw new Error("expected failed");
+      expect(outcome.classification.failureCategory).toBe("network_or_proxy");
+      expect(outcome.classification.retryable).toBe(true);
+      expect(outcome.error).toBe("代理超时");
     });
 
     it("maps exit code 4 to verification error", async () => {
@@ -383,6 +439,128 @@ describe("CodexToolAdapter", () => {
       expect(r.recoverable.phone).toBe("+888");
       expect(r.recoverable.password).toBe("p4ss");
       expect(r.recoverable.error).toBe("OAuth timeout");
+    });
+
+    // P5-AI: external-integration.md §"成本上限和选区策略" 新增 sms_* 字段
+    it("token_ready 提取 sms_country / sms_cost_usd / sms_region_result / sms_region_attempts", async () => {
+      const { spawner } = makeRecordingSpawner({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          command: "all",
+          run_id: null,
+          data: {
+            accounts: [
+              {
+                phone: "+999",
+                password: "p4ss",
+                email: "bob@e.com",
+                batch_id: "all-260528-abcd",
+                status: "token_ready",
+                sms_country: "12",
+                sms_cost_usd: 0.044,
+                sms_region_result: { country: "12", operator: "any", price: 0.044, status: "registered" },
+                sms_region_attempts: [
+                  { country: "6", price: 0.031, status: "registration_failed", error: "timeout" },
+                  { country: "12", price: 0.044, status: "registered" }
+                ],
+                token: { tokens: { id_token: "id", access_token: "ac", refresh_token: "rt" } }
+              }
+            ],
+            recoverable_accounts: [],
+            registration_failures: []
+          },
+          error: null,
+          warnings: [],
+          paths: {}
+        }),
+        stderr: "",
+        timedOut: false,
+        signal: null
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      const r = await adapter.registerOne();
+      if (r.kind !== "token_ready") throw new Error("expected token_ready");
+      expect(r.account.sms.country).toBe("12");
+      expect(r.account.sms.costUsd).toBe(0.044);
+      expect(r.account.sms.attempts).toHaveLength(2);
+      expect(r.account.sms.result).toMatchObject({ country: "12", status: "registered" });
+    });
+
+    // P5-AI: external-integration.md §"OAuth 失败分类"
+    it("oauth_failed 带 failure_category=account_unusable 时透传分类", async () => {
+      const { spawner } = makeRecordingSpawner({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          command: "all",
+          run_id: null,
+          data: {
+            accounts: [],
+            recoverable_accounts: [
+              {
+                phone: "+888",
+                password: "p4ss",
+                batch_id: "all-x",
+                status: "oauth_failed",
+                error: "继续 OAuth 授权 请求失败：缺少目标 URL",
+                failure_category: "account_unusable",
+                retryable: false,
+                recommended_action: "mark_account_unusable",
+                reason: "OAuth 授权链终态缺失，无法完成",
+                recovery_input: { command: "login", phone: "+888", password: "p4ss" },
+                sms_country: "12",
+                sms_cost_usd: 0.044
+              }
+            ],
+            registration_failures: []
+          },
+          error: null,
+          warnings: [],
+          paths: {}
+        }),
+        stderr: "",
+        timedOut: false,
+        signal: null
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      const r = await adapter.registerOne();
+      if (r.kind !== "oauth_failed") throw new Error("expected oauth_failed");
+      expect(r.recoverable.classification.failureCategory).toBe("account_unusable");
+      expect(r.recoverable.classification.retryable).toBe(false);
+      expect(r.recoverable.classification.recommendedAction).toBe("mark_account_unusable");
+      expect(r.recoverable.sms.country).toBe("12");
+      expect(r.recoverable.sms.costUsd).toBe(0.044);
+    });
+
+    // 兼容老版本 codex-tool 不返回分类字段
+    it("oauth_failed 老版本无分类字段 → 全部 null（worker 兜底按 oauth_failed）", async () => {
+      const { spawner } = makeRecordingSpawner({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          command: "all",
+          run_id: null,
+          data: {
+            accounts: [],
+            recoverable_accounts: [
+              { phone: "+777", password: "p4ss", batch_id: "all-y", status: "oauth_failed", error: "x" }
+            ],
+            registration_failures: []
+          },
+          error: null,
+          warnings: [],
+          paths: {}
+        }),
+        stderr: "",
+        timedOut: false,
+        signal: null
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      const r = await adapter.registerOne();
+      if (r.kind !== "oauth_failed") throw new Error("expected oauth_failed");
+      expect(r.recoverable.classification.failureCategory).toBeNull();
+      expect(r.recoverable.classification.retryable).toBeNull();
     });
 
     it("returns registration_failed when only registration_failures[]", async () => {

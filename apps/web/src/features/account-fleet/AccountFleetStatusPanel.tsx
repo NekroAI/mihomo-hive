@@ -64,10 +64,72 @@ export function AccountFleetStatusPanel(props: {
   return (
     <div className="orchestration-status-panel account-fleet-status-panel">
       <KpiCards snapshot={snap} />
+      <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
       <AccountMatrix accounts={snap.accounts} />
       <RecentTicksCard ticks={snap.recentTicks} />
       <RecentJobsCard jobs={snap.recentJobs} />
     </div>
+  );
+}
+
+/**
+ * 短信地区记忆 + 成本回看（P5-AI / external-integration.md §"成本上限和选区策略"）。
+ *
+ * Hive 完全透明保存 hint blob，UI 这里做"尽力解析最常见字段"展示 —— 找不到的字段
+ * 用 fallback "未提供"。设计原则：哪怕 codex-tool 字段改了，UI 也不应该崩，至少
+ * 还能显示 lastUpdatedAt 让用户知道 hint 是新的还是陈旧的。
+ *
+ * 成本卡片同区放置：今日/本月累计短信成本（Hive 自己累的）— 让用户能看到
+ * region_hint 命中是否真的在省钱。
+ */
+function SmsRegionHintCard(props: {
+  hint: AccountFleetStatusSnapshot["smsRegionHint"];
+  kpis: AccountFleetStatusSnapshot["kpis"];
+}) {
+  const { hint, kpis } = props;
+  const todayUsd = (kpis.todaySmsCostCents / 100).toFixed(2);
+  const monthlyUsd = (kpis.monthlySmsCostCents / 100).toFixed(2);
+  const hintObj = hint?.hint && typeof hint.hint === "object" && !Array.isArray(hint.hint)
+    ? (hint.hint as Record<string, unknown>)
+    : null;
+  const country = hintObj && typeof hintObj.country === "string" ? hintObj.country : null;
+  const operator = hintObj && typeof hintObj.operator === "string" ? hintObj.operator : null;
+  const lastSuccessAt = hintObj && typeof hintObj.last_success_at === "string" ? hintObj.last_success_at : null;
+  const ttlSeconds =
+    hintObj && typeof hintObj.ttl_seconds === "number"
+      ? hintObj.ttl_seconds
+      : null;
+  return (
+    <Panel
+      title="短信成本与地区记忆"
+      hint="codex-tool 自动选区策略：本地保存最近一次注册成功的地区作为下次的优先尝试。具体 TTL / 黑名单逻辑由 codex-tool 决定，Hive 只做透明回传。"
+    >
+      <div className="form-grid" style={{ gap: 8 }}>
+        <div>
+          <div className="muted small">今日 SMS 成本</div>
+          <div className="mono-strong">${todayUsd}</div>
+        </div>
+        <div>
+          <div className="muted small">本月 SMS 成本</div>
+          <div className="mono-strong">${monthlyUsd}</div>
+        </div>
+        <div>
+          <div className="muted small">上次成功地区</div>
+          <div className="mono-strong">{country ?? "—"}{operator ? ` · ${operator}` : ""}</div>
+        </div>
+        <div>
+          <div className="muted small">记忆更新时间</div>
+          <div className="small">{hint?.lastUpdatedAt ? new Date(hint.lastUpdatedAt).toLocaleString() : "尚未注册过"}</div>
+        </div>
+      </div>
+      {lastSuccessAt || ttlSeconds ? (
+        <div className="muted small" style={{ marginTop: 6 }}>
+          {lastSuccessAt ? `codex-tool last_success_at=${lastSuccessAt}` : ""}
+          {lastSuccessAt && ttlSeconds ? " · " : ""}
+          {ttlSeconds ? `ttl=${ttlSeconds}s` : ""}
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 
@@ -213,6 +275,15 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                 </td>
                 <td>
                   <HealthBadge health={acc.health} />
+                  {acc.lastRecoveryFailureCategory === "account_unusable" ? (
+                    <span
+                      className="muted small"
+                      style={{ marginLeft: 4, cursor: "help" }}
+                      title="codex-tool 判定为 account_unusable：OAuth 授权链终态缺失，无法自动恢复。"
+                    >
+                      ⚠
+                    </span>
+                  ) : null}
                 </td>
                 <td className="num">
                   <span className={`mono-strong ${quotaToneClass(acc.quota5hPercent)}`}>
@@ -559,13 +630,36 @@ function formatEgressTooltip(acc: AccountRecordView): string {
     lines.push("");
     lines.push(`上次 codex-tool 出口走的节点 hash: ${acc.egressNodeHash}`);
   }
+  // P5-AI: 短信注册数据
+  if (acc.smsCountry || acc.smsCostCents != null) {
+    lines.push("");
+    const parts: string[] = [];
+    if (acc.smsCountry) parts.push(`地区 ${acc.smsCountry}`);
+    if (acc.smsCostCents != null) parts.push(`成本 $${(acc.smsCostCents / 100).toFixed(2)}`);
+    lines.push(`注册短信：${parts.join(" · ")}`);
+  }
   if (acc.lastRecoveryPath) {
     lines.push(`最近修复路径: ${acc.lastRecoveryPath}`);
+  }
+  // P5-AI: codex-tool 失败分类（external-integration.md §"OAuth 失败分类"）
+  if (acc.lastRecoveryFailureCategory) {
+    lines.push(`失败分类: ${formatFailureCategory(acc.lastRecoveryFailureCategory)}`);
   }
   if (acc.lastRecoveryError) {
     lines.push(`上次修复错误: ${acc.lastRecoveryError}`);
   }
   return lines.join("\n");
+}
+
+function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFailureCategory"]>): string {
+  switch (c) {
+    case "account_unusable":
+      return "账号无救（OAuth 授权链终态缺失）";
+    case "network_or_proxy":
+      return "网络/代理类（建议检查出口）";
+    case "oauth_failed":
+      return "普通 OAuth 失败";
+  }
 }
 
 function quotaToneClass(percent: number | null): string {

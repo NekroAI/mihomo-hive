@@ -1334,8 +1334,11 @@ export const appRouter = t.router({
           todayRegistrationsUsed: dayBudget?.registrationsUsed ?? 0,
           todayRegistrationsBudget: spec.registration.dailyBudget,
           monthlyRegistrationsUsed: monthBudget?.registrationsUsed ?? 0,
-          monthlyRegistrationsBudget: spec.registration.monthlyBudget
-        }
+          monthlyRegistrationsBudget: spec.registration.monthlyBudget,
+          todaySmsCostCents: dayBudget?.smsCostCents ?? 0,
+          monthlySmsCostCents: monthBudget?.smsCostCents ?? 0
+        },
+        smsRegionHint: ctx.repo.getSmsRegionHint()
       });
     }),
     tick: t.router({
@@ -1526,8 +1529,11 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     nextRecoveryAfter: a.nextRecoveryAfter,
     lastRecoveryError: a.lastRecoveryError,
     lastRecoveryPath: a.lastRecoveryPath,
+    lastRecoveryFailureCategory: a.lastRecoveryFailureCategory,
     batchId: a.batchId,
     registeredAt: a.registeredAt,
+    smsCountry: a.smsCountry,
+    smsCostCents: a.smsCostCents,
     egressNodeHash: a.egressNodeHash,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt

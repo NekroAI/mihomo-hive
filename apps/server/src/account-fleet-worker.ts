@@ -195,15 +195,35 @@ async function runCodexLogin(
 
   const egress = resolveEgressForLogin(repo, spec, account);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
-  const loginResult = await adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs });
+  const outcome = await adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs });
+  // P5-AI: login 失败拿到分类信号 → 早期分流：
+  //   account_unusable → 把账号直接 retire，不再消耗后续修复 quota
+  //   network_or_proxy → 保留账号 + 标错误分类（worker 上层会根据 intent=recovering 继续退避）
+  //   oauth_failed     → 跟旧行为一致，抛错由 handleRecoveryFailure 统一退避
+  if (outcome.kind === "failed") {
+    const category = outcome.classification.failureCategory ?? "oauth_failed";
+    if (category === "account_unusable") {
+      repo.patchAccount(account.id, {
+        intent: "retired",
+        health: "broken",
+        lastRecoveryError: redactErrorMessage(outcome.error),
+        lastRecoveryPath: "codex_login",
+        lastRecoveryFailureCategory: "account_unusable"
+      });
+      throw new Error(`login failed [account_unusable]: ${outcome.error}`);
+    }
+    // network_or_proxy / oauth_failed → 把分类标到账号，让 handleRecoveryFailure 接管退避
+    repo.patchAccount(account.id, { lastRecoveryFailureCategory: category });
+    throw new Error(`login failed [${category}]: ${outcome.error}`);
+  }
   await landOnSub2api({
     repo,
     crypto,
     spec,
     account,
-    tokens: loginResult.tokens,
-    email: loginResult.email,
-    accountIdHint: loginResult.accountId,
+    tokens: outcome.result.tokens,
+    email: outcome.result.email,
+    accountIdHint: outcome.result.accountId,
     isRecovery: true,
     egressNodeHash: egress?.hash ?? null
   });
@@ -229,28 +249,60 @@ async function runCodexRegister(
   });
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
 
+  // P5-AI: 不管成功失败，只要 codex-tool 返回了 sms_region_result 就回灌经验
+  // （codex-tool 决定怎么用，Hive 透明保存）；并按实际花费记账，让月度成本预算有意义
+  const persistSms = (sms: { result: unknown; costUsd: number | null }, country: string | null) => {
+    if (sms.result != null) repo.saveSmsRegionHint(sms.result);
+    const costCents = sms.costUsd != null ? Math.round(sms.costUsd * 100) : 0;
+    incrementRegistrationsBudget(repo, spec, costCents);
+    return { costCents: sms.costUsd != null ? costCents : null, country };
+  };
+
   if (outcome.kind === "registration_failed") {
+    // 接码失败一般不收费（cost=0），但仍把 attempts 经验保留下来给 codex-tool 下次参考
+    persistSms(outcome.sms, outcome.sms.country);
     throw new Error(`registration failed: ${outcome.error}`);
   }
   if (outcome.kind === "oauth_failed") {
-    // 把恢复块塞到本地 accounts —— 走 import_to_sub2api 模式后续修复
+    const { costCents, country } = persistSms(outcome.recoverable.sms, outcome.recoverable.sms.country);
+    // 按 OAuth 失败分类决定怎么落库（external-integration.md §"OAuth 失败分类"）：
+    //   account_unusable → 直接 retired，不进恢复队列
+    //   network_or_proxy → 进恢复队列但拉长延后，可能换代理后能救
+    //   oauth_failed     → 普通恢复队列（旧行为）
+    //   null（老版本 codex-tool）→ 兜底按 oauth_failed
+    const category = outcome.recoverable.classification.failureCategory ?? "oauth_failed";
+    const baseIntent = category === "account_unusable" ? "retired" : "recovering";
     const recoveryJson = JSON.stringify(outcome.recoverable.recoveryInput);
     const newRow: AccountRecordInternal = makeFreshAccount({
       email: `oauth-failed-${Date.now()}`,
       origin: "hive_registered",
+      intent: baseIntent,
+      health: "broken",
       encPhone: crypto.encryptOptional(outcome.recoverable.phone),
       encPassword: crypto.encryptOptional(outcome.recoverable.password),
       encRecoveryInputJson: crypto.encryptOptional(recoveryJson),
       batchId: outcome.recoverable.batchId,
-      egressNodeHash: egress?.hash ?? null
+      egressNodeHash: egress?.hash ?? null,
+      smsCountry: country,
+      smsCostCents: costCents,
+      lastRecoveryError: redactErrorMessage(outcome.recoverable.error),
+      lastRecoveryFailureCategory: category,
+      // network_or_proxy 时取退避序列第二档（粗略给代理切换留余地，避免立刻撞同样问题）
+      nextRecoveryAfter:
+        category === "network_or_proxy"
+          ? new Date(
+              Date.now() + (spec.recovery.backoffSequenceMs[1] ?? spec.recovery.backoffSequenceMs[0] ?? 60_000)
+            ).toISOString()
+          : null
     });
     repo.upsertAccount(newRow);
-    // 记账：还是消耗了 SMS 配额
-    incrementRegistrationsBudget(repo, spec);
-    throw new Error(`oauth_failed; recoverable account saved as ${newRow.id}: ${outcome.recoverable.error}`);
+    throw new Error(
+      `oauth_failed[${category}]; recoverable account saved as ${newRow.id}: ${outcome.recoverable.error}`
+    );
   }
 
   // token_ready
+  const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country);
   await landOnSub2api({
     repo,
     crypto,
@@ -264,9 +316,10 @@ async function runCodexRegister(
     batchId: outcome.account.batchId,
     isRecovery: Boolean(oldAccount),
     isFreshRegistration: !oldAccount,
-    egressNodeHash: egress?.hash ?? null
+    egressNodeHash: egress?.hash ?? null,
+    smsCountry: country,
+    smsCostCents: costCents
   });
-  incrementRegistrationsBudget(repo, spec);
 }
 
 /**
@@ -399,6 +452,10 @@ interface LandOnSub2apiInput {
   isFreshRegistration?: boolean | undefined;
   /** 本次 codex-tool 调用用了哪个本地节点作出口；落地账号时写入 egressNodeHash 作软粘性 */
   egressNodeHash?: string | null | undefined;
+  /** P5-AI: codex-tool 注册返回的 sms_country；非注册路径（恢复登录 / import）为 null */
+  smsCountry?: string | null | undefined;
+  /** P5-AI: codex-tool 注册返回的 sms_cost_usd * 100；非注册路径为 null */
+  smsCostCents?: number | null | undefined;
 }
 
 /**
@@ -465,6 +522,8 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
       nextRecoveryAfter: null,
       lastRecoveryError: deletedOld ? null : account.lastRecoveryError,
       lastRecoveryPath: "codex_login",
+      // 恢复成功后清掉上次失败分类（让 UI 不再显示旧的红色告警）
+      lastRecoveryFailureCategory: null,
       // 仅在本次成功用过 egress 时回填；保留原值的 fallback：传 null 会覆盖，传 undefined 会跳过
       ...(input.egressNodeHash !== undefined ? { egressNodeHash: input.egressNodeHash } : {})
     });
@@ -483,7 +542,9 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
       batchId: input.batchId ?? null,
       registeredAt: now,
       lastRecoveryPath: "codex_register",
-      egressNodeHash: input.egressNodeHash ?? null
+      egressNodeHash: input.egressNodeHash ?? null,
+      smsCountry: input.smsCountry ?? null,
+      smsCostCents: input.smsCostCents ?? null
     });
     repo.upsertAccount(fresh);
   }
@@ -584,8 +645,11 @@ function makeFreshAccount(overrides: Partial<AccountRecordInternal>): AccountRec
     nextRecoveryAfter: null,
     lastRecoveryError: null,
     lastRecoveryPath: null,
+    lastRecoveryFailureCategory: null,
     batchId: null,
     registeredAt: null,
+    smsCountry: null,
+    smsCostCents: null,
     egressNodeHash: null,
     createdAt: now,
     updatedAt: now,
@@ -624,7 +688,11 @@ function applyRecoveryFailure(
   });
 }
 
-function incrementRegistrationsBudget(repo: HiveRepository, spec: AccountFleetSpec): void {
+function incrementRegistrationsBudget(
+  repo: HiveRepository,
+  spec: AccountFleetSpec,
+  deltaSmsCostCents = 0
+): void {
   const now = new Date();
   const dayKey = budgetWindowKey(now, "day");
   const monthKey = budgetWindowKey(now, "month");
@@ -639,13 +707,15 @@ function incrementRegistrationsBudget(repo: HiveRepository, spec: AccountFleetSp
     windowKey: dayKey,
     registrationsBudget: spec.registration.dailyBudget,
     resetAt: tomorrow.toISOString(),
-    deltaRegistrations: 1
+    deltaRegistrations: 1,
+    deltaSmsCostCents
   });
   repo.incrementBudgetUsage({
     windowKey: monthKey,
     registrationsBudget: spec.registration.monthlyBudget,
     resetAt: monthAfter.toISOString(),
-    deltaRegistrations: 1
+    deltaRegistrations: 1,
+    deltaSmsCostCents
   });
 }
 
@@ -666,6 +736,9 @@ export async function buildCodexToolAdapter(
     ? crypto.decrypt(spec.codexTool.phoneSms.apiKeyRef)
     : "";
   const proxyDefault = egress ? `socks5://127.0.0.1:${egress.port}` : resolveLegacyEgressProxyUrl(repo, spec);
+  // P5-AI: 透明回灌 region_hint —— 上次注册成功的 sms_region_result blob 原样塞给
+  // codex-tool 让它优先尝试该地区，Hive 不解析 blob 字段。第一次跑时没有，为 null。
+  const hintMemory = repo.getSmsRegionHint();
   const config: CodexToolConfig = {
     binPath: spec.codexTool.binPath,
     skymail: {
@@ -682,7 +755,8 @@ export async function buildCodexToolAdapter(
       provider: spec.codexTool.phoneSms.provider,
       apiKey: smsApiKey,
       service: spec.codexTool.phoneSms.service,
-      maxCostPerAccountUsd: spec.registration.maxCostPerAccountUsd
+      maxCostPerAccountUsd: spec.registration.maxCostPerAccountUsd,
+      ...(hintMemory?.hint != null ? { regionHint: hintMemory.hint } : {})
     },
     httpUserAgentChrome: spec.codexTool.httpUserAgentChrome,
     proxyDefault

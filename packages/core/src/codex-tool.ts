@@ -42,6 +42,14 @@ export interface CodexToolConfig {
      * 详细约定见 mihomo-hive 仓库的 notes/codex-tool-needs.md。
      */
     maxCostPerAccountUsd: number;
+    /**
+     * 跨调用地区经验回灌（external-integration.md §"成本上限和选区策略"）。
+     *
+     * Hive 保持透明：原样从上一次注册的 sms_region_result 拿到的 blob 直接塞进来，
+     * codex-tool 自己决定 TTL / 失败惩罚 / 黑名单。Hive 永远不解析其字段语义，
+     * 只在 UI 上作为观测数据展示。null 表示无历史经验，codex-tool 走价格升序探索。
+     */
+    regionHint?: unknown;
   };
   httpUserAgentChrome: string;
   /** 出口代理 URL（e.g. "socks5://127.0.0.1:10001"），codex-tool 通过它访问外部服务。 */
@@ -77,7 +85,11 @@ export function buildCodexToolConfigJson(config: CodexToolConfig): Record<string
       provider: config.phoneSms.provider,
       [phoneSmsKey]: config.phoneSms.apiKey,
       service: config.phoneSms.service,
-      max_cost_per_account_usd: config.phoneSms.maxCostPerAccountUsd
+      max_cost_per_account_usd: config.phoneSms.maxCostPerAccountUsd,
+      // 透明回灌：上次 sms_region_result 的整个 object 原样塞，codex-tool 自己解释
+      ...(config.phoneSms.regionHint !== undefined && config.phoneSms.regionHint !== null
+        ? { region_hint: config.phoneSms.regionHint }
+        : {})
     },
     http: {
       user_agent_chrome: config.httpUserAgentChrome
@@ -160,12 +172,59 @@ export interface CodexToolTokens {
   accountId: string | null;
 }
 
+/**
+ * codex-tool 返回的 OAuth 失败分类（external-integration.md §"OAuth 失败分类"）。
+ * Hive 按此分流：
+ *   - account_unusable → 不重试，账号入 retired
+ *   - network_or_proxy → 延后重试，优先检查代理/出口
+ *   - oauth_failed     → 普通恢复登录队列
+ */
+export type CodexFailureCategory = "account_unusable" | "network_or_proxy" | "oauth_failed";
+
+export interface CodexFailureClassification {
+  failureCategory: CodexFailureCategory | null;
+  retryable: boolean | null;
+  recommendedAction: string | null;
+  reason: string | null;
+}
+
+/**
+ * 短信地区返回数据（external-integration.md §"成本上限和选区策略"）。
+ * 这部分 Hive 完全透明保存——不解析 country/operator/price 等字段语义，
+ * 仅在 UI 上观测、在下一次注册时把 smsRegionResult 作为 hint 原样回传。
+ */
+export interface CodexSmsRegionResult {
+  /** 透明 blob：原样从 envelope.data.sms_region_result 取，结构由 codex-tool 决定。 */
+  result: unknown;
+  /** 本轮地区尝试明细 list，原样保留供审计。 */
+  attempts: unknown[];
+  /** 注册实际花了多少美元；落 account_budgets.sms_cost_cents 用。 */
+  costUsd: number | null;
+  /** 注册成功用的国家码，落 accounts.sms_country 用（用户能看到的简单字段）。 */
+  country: string | null;
+}
+
 export interface CodexToolLoginResult {
   phone: string;
   email: string;
   accountId: string | null;
   tokens: CodexToolTokens;
 }
+
+/**
+ * login 命令的返回 union：成功取到新 tokens 或带分类的失败。
+ * 旧版本调用方拿到 failure 时一律重试；新版本可以按 failureCategory 分流：
+ *   - account_unusable → 不重试，账号 retired
+ *   - network_or_proxy → 延后重试
+ *   - oauth_failed     → 正常退避重试
+ */
+export type CodexToolLoginOutcome =
+  | { kind: "ok"; result: CodexToolLoginResult }
+  | {
+      kind: "failed";
+      error: string;
+      classification: CodexFailureClassification;
+    };
 
 export type CodexToolRegisterOutcome =
   | {
@@ -176,6 +235,8 @@ export type CodexToolRegisterOutcome =
         email: string;
         batchId: string;
         tokens: CodexToolTokens;
+        /** 本次注册的短信地区数据（用于观测 + 回灌 + 账单）。 */
+        sms: CodexSmsRegionResult;
       };
     }
   | {
@@ -186,11 +247,20 @@ export type CodexToolRegisterOutcome =
         batchId: string;
         error: string;
         recoveryInput: unknown;
+        /** OAuth 失败已扣短信成本，仍要入账。 */
+        sms: CodexSmsRegionResult;
+        classification: CodexFailureClassification;
       };
     }
   | {
       kind: "registration_failed";
       error: string;
+      /**
+       * 注册阶段失败时通常没有可保存账号，但 codex-tool 可能仍在 sms_region_attempts 里
+       * 留有"试了哪些地区花了多少钱"用于审计；sms_cost_usd 一般为 0（取号失败不收费）。
+       */
+      sms: CodexSmsRegionResult;
+      classification: CodexFailureClassification;
     };
 
 // ─── Spawner / Adapter 接口 ──────────────────────
@@ -222,7 +292,7 @@ export interface CodexToolAdapter {
     phone: string;
     password: string;
     timeoutMs?: number;
-  }): Promise<CodexToolLoginResult>;
+  }): Promise<CodexToolLoginOutcome>;
 
   registerOne(input?: {
     timeoutMs?: number;
@@ -246,7 +316,17 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
   const spawner = opts.spawner ?? createDefaultSpawner(opts.config.binPath);
   const configJson = JSON.stringify(buildCodexToolConfigJson(opts.config));
 
-  async function runEnvelope(args: string[], timeoutMs: number, withStdin: boolean): Promise<CodexToolEnvelope> {
+  /**
+   * @param lenient 默认 false：ok=false 直接抛 envelope_not_ok。如果调用方（如
+   *   login）需要从失败 envelope 里读 failure_category 字段做分类处理，传 true
+   *   只让 exit code 非 0 抛错，ok=false 但 exit=0 返回让调用方解释。
+   */
+  async function runEnvelope(
+    args: string[],
+    timeoutMs: number,
+    withStdin: boolean,
+    lenient = false
+  ): Promise<CodexToolEnvelope> {
     const res = await spawner({
       args,
       stdinJson: withStdin ? configJson : null,
@@ -273,7 +353,7 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
         res.exitCode
       );
     }
-    if (!envelope.ok) {
+    if (!envelope.ok && !lenient) {
       throw new CodexToolError(
         envelope.error ?? `codex-tool returned ok=false (exit 0)`,
         "envelope_not_ok"
@@ -328,8 +408,17 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
         input.password
       ];
       const timeoutMs = input.timeoutMs ?? opts.defaults.loginMs;
-      const env = await runEnvelope(args, timeoutMs, true);
-      return parseLoginEnvelope(env);
+      // lenient：ok=false 不抛错，调用方能从 data 里读 failure_category 做分流
+      const env = await runEnvelope(args, timeoutMs, true, true);
+      if (!env.ok) {
+        const data = isObject(env.data) ? (env.data as Record<string, unknown>) : {};
+        return {
+          kind: "failed",
+          error: env.error ?? "login failed (no error message)",
+          classification: extractFailureClassification(data)
+        };
+      }
+      return { kind: "ok", result: parseLoginEnvelope(env) };
     },
 
     async registerOne(input = {}) {
@@ -407,6 +496,46 @@ function parseLoginEnvelope(env: CodexToolEnvelope): CodexToolLoginResult {
   };
 }
 
+/**
+ * 从单个 account / recoverable 条目里抽 sms 数据（external-integration.md
+ * §"成本上限和选区策略"）。codex-tool 把 sms_region_result / sms_region_attempts /
+ * sms_cost_usd / sms_country 都挂在条目内层；老版本可能没这些字段，全部 null-safe。
+ */
+function extractSmsResult(item: Record<string, unknown>): CodexSmsRegionResult {
+  const attempts = Array.isArray(item.sms_region_attempts)
+    ? (item.sms_region_attempts as unknown[])
+    : [];
+  const result = item.sms_region_result !== undefined ? item.sms_region_result : null;
+  const costUsd =
+    typeof item.sms_cost_usd === "number"
+      ? item.sms_cost_usd
+      : typeof item.sms_cost_usd === "string"
+        ? Number(item.sms_cost_usd) || null
+        : null;
+  const country = typeof item.sms_country === "string" ? item.sms_country : null;
+  return { result, attempts, costUsd, country };
+}
+
+/**
+ * 抽 OAuth 失败分类字段（external-integration.md §"OAuth 失败分类"）。老版本
+ * codex-tool 不带这几个字段，全部 null-safe。Hive 拿到 null 时会保守按
+ * "oauth_failed" 分支处理（兼容旧版本不引入回归）。
+ */
+function extractFailureClassification(item: Record<string, unknown>): CodexFailureClassification {
+  const cat = item.failure_category;
+  const failureCategory: CodexFailureCategory | null =
+    cat === "account_unusable" || cat === "network_or_proxy" || cat === "oauth_failed" ? cat : null;
+  return {
+    failureCategory,
+    retryable: typeof item.retryable === "boolean" ? item.retryable : null,
+    recommendedAction: typeof item.recommended_action === "string" ? item.recommended_action : null,
+    reason: typeof item.reason === "string" ? item.reason : null
+  };
+}
+
+/** 空 sms 占位 —— 当条目里没有任何 sms 字段或者没匹配到具体条目时返回。 */
+const EMPTY_SMS: CodexSmsRegionResult = { result: null, attempts: [], costUsd: null, country: null };
+
 function parseRegisterEnvelope(env: CodexToolEnvelope): CodexToolRegisterOutcome {
   const data = env.data;
   if (!isObject(data)) {
@@ -435,7 +564,8 @@ function parseRegisterEnvelope(env: CodexToolEnvelope): CodexToolRegisterOutcome
           accessToken: stringOrThrow(tokens.access_token, "tokens.access_token"),
           refreshToken: stringOrThrow(tokens.refresh_token, "tokens.refresh_token"),
           accountId: typeof tokens.account_id === "string" ? tokens.account_id : null
-        }
+        },
+        sms: extractSmsResult(acc)
       }
     };
   }
@@ -450,17 +580,28 @@ function parseRegisterEnvelope(env: CodexToolEnvelope): CodexToolRegisterOutcome
         password: stringOrThrow(rec.password, "recoverable.password"),
         batchId: stringOrThrow(rec.batch_id, "recoverable.batch_id"),
         error: typeof rec.error === "string" ? rec.error : "oauth failed",
-        recoveryInput: rec.recovery_input ?? null
+        recoveryInput: rec.recovery_input ?? null,
+        sms: extractSmsResult(rec),
+        classification: extractFailureClassification(rec)
       }
     };
   }
   const failures = Array.isArray(data.registration_failures) ? data.registration_failures : [];
   const failure = failures.find((f) => isObject(f));
+  const failObj = failure && isObject(failure) ? (failure as Record<string, unknown>) : null;
   return {
     kind: "registration_failed",
-    error: failure && isObject(failure) && typeof (failure as Record<string, unknown>).error === "string"
-      ? String((failure as Record<string, unknown>).error)
-      : "registration failed (no detail)"
+    error:
+      failObj && typeof failObj.error === "string"
+        ? failObj.error
+        : "registration failed (no detail)",
+    sms: failObj ? extractSmsResult(failObj) : EMPTY_SMS,
+    classification: failObj ? extractFailureClassification(failObj) : {
+      failureCategory: null,
+      retryable: null,
+      recommendedAction: null,
+      reason: null
+    }
   };
 }
 

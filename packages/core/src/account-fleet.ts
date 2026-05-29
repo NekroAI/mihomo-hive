@@ -177,8 +177,12 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
       nextRecoveryAfter: null,
       lastRecoveryError: null,
       lastRecoveryPath: null,
+      lastRecoveryFailureCategory: null,
       batchId: null,
       registeredAt: null,
+      // adopted_* 不是本地注册，没有 sms_country / sms_cost 经验
+      smsCountry: null,
+      smsCostCents: null,
       egressNodeHash: null,
       createdAt: nowIso,
       updatedAt: nowIso

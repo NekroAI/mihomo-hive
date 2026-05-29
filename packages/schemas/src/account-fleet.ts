@@ -81,10 +81,32 @@ export const accountRecordInternalSchema = z.object({
   nextRecoveryAfter: z.string().nullable(),
   lastRecoveryError: z.string().nullable(),
   lastRecoveryPath: accountRecoveryPathSchema.nullable(),
+  /**
+   * codex-tool 上次返回的 OAuth 失败分类（external-integration.md §"OAuth 失败分类"）。
+   *   - account_unusable → 永久不可用，worker 不再重试
+   *   - network_or_proxy → 代理/网络类失败，延后再试
+   *   - oauth_failed     → 普通 OAuth 失败
+   * 为 null 表示无最近失败 / 老版本 codex-tool 没返回该字段。
+   */
+  lastRecoveryFailureCategory: z
+    .enum(["account_unusable", "network_or_proxy", "oauth_failed"])
+    .nullable(),
 
   // 溯源
   batchId: z.string().nullable(),
   registeredAt: z.string().nullable(),
+
+  /**
+   * codex-tool 注册时实际使用的国家码（external-integration.md §"成本上限和选区策略"
+   * 的 sms_country）。仅供观测 / 审计用：发现某国号码批量风控时反查"哪些账号是这个
+   * 国家来的"。注册失败 / adopted 路径下为 null。
+   */
+  smsCountry: z.string().nullable(),
+  /**
+   * 注册时短信成本（USD * 100，按整数 cent 存）。仅供观测；汇总成本走
+   * account_budgets.sms_cost_cents（窗口化）。
+   */
+  smsCostCents: z.number().int().nonnegative().nullable(),
 
   /**
    * 软粘性的代理出口偏好 —— 账号首次注册 / 上次登录用过的本地节点 hash。
@@ -131,9 +153,14 @@ export const accountRecordViewSchema = z.object({
   nextRecoveryAfter: z.string().nullable(),
   lastRecoveryError: z.string().nullable(),
   lastRecoveryPath: accountRecoveryPathSchema.nullable(),
+  lastRecoveryFailureCategory: z
+    .enum(["account_unusable", "network_or_proxy", "oauth_failed"])
+    .nullable(),
 
   batchId: z.string().nullable(),
   registeredAt: z.string().nullable(),
+  smsCountry: z.string().nullable(),
+  smsCostCents: z.number().int().nonnegative().nullable(),
   egressNodeHash: z.string().nullable(),
 
   /**
@@ -158,6 +185,22 @@ export const accountRecordViewSchema = z.object({
 });
 
 export type AccountRecordView = z.infer<typeof accountRecordViewSchema>;
+
+/**
+ * 短信地区经验回灌（external-integration.md §"成本上限和选区策略"）—— Hive 完全
+ * 透明保存：codex-tool 注册返回的 sms_region_result blob 原样存到 settings.value_json，
+ * 下次注册前作为 phone_sms.region_hint 原样回传。
+ *
+ * 不解析具体字段含义（country / operator / TTL / 失败计数都是 codex-tool 内部约定）。
+ * 仅 UI 上展示 blob 内容方便用户观测"上次注册成功用的哪国号码、什么时候"。
+ *
+ * 配套字段 lastUpdatedAt 由 Hive 写入，让 UI 显示"经验新鲜度"。
+ */
+export const smsRegionHintMemorySchema = z.object({
+  hint: z.unknown().nullable(),
+  lastUpdatedAt: z.string().nullable()
+});
+export type SmsRegionHintMemory = z.infer<typeof smsRegionHintMemorySchema>;
 
 // ─── Spec（用户配置）─────────────────────────────
 
@@ -482,8 +525,17 @@ export const accountFleetStatusSnapshotSchema = z.object({
     todayRegistrationsUsed: z.number().int().nonnegative(),
     todayRegistrationsBudget: z.number().int().nonnegative(),
     monthlyRegistrationsUsed: z.number().int().nonnegative(),
-    monthlyRegistrationsBudget: z.number().int().nonnegative()
-  })
+    monthlyRegistrationsBudget: z.number().int().nonnegative(),
+    /** P5-AI: 当日累计短信成本 cent；月度同。来源是 account_budgets 表。 */
+    todaySmsCostCents: z.number().int().nonnegative().default(0),
+    monthlySmsCostCents: z.number().int().nonnegative().default(0)
+  }),
+  /**
+   * codex-tool 短信地区经验回灌（透明 blob）。Hive 不解析具体字段，仅在 UI
+   * 上展示让用户能看到"上次注册成功的地区 / 时间 / TTL"等 codex-tool 自定义信息。
+   * 从未注册过则为 null。
+   */
+  smsRegionHint: smsRegionHintMemorySchema.nullable()
 });
 
 export type AccountFleetStatusSnapshot = z.infer<typeof accountFleetStatusSnapshotSchema>;

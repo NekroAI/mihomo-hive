@@ -127,8 +127,13 @@ function ensureSchema(sqlite: HiveSqlite): void {
       last_recovery_error TEXT,
       last_recovery_path TEXT
         CHECK (last_recovery_path IS NULL OR last_recovery_path IN ('codex_login', 'codex_register')),
+      last_recovery_failure_category TEXT
+        CHECK (last_recovery_failure_category IS NULL
+               OR last_recovery_failure_category IN ('account_unusable', 'network_or_proxy', 'oauth_failed')),
       batch_id TEXT,
       registered_at TEXT,
+      sms_country TEXT,
+      sms_cost_cents INTEGER,
       egress_node_hash TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -216,6 +221,11 @@ function ensureSchema(sqlite: HiveSqlite): void {
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：
   // 旧 accounts 表升级时补 egress_node_hash 字段
   addColumnIfMissing(sqlite, "accounts", "egress_node_hash", "TEXT");
+  // P5-AI: 持久化 codex-tool 注册阶段返回的元信息（external-integration.md §"成本上限
+  // 和选区策略" + §"OAuth 失败分类"）。三列都允许 NULL —— 老账号 / adopted 路径不会有。
+  addColumnIfMissing(sqlite, "accounts", "sms_country", "TEXT");
+  addColumnIfMissing(sqlite, "accounts", "sms_cost_cents", "INTEGER");
+  addColumnIfMissing(sqlite, "accounts", "last_recovery_failure_category", "TEXT");
   // Seed intent_role from lifecycle for nodes that pre-date this column.
   sqlite.exec(`
     UPDATE nodes

@@ -9,6 +9,7 @@ import {
   defaultOrchestrationSpec,
   orchestrationSpecSchema,
   reconcileTickSchema,
+  smsRegionHintMemorySchema,
   sub2ApiConnectionConfigSchema,
   sub2ApiProtectedProxyRuleSchema
 } from "@mihomo-hive/schemas";
@@ -30,6 +31,7 @@ import type {
   ProxyNode,
   ReconcileTick,
   ReconcileTickSummary,
+  SmsRegionHintMemory,
   Sub2ApiConnectionConfig,
   Sub2ApiProtectedProxyRule,
   Sub2ApiSafeConnectionConfig,
@@ -112,6 +114,7 @@ const sub2ApiConnectionSettingKey = "sub2api.connection";
 const sub2ApiProtectedRuleSettingKey = "sub2api.protectedRule";
 const orchestrationSpecSettingKey = "orchestration.spec";
 const accountFleetSpecSettingKey = "account_fleet.spec";
+const accountFleetSmsRegionHintSettingKey = "account_fleet.smsRegionHint";
 
 interface AccountRow {
   id: string;
@@ -143,8 +146,11 @@ interface AccountRow {
   next_recovery_after: string | null;
   last_recovery_error: string | null;
   last_recovery_path: AccountRecordInternal["lastRecoveryPath"];
+  last_recovery_failure_category: AccountRecordInternal["lastRecoveryFailureCategory"];
   batch_id: string | null;
   registered_at: string | null;
+  sms_country: string | null;
+  sms_cost_cents: number | null;
   egress_node_hash: string | null;
   created_at: string;
   updated_at: string;
@@ -804,6 +810,39 @@ export class HiveRepository {
     return parsed;
   }
 
+  /**
+   * codex-tool 短信地区经验透明回灌（P5-AI / external-integration.md §"成本上限和选区策略"）。
+   *
+   * Hive 完全黑盒：把 sms_region_result 整个 blob 当作 unknown 存到 settings，
+   * 下次注册前作为 phone_sms.region_hint 原样回传。lastUpdatedAt 由 Hive 在写入时
+   * 打戳，让 UI 能显示"经验新鲜度"。返回 null 表示从未保存过经验。
+   */
+  getSmsRegionHint(): SmsRegionHintMemory | null {
+    const row = this.sqlite
+      .prepare("SELECT value_json FROM settings WHERE key = ?")
+      .get(accountFleetSmsRegionHintSettingKey) as { value_json: string } | undefined;
+    if (!row) return null;
+    try {
+      return smsRegionHintMemorySchema.parse(JSON.parse(row.value_json));
+    } catch {
+      return null;
+    }
+  }
+
+  saveSmsRegionHint(hint: unknown): SmsRegionHintMemory {
+    const memory: SmsRegionHintMemory = { hint: hint ?? null, lastUpdatedAt: new Date().toISOString() };
+    this.sqlite
+      .prepare(
+        `
+        INSERT INTO settings (key, value_json)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+      `
+      )
+      .run(accountFleetSmsRegionHintSettingKey, JSON.stringify(memory));
+    return memory;
+  }
+
   upsertAccount(record: AccountRecordInternal): AccountRecordInternal {
     const parsed = accountRecordInternalSchema.parse(record);
     this.sqlite
@@ -818,7 +857,9 @@ export class HiveRepository {
           quota_5h_percent, quota_7d_percent, errors_in_window,
           broken_since_tick, broken_consecutive_ticks,
           recovery_attempts, next_recovery_after, last_recovery_error, last_recovery_path,
-          batch_id, registered_at, egress_node_hash, created_at, updated_at
+          last_recovery_failure_category,
+          batch_id, registered_at, sms_country, sms_cost_cents, egress_node_hash,
+          created_at, updated_at
         ) VALUES (
           @id, @externalId, @origin, @intent, @health,
           @email, @organizationId, @clientId, @platform, @type,
@@ -828,7 +869,9 @@ export class HiveRepository {
           @quota5hPercent, @quota7dPercent, @errorsInWindow,
           @brokenSinceTick, @brokenConsecutiveTicks,
           @recoveryAttempts, @nextRecoveryAfter, @lastRecoveryError, @lastRecoveryPath,
-          @batchId, @registeredAt, @egressNodeHash, @createdAt, @updatedAt
+          @lastRecoveryFailureCategory,
+          @batchId, @registeredAt, @smsCountry, @smsCostCents, @egressNodeHash,
+          @createdAt, @updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET
           external_id = excluded.external_id,
@@ -859,8 +902,11 @@ export class HiveRepository {
           next_recovery_after = excluded.next_recovery_after,
           last_recovery_error = excluded.last_recovery_error,
           last_recovery_path = excluded.last_recovery_path,
+          last_recovery_failure_category = excluded.last_recovery_failure_category,
           batch_id = excluded.batch_id,
           registered_at = excluded.registered_at,
+          sms_country = excluded.sms_country,
+          sms_cost_cents = excluded.sms_cost_cents,
           egress_node_hash = excluded.egress_node_hash,
           updated_at = excluded.updated_at
       `
@@ -927,6 +973,10 @@ export class HiveRepository {
       batchId: string | null;
       registeredAt: string | null;
       egressNodeHash: string | null;
+      // P5-AI: codex-tool 注册阶段返回的元信息
+      smsCountry: string | null;
+      smsCostCents: number | null;
+      lastRecoveryFailureCategory: AccountRecordInternal["lastRecoveryFailureCategory"];
       email: string;
     }>
   ): AccountRecordInternal | undefined {
@@ -949,6 +999,7 @@ export class HiveRepository {
       nextRecoveryAfter: "next_recovery_after",
       lastRecoveryError: "last_recovery_error",
       lastRecoveryPath: "last_recovery_path",
+      lastRecoveryFailureCategory: "last_recovery_failure_category",
       encPhone: "enc_phone",
       encPassword: "enc_password",
       encRefreshToken: "enc_refresh_token",
@@ -959,6 +1010,8 @@ export class HiveRepository {
       clientId: "client_id",
       batchId: "batch_id",
       registeredAt: "registered_at",
+      smsCountry: "sms_country",
+      smsCostCents: "sms_cost_cents",
       egressNodeHash: "egress_node_hash"
     };
     const sets: string[] = [];
@@ -1372,8 +1425,11 @@ function toAccountRow(record: AccountRecordInternal): Record<string, unknown> {
     nextRecoveryAfter: record.nextRecoveryAfter,
     lastRecoveryError: record.lastRecoveryError,
     lastRecoveryPath: record.lastRecoveryPath,
+    lastRecoveryFailureCategory: record.lastRecoveryFailureCategory,
     batchId: record.batchId,
     registeredAt: record.registeredAt,
+    smsCountry: record.smsCountry,
+    smsCostCents: record.smsCostCents,
     egressNodeHash: record.egressNodeHash,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
@@ -1411,8 +1467,11 @@ function accountFromRow(row: AccountRow): AccountRecordInternal {
     nextRecoveryAfter: row.next_recovery_after,
     lastRecoveryError: row.last_recovery_error,
     lastRecoveryPath: row.last_recovery_path,
+    lastRecoveryFailureCategory: row.last_recovery_failure_category,
     batchId: row.batch_id,
     registeredAt: row.registered_at,
+    smsCountry: row.sms_country,
+    smsCostCents: row.sms_cost_cents,
     egressNodeHash: row.egress_node_hash,
     createdAt: row.created_at,
     updatedAt: row.updated_at
