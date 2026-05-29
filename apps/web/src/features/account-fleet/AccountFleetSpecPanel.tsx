@@ -138,32 +138,29 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patchTarget((c) => ({ ...c, minHealthyRatio: v }))}
           />
         </div>
-        <div className="form-field" style={{ marginTop: 8 }}>
-          <label className="form-label">
-            补充策略均衡度：{draft.target.registerBias <= 15
-              ? "重登旧账号优先"
-              : draft.target.registerBias >= 85
-                ? "注册新账号优先"
-                : `重登 ${100 - draft.target.registerBias}% / 注册 ${draft.target.registerBias}%`}
-          </label>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="muted small">重登旧账号</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={draft.target.registerBias}
-              onChange={(e) => patchTarget((c) => ({ ...c, registerBias: Number(e.target.value) }))}
-              style={{ flex: 1 }}
-            />
-            <span className="muted small">注册新账号</span>
-            <span className="mono-strong" style={{ width: 40, textAlign: "right" }}>{draft.target.registerBias}</span>
+        <div className="form-field balance-field" style={{ marginTop: 8 }}>
+          <label className="form-label">补充策略均衡度</label>
+          <div className="balance-ends">
+            <span className={draft.target.registerBias < 50 ? "balance-end is-strong" : "balance-end"}>
+              ↻ 重登旧账号 <strong>{100 - draft.target.registerBias}%</strong>
+            </span>
+            <span className={draft.target.registerBias > 50 ? "balance-end is-strong" : "balance-end"}>
+              <strong>{draft.target.registerBias}%</strong> 注册新账号 ＋
+            </span>
           </div>
-          <div className="muted small" style={{ marginTop: 4 }}>
-            健康账号不足时，缺口里有多大比例用"注册新号"补满，其余留给"重登掉线旧号"恢复。
+          <input
+            type="range"
+            className="balance-range"
+            min={0}
+            max={100}
+            step={5}
+            value={draft.target.registerBias}
+            onChange={(e) => patchTarget((c) => ({ ...c, registerBias: Number(e.target.value) }))}
+            aria-label="补充策略均衡度：左偏重登，右偏注册"
+          />
+          <div className="muted small" style={{ marginTop: 6 }}>
+            健康账号不足时，缺口按此比例分配：偏左多靠"重登掉线旧号"补，偏右多靠"注册新号"补。
             掉线账号始终会照常尝试重登；此项只调注册新号的积极程度（紧急模式下忽略，全力补给）。
-            注册需先开启「注册」开关。
           </div>
         </div>
         <div className="form-grid">
@@ -274,7 +271,7 @@ export function AccountFleetSpecPanel(props: {
         title="注册新账号（接码收费）"
         storageKey="account-fleet-registration"
         defaultOpen
-        hint="唯一收费路径。三级预算 perTick / daily / monthly 任一耗尽即停。紧急补给 = healthy/target < minHealthyRatio 时自动提升 perTickCap。"
+        hint="唯一花钱的路径。三道上限任一达到就停止注册：每次巡检最多注册 N 个、当天累计、当月累计。上限按【成功注册数】计，失败的尝试只算花费不占额度。紧急补给（健康/目标低于最低健康比）时忽略每次巡检上限全力补。"
       >
         <div className="checkbox-stack">
           <Checkbox
@@ -285,19 +282,19 @@ export function AccountFleetSpecPanel(props: {
         </div>
         <div className="form-grid">
           <NumberInput
-            label="单 tick 注册上限"
+            label="每次巡检最多注册"
             value={draft.registration.perTickCap}
             min={0}
             onChange={(v) => patchRegistration((c) => ({ ...c, perTickCap: v }))}
           />
           <NumberInput
-            label="日预算"
+            label="每日注册上限"
             value={draft.registration.dailyBudget}
             min={0}
             onChange={(v) => patchRegistration((c) => ({ ...c, dailyBudget: v }))}
           />
           <NumberInput
-            label="月预算"
+            label="每月注册上限"
             value={draft.registration.monthlyBudget}
             min={0}
             onChange={(v) => patchRegistration((c) => ({ ...c, monthlyBudget: v }))}

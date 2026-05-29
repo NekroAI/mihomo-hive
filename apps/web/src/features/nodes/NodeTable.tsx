@@ -125,7 +125,7 @@ export function NodeTable(props: {
       },
       {
         id: "codexOutcome",
-        header: "登录战绩",
+        header: "登录实测",
         cell: ({ row }) => <CodexOutcomeCell node={row.original} />,
         size: 96
       },
@@ -318,7 +318,7 @@ function QualityCell(props: { score: number | null | undefined }) {
 function CodexOutcomeCell(props: { node: ProxyNode }) {
   const ok = props.node.codexLoginSuccess ?? 0;
   const fail = props.node.codexLoginFailure ?? 0;
-  if (ok === 0 && fail === 0) return <span className="muted small" title="尚未经此节点跑过登录/注册">未试</span>;
+  if (ok === 0 && fail === 0) return <span className="muted" title="尚未经此节点跑过登录/注册">-</span>;
   const tone: "success" | "warning" | "danger" = ok > 0 ? "success" : "danger";
   return (
     <Badge tone={tone}>

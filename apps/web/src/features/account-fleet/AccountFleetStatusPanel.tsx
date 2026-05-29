@@ -70,7 +70,7 @@ export function AccountFleetStatusPanel(props: {
       <PoolHealthHero snapshot={snap} />
       <KpiCards snapshot={snap} />
       <div className="account-fleet-main">
-        <AccountMatrix accounts={snap.accounts} />
+        <AccountMatrix accounts={snap.accounts} lastTick={snap.lastTick} />
         <div className="account-fleet-side">
           <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
           <RunningJobsCard
@@ -81,7 +81,7 @@ export function AccountFleetStatusPanel(props: {
           />
           <FailureReasonsCard reasons={snap.recentFailureReasons} />
           <RecentFinishedJobsCard jobs={snap.recentFinishedJobs} accounts={snap.accounts} />
-          <RecentTicksCard ticks={snap.recentTicks} />
+          <RecentTicksCard ticks={snap.recentTicks} lastTick={snap.lastTick} />
         </div>
       </div>
     </div>
@@ -155,7 +155,7 @@ function SmsRegionHintCard(props: {
  * 右：自动维护状态 + 上次巡检。充分利用桌面横向空间。
  */
 function PoolHealthHero(props: { snapshot: AccountFleetStatusSnapshot }) {
-  const { kpis, lastTick, spec } = props.snapshot;
+  const { kpis, spec } = props.snapshot;
   const ratio = kpis.target > 0 ? kpis.healthyCount / kpis.target : 1;
   const verdict =
     kpis.target === 0
@@ -220,13 +220,6 @@ function PoolHealthHero(props: { snapshot: AccountFleetStatusSnapshot }) {
         <Badge tone={spec.enabled ? "success" : "warning"}>
           {spec.enabled ? "自动维护运行中" : "已暂停"}
         </Badge>
-        {lastTick ? (
-          <span className="muted small">
-            上次巡检 {new Date(lastTick.startedAt).toLocaleTimeString()} · 计划 {lastTick.plannedTotal} · 入队 {lastTick.appliedTotal}
-          </span>
-        ) : (
-          <span className="muted small">尚未巡检</span>
-        )}
       </div>
     </section>
   );
@@ -261,21 +254,21 @@ function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
         tone={recoveringTone}
       />
       <KpiCard
-        title="今日注册"
+        title="今日成功注册"
         primary={`${kpis.todayRegistrationsUsed} / ${kpis.todayRegistrationsBudget}`}
-        secondary={describeBudgetTone(budgetTone, dailyRatio)}
+        secondary={describeBudgetTone(budgetTone, dailyRatio) + "（失败不计入）"}
         tone={budgetTone}
       />
       <KpiCard
         title="今日花费"
         primary={`$${(kpis.todaySmsCostCents / 100).toFixed(2)}`}
-        secondary={`本月 $${(kpis.monthlySmsCostCents / 100).toFixed(2)}`}
+        secondary={`本月 $${(kpis.monthlySmsCostCents / 100).toFixed(2)} · 含失败取号`}
         tone="neutral"
       />
       <KpiCard
-        title="本月注册"
+        title="本月成功注册"
         primary={`${kpis.monthlyRegistrationsUsed} / ${kpis.monthlyRegistrationsBudget}`}
-        secondary={kpis.monthlyRegistrationsBudget === 0 ? "未设月预算" : `占月预算 ${monthlyRatioPct}%`}
+        secondary={kpis.monthlyRegistrationsBudget === 0 ? "未设月上限" : `占月上限 ${monthlyRatioPct}%`}
         tone="neutral"
       />
     </section>
@@ -295,7 +288,11 @@ const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountR
   {
     key: "attention",
     label: "需关注",
-    match: (a) => a.health === "broken" || a.intent === "recovering" || a.health === "rate_limited"
+    // 只看"还能动手"的：可恢复的掉线(未退役) / 正在修复 / 被限流。已退役死号不算需关注。
+    match: (a) =>
+      (a.health === "broken" && a.intent !== "retired") ||
+      a.intent === "recovering" ||
+      a.health === "rate_limited"
   },
   { key: "all", label: "全部", match: () => true },
   { key: "healthy", label: "健康", match: (a) => a.health === "healthy" },
@@ -306,7 +303,7 @@ const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountR
 
 const MATRIX_PAGE_SIZE = 50;
 
-function AccountMatrix(props: { accounts: AccountRecordView[] }) {
+function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: AccountFleetTick | undefined }) {
   const [filter, setFilter] = React.useState<MatrixFilterKey>("attention");
   const [query, setQuery] = React.useState("");
   const [page, setPage] = React.useState(0);
@@ -320,8 +317,12 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
           (a) => a.email.toLowerCase().includes(q) || (a.externalId ? String(a.externalId).includes(q) : false)
         )
       : base;
-    // 排序：broken / recovering 在前，retired 在后；同状态下 quota 高的靠前
-    return [...searched].sort((a, b) => intentRank(a) - intentRank(b) || healthRank(a) - healthRank(b));
+    // P6-10 排序：按"用户最关心 + 最近有变动"——正在修复→可恢复掉线→限流→健康→
+    // 配额冷却→已退役死号(沉底)；同档内按真实事件时间(恢复/注册/限流)降序，让刚发生
+    // 变化的浮到前面。不用 updatedAt(每 tick 全量刷新，无区分度)。
+    return [...searched].sort(
+      (a, b) => matrixActivityRank(a) - matrixActivityRank(b) || matrixRecencyMs(b) - matrixRecencyMs(a)
+    );
   }, [props.accounts, activeMatch, q]);
 
   // filter/search 变化时回到第 1 页
@@ -371,7 +372,20 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
   }
 
   return (
-    <Panel title={`账号矩阵 ${filtered.length}/${props.accounts.length}`} className="status-pane-matrix">
+    <Panel
+      title={`账号矩阵 ${filtered.length}/${props.accounts.length}`}
+      className="status-pane-matrix"
+      actions={
+        props.lastTick ? (
+          <span className="muted small">
+            上次巡检 {new Date(props.lastTick.startedAt).toLocaleTimeString()} · 计划 {props.lastTick.plannedTotal} · 入队{" "}
+            {props.lastTick.appliedTotal}
+          </span>
+        ) : (
+          <span className="muted small">尚未巡检</span>
+        )
+      }
+    >
       {chipBar}
       {filtered.length === 0 ? (
         <EmptyState title="没有符合条件的账号" description="换个筛选或清空搜索试试。" />
@@ -547,23 +561,67 @@ function mergeIdleRuns(ticks: AccountFleetTickSummary[]): FleetFeedItem[] {
   return items;
 }
 
-function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
+/** P6-11 本轮巡检规划摘要：把 lastTick.plannedActions 按动作类型聚合成 chips —— 比一排
+ *  "计划68/入队37" 重复行有意义得多，直接告诉用户系统这一轮在做什么。 */
+function TickActionBreakdown(props: { tick: AccountFleetTick }) {
+  const counts = new Map<string, number>();
+  for (const a of props.tick.plannedActions) counts.set(a.kind, (counts.get(a.kind) ?? 0) + 1);
+  // 把"实际动手"的排前面，观察/延后这类只读动作排后并弱化
+  const order = [
+    "recover_via_login",
+    "recover_via_register",
+    "register_new",
+    "retire",
+    "delete_external",
+    "demote_to_observing",
+    "toggle_schedulable",
+    "defer",
+    "observe_usage"
+  ];
+  const passive = new Set(["defer", "observe_usage"]);
+  const entries = [...counts.entries()].sort(
+    (a, b) => order.indexOf(a[0]) - order.indexOf(b[0])
+  );
+  if (entries.length === 0) {
+    return <div className="muted small">本轮无规划动作（池子稳定 / 已暂停）。</div>;
+  }
+  return (
+    <div className="tick-breakdown">
+      {entries.map(([kind, n]) => (
+        <span key={kind} className={`tick-bd-chip${passive.has(kind) ? " is-passive" : ""}`}>
+          {tickActionLabel(kind as AccountFleetTick["plannedActions"][number]["kind"])}
+          <strong>{n}</strong>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RecentTicksCard(props: { ticks: AccountFleetTickSummary[]; lastTick: AccountFleetTick | undefined }) {
+  const [historyOpen, setHistoryOpen] = React.useState(false);
   if (props.ticks.length === 0) {
     return (
-      <Panel title="最近巡检">
-        <EmptyState title="尚未跑过巡检" description="服务启动后会按 reconcileIntervalMs（默认 5 分钟）触发首次。" />
+      <Panel title="巡检活动">
+        <EmptyState title="尚未跑过巡检" description="开启自动维护后每 5 分钟自动巡检一次。" />
       </Panel>
     );
   }
   const items = mergeIdleRuns(props.ticks);
-  const meaningful = props.ticks.filter(
-    (t) => t.skippedReason !== "no_change" && t.skippedReason !== "paused"
-  ).length;
   return (
-    <Panel
-      title={`最近巡检 (${meaningful} 有变化 / 共 ${props.ticks.length})`}
-      className="status-pane-feed"
-    >
+    <Panel title="巡检活动" className="status-pane-feed">
+      {props.lastTick ? (
+        <div className="tick-current">
+          <div className="muted small" style={{ marginBottom: 4 }}>
+            本轮规划（{new Date(props.lastTick.startedAt).toLocaleTimeString()} · 入队 {props.lastTick.appliedTotal}/
+            {props.lastTick.plannedTotal}）
+          </div>
+          <TickActionBreakdown tick={props.lastTick} />
+        </div>
+      ) : null}
+      <button type="button" className="tick-history-toggle" onClick={() => setHistoryOpen((v) => !v)}>
+        {historyOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} 历史巡检（{props.ticks.length}）
+      </button>
+      {historyOpen ? (
       <div className="reconcile-feed">
         {items.map((item, idx) => {
           if (item.kind === "paused_run" || item.kind === "no_change_run") {
@@ -588,6 +646,7 @@ function RecentTicksCard(props: { ticks: AccountFleetTickSummary[] }) {
           return <TickRow key={item.tick.id} tick={item.tick} />;
         })}
       </div>
+      ) : null}
     </Panel>
   );
 }
@@ -1256,31 +1315,25 @@ function rowRoleByHealth(health: AccountHealth): "serving" | "quarantined" | "ev
   }
 }
 
-function intentRank(acc: AccountRecordView): number {
-  switch (acc.intent) {
-    case "recovering":
-      return 0;
-    case "pending":
-      return 1;
-    case "active":
-      return 2;
-    case "retired":
-      return 3;
-  }
+/** P6-10 账号矩阵活动优先级：数字越小越靠前。已退役死号沉底。 */
+function matrixActivityRank(a: AccountRecordView): number {
+  if (a.intent === "retired") return 6; // 死号永远沉底
+  if (a.intent === "recovering") return 0; // 正在修复，最该看
+  if (a.intent === "pending") return 1; // 注册落地中
+  if (a.health === "broken") return 2; // 可恢复掉线
+  if (a.health === "rate_limited") return 3;
+  if (a.health === "healthy") return 4;
+  if (a.health === "quota_exhausted") return 5; // 冷却中，自己会好
+  return 5;
 }
-function healthRank(acc: AccountRecordView): number {
-  switch (acc.health) {
-    case "broken":
-      return 0;
-    case "rate_limited":
-      return 1;
-    case "quota_exhausted":
-      return 2;
-    case "unknown":
-      return 3;
-    case "healthy":
-      return 4;
-  }
+
+/** 同档内的"最近有变动"信号：取恢复/注册/限流等真实事件时间最大值（非 updatedAt）。 */
+function matrixRecencyMs(a: AccountRecordView): number {
+  const ts = [a.lastRecoveredAt, a.registeredAt, a.rateLimitedAt, a.firstSeenAt]
+    .filter((t): t is string => Boolean(t))
+    .map((t) => new Date(t).getTime())
+    .filter((n) => Number.isFinite(n));
+  return ts.length ? Math.max(...ts) : 0;
 }
 
 function SkippedIcon(props: { skipped: AccountFleetTickSummary["skippedReason"] }) {

@@ -333,17 +333,26 @@ async function runCodexRegister(
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
 
   // P5-AI: 不管成功失败，只要 codex-tool 返回了 sms_region_result 就回灌经验
-  // （codex-tool 决定怎么用，Hive 透明保存）；并按实际花费记账，让月度成本预算有意义
-  const persistSms = (sms: { result: unknown; costUsd: number | null }, country: string | null) => {
+  // （codex-tool 决定怎么用，Hive 透明保存）；并按实际花费记账，让月度成本预算有意义。
+  // P6-09: succeeded 决定是否计入"今日注册"额度 —— 只有真注册成功(token_ready)才 +1，
+  // 失败尝试只记花费、不占注册额度（否则失败会把 dailyBudget 烧光锁死自动注册）。
+  const persistSms = (
+    sms: { result: unknown; costUsd: number | null },
+    country: string | null,
+    succeeded: boolean
+  ) => {
     if (sms.result != null) repo.saveSmsRegionHint(sms.result);
     const costCents = sms.costUsd != null ? Math.round(sms.costUsd * 100) : 0;
-    incrementRegistrationsBudget(repo, spec, costCents);
+    incrementRegistrationsBudget(repo, spec, {
+      deltaRegistrations: succeeded ? 1 : 0,
+      deltaSmsCostCents: costCents
+    });
     return { costCents: sms.costUsd != null ? costCents : null, country };
   };
 
   if (outcome.kind === "registration_failed") {
     // 接码失败一般不收费（cost=0），但仍把 sms_region_result 经验回灌给 codex-tool。
-    persistSms(outcome.sms, outcome.sms.country);
+    persistSms(outcome.sms, outcome.sms.country, false);
     const attemptCount = Array.isArray(outcome.sms.attempts) ? outcome.sms.attempts.length : 0;
     // P5-AX：归因 —— 注册失败不无脑透传原始错误。取不到号 / 取到号收不到验证码都归为
     // "地区不可用"（不是账号/节点问题，不退役账号、不罚节点）。带上尝试地区数便于判断。
@@ -356,7 +365,7 @@ async function runCodexRegister(
     throw new Error(reason);
   }
   if (outcome.kind === "oauth_failed") {
-    const { costCents, country } = persistSms(outcome.recoverable.sms, outcome.recoverable.sms.country);
+    const { costCents, country } = persistSms(outcome.recoverable.sms, outcome.recoverable.sms.country, false);
     // P5-AS：OAuth 失败若属网络/代理/Sentinel 类，给节点记一笔失败（account_unusable 不记）
     recordNodeOutcome(repo, egress, {
       failedMessage: `${outcome.recoverable.error} [${outcome.recoverable.classification.failureCategory ?? "oauth_failed"}]`
@@ -400,7 +409,7 @@ async function runCodexRegister(
   // token_ready
   // P5-AS：注册成功 = 节点能过 Sentinel，记一笔成功
   recordNodeOutcome(repo, egress, "success");
-  const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country);
+  const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country, true);
   await landOnSub2api({
     repo,
     crypto,
@@ -1094,10 +1103,17 @@ function applyRecoveryFailure(
   });
 }
 
+/**
+ * 记账（P6-09 修正）：
+ *   deltaRegistrations —— **仅成功注册(token_ready)计 1**，失败尝试不计入"今日注册"
+ *     额度。否则一串失败会把 dailyBudget 烧光，永久拦截自动注册（实测 25 次尝试只 5
+ *     成功却把 used 顶到 25、dailyBudget=1 直接锁死）。
+ *   deltaSmsCostCents —— 任何实际取号花费都记（含失败时已扣的号费），成本真实反映。
+ */
 function incrementRegistrationsBudget(
   repo: HiveRepository,
   spec: AccountFleetSpec,
-  deltaSmsCostCents = 0
+  opts: { deltaRegistrations: number; deltaSmsCostCents: number }
 ): void {
   const now = new Date();
   const dayKey = budgetWindowKey(now, "day");
@@ -1113,15 +1129,15 @@ function incrementRegistrationsBudget(
     windowKey: dayKey,
     registrationsBudget: spec.registration.dailyBudget,
     resetAt: tomorrow.toISOString(),
-    deltaRegistrations: 1,
-    deltaSmsCostCents
+    deltaRegistrations: opts.deltaRegistrations,
+    deltaSmsCostCents: opts.deltaSmsCostCents
   });
   repo.incrementBudgetUsage({
     windowKey: monthKey,
     registrationsBudget: spec.registration.monthlyBudget,
     resetAt: monthAfter.toISOString(),
-    deltaRegistrations: 1,
-    deltaSmsCostCents
+    deltaRegistrations: opts.deltaRegistrations,
+    deltaSmsCostCents: opts.deltaSmsCostCents
   });
 }
 
