@@ -838,15 +838,6 @@ input[type="number"] {
   color: inherit;
   font-size: 13px;
 }
-.matrix-pager {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 8px;
-  border-top: 1px solid var(--border);
-}
-
 /* P6-08 均衡度平衡条：左(重登)↔右(注册)，暗色适配 */
 .balance-field .balance-ends {
   display: flex;
@@ -2713,9 +2704,53 @@ input[type="number"] {
   font-size: 12px;
 }
 
+/* P6-17 统一分页器：每页大小 + 范围 + 上/下一页，全项目表格共用 */
 .pager {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
+}
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.pager-size-select {
+  width: auto;
+  min-width: 56px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.pager-range {
+  font-variant-numeric: tabular-nums;
+}
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  background: var(--panel);
+  color: var(--text, inherit);
+  cursor: pointer;
+}
+.pager-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.matrix-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
 }
 
 .export-stats {

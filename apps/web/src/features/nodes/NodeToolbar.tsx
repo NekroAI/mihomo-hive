@@ -4,6 +4,7 @@ import {
   Archive,
   Check,
   CheckSquare,
+  CircleDashed,
   MoreHorizontal,
   PauseCircle,
   PlayCircle,
@@ -53,6 +54,7 @@ export interface NodeToolbarProps {
   onPreviewDeleteSelected: () => void;
   onSelectFiltered: () => void;
   onSelectSuccessful: () => void;
+  onSelectUntested: () => void;
   onInvertFiltered: () => void;
   onClearSelection: () => void;
 }
@@ -111,6 +113,15 @@ export function NodeToolbar(props: NodeToolbarProps) {
           <Button
             size="sm"
             variant="secondary"
+            icon={<CircleDashed size={14} />}
+            onClick={props.onSelectUntested}
+            title="只选中筛选结果中尚未测试（status=untested）的节点，便于批量测新导入的节点"
+          >
+            选择未测试
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             icon={<XSquare size={14} />}
             disabled={!hasSelection}
             onClick={props.onClearSelection}
@@ -139,14 +150,14 @@ export function NodeToolbar(props: NodeToolbarProps) {
             variant="secondary"
             icon={<Activity size={14} />}
             loading={props.testing}
-            disabled={props.busy || !hasSelection || !canTestSelected}
+            disabled={props.busy || !hasSelection}
             onClick={props.onTestSelected}
             title={
               !hasSelection
                 ? "请先在表格里勾选节点"
-                : !canTestSelected
-                  ? "选中节点中没有已分配端口的，先点'分配端口'"
-                  : `对所选 ${props.selectedWithPortCount} 个已分配端口节点跑 OpenAI / Claude 连通性测试`
+                : canTestSelected
+                  ? `对所选 ${props.selectedCount} 个节点跑 OpenAI / Claude 连通性测试`
+                  : "所选节点未分配端口，测试时会自动先分配端口并接入 Mihomo 再测"
             }
           >
             测试所选

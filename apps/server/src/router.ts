@@ -550,6 +550,32 @@ export const appRouter = t.router({
         const spec = ctx.repo.getOrchestrationSpec();
         const inPoolGate = spec.supply.inPoolGate;
         const hashFilter = input.hashes ? new Set(input.hashes) : undefined;
+        // P6-16：用户"测试所选"时，若选中的节点还没分配端口（刚导入的 candidate），
+        // 先给它们补端口 + 渲染 reload Mihomo，再测 —— 不必让用户手动先点"接入 Mihomo"。
+        if (hashFilter) {
+          const needPort = ctx.repo
+            .listNodes()
+            .filter((n) => hashFilter.has(n.hash) && !n.assignedPort && n.lifecycleStatus !== "retired");
+          if (needPort.length > 0) {
+            const range = { start: ctx.config.portRangeStart, end: ctx.config.portRangeEnd };
+            const status = await readMihomoStatus(ctx.config);
+            const occupied = status.running
+              ? new Set<number>()
+              : await findOccupiedPorts(ctx.config.listenHost, enumeratePorts(range));
+            const assigned = assignStablePorts({
+              nodes: ctx.repo.listNodes(),
+              range,
+              occupiedPorts: occupied,
+              preserveExisting: true,
+              targetHashes: needPort.map((n) => n.hash)
+            });
+            ctx.repo.saveNodes(assigned);
+            const rendered = renderMihomoConfig(assigned, ctx.config);
+            await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
+            await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
+            await (status.running ? reloadMihomo(ctx.config) : startMihomo(ctx.config));
+          }
+        }
         const candidates = ctx.repo
           .listNodes()
           .filter((node) => node.assignedPort && node.lifecycleStatus !== "retired")
@@ -1942,10 +1968,13 @@ function resolvePreviewSource(
 ): SubscriptionSource {
   if (input.id) {
     const source = repo.listSubscriptions().find((item) => item.id === input.id);
-    if (!source) {
+    if (source) return source;
+    // 容错：id 找不到时，若带了 url 就走临时源（预览本就不要求订阅已保存）。
+    // 修复"输 URL→预览→加关键词→重新预览"报"订阅源不存在"——首次预览的 source.id
+    // 只是个未保存的随机 UUID，重新预览传它回来当然找不到。
+    if (!input.url) {
       throw new TRPCError({ code: "NOT_FOUND", message: "订阅源不存在。" });
     }
-    return source;
   }
   if (!input.name || !input.url) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "请填写订阅名称和 URL。" });

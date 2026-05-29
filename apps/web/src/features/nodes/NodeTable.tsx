@@ -15,8 +15,6 @@ import {
   Check,
   CheckCircle2,
   CircleDot,
-  ChevronsLeft,
-  ChevronsRight,
   MessageSquare,
   MinusCircle,
   Search,
@@ -25,7 +23,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { ProxyNode, Sub2ApiProxyRecord } from "@mihomo-hive/schemas";
-import { Badge, Button, Checkbox, EmptyState, SelectInput, TextInput } from "../../components/ui.js";
+import { Badge, Checkbox, EmptyState, Pager, SelectInput, TextInput } from "../../components/ui.js";
 import {
   formatLifecycleStatus,
   formatRegion,
@@ -221,6 +219,17 @@ export function NodeTable(props: {
           onChange={(type) => props.onFiltersChange({ ...props.filters, type })}
           options={[{ label: "全部协议", value: "all" }, ...uniqueOptions(props.nodes, "type")]}
         />
+        <SelectInput
+          value={props.filters.sourceId}
+          onChange={(sourceId) => props.onFiltersChange({ ...props.filters, sourceId })}
+          options={[
+            { label: "全部来源", value: "all" },
+            ...uniqueOptions(props.nodes, "sourceId").map((o) => ({
+              label: props.sourceNames.get(o.value) ?? o.value,
+              value: o.value
+            }))
+          ]}
+        />
         <TextInput
           value={props.filters.portFrom}
           onChange={(portFrom) => props.onFiltersChange({ ...props.filters, portFrom })}
@@ -274,29 +283,14 @@ export function NodeTable(props: {
       </div>
 
       <footer className="table-footer">
-        <div>
-          第 {table.getState().pagination.pageIndex + 1} / {Math.max(1, table.getPageCount())} 页
-        </div>
-        <div className="pager">
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<ChevronsLeft size={15} />}
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-          >
-            上一页
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<ChevronsRight size={15} />}
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-          >
-            下一页
-          </Button>
-        </div>
+        <Pager
+          page={table.getState().pagination.pageIndex}
+          pageCount={Math.max(1, table.getPageCount())}
+          total={props.filteredNodes.length}
+          pageSize={table.getState().pagination.pageSize}
+          onPageChange={(p) => table.setPageIndex(p)}
+          onPageSizeChange={(s) => table.setPageSize(s)}
+        />
       </footer>
     </section>
   );

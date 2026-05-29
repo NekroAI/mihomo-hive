@@ -1,5 +1,5 @@
 import React from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info, Loader2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Info, Loader2, X } from "lucide-react";
 
 export type Tone = "neutral" | "success" | "danger" | "warning" | "info";
 
@@ -121,6 +121,63 @@ export function SelectInput(props: {
       <span>{props.label}</span>
       {select}
     </label>
+  );
+}
+
+/**
+ * 统一分页器（P6-17）—— 全项目表格共用：每页大小选择 + 范围 + 上/下一页。
+ * page 为 0-based。pageSize 选项默认 25/50/100/200。
+ */
+export function Pager(props: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  pageSizeOptions?: number[];
+}) {
+  const opts = props.pageSizeOptions ?? [25, 50, 100, 200];
+  const from = props.total === 0 ? 0 : props.page * props.pageSize + 1;
+  const to = Math.min((props.page + 1) * props.pageSize, props.total);
+  return (
+    <div className="pager">
+      <span className="pager-size">
+        每页
+        <select
+          className="select-input pager-size-select"
+          value={String(props.pageSize)}
+          onChange={(e) => props.onPageSizeChange(Number(e.target.value))}
+        >
+          {opts.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </span>
+      <span className="pager-range muted small">
+        {from}–{to} / {props.total}
+      </span>
+      <button
+        type="button"
+        className="pager-btn"
+        disabled={props.page <= 0}
+        onClick={() => props.onPageChange(props.page - 1)}
+        aria-label="上一页"
+      >
+        <ChevronLeft size={15} />
+      </button>
+      <button
+        type="button"
+        className="pager-btn"
+        disabled={props.page >= props.pageCount - 1}
+        onClick={() => props.onPageChange(props.page + 1)}
+        aria-label="下一页"
+      >
+        <ChevronRight size={15} />
+      </button>
+    </div>
   );
 }
 

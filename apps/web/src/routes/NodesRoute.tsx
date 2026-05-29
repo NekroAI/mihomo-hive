@@ -124,11 +124,14 @@ export function NodesRoute(props: NodesRouteProps) {
           const id = props.importPreview?.source.id;
           const name = props.importPreview?.source.name ?? props.subscriptionName;
           const url = props.importPreview?.source.value ?? props.subscriptionUrl;
-          if (id) {
-            m.previewImport.mutate({ id, excludeKeywords: keywords });
-          } else if (name && url) {
-            m.previewImport.mutate({ name, url, excludeKeywords: keywords });
-          }
+          // 同时带 id + name + url：后端优先用已保存的 id，找不到(未保存的预览源)则回退到
+          // url，避免"重新预览"报"订阅源不存在"。
+          m.previewImport.mutate({
+            ...(id ? { id } : {}),
+            ...(name ? { name } : {}),
+            ...(url ? { url } : {}),
+            excludeKeywords: keywords
+          });
         }}
         onApplyImport={(keywords) => {
           props.setSubscriptionKeywords(keywords.join(","));
@@ -264,6 +267,14 @@ export function NodesRoute(props: NodesRouteProps) {
             props.mutateSelection((current) => {
               for (const node of props.filteredNodes) {
                 if (node.status === "active") current.add(node.hash);
+              }
+              return current;
+            })
+          }
+          onSelectUntested={() =>
+            props.mutateSelection((current) => {
+              for (const node of props.filteredNodes) {
+                if (node.status === "untested") current.add(node.hash);
               }
               return current;
             })

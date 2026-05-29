@@ -20,7 +20,7 @@ import type {
   AccountOrigin,
   AccountRecordView
 } from "@mihomo-hive/schemas";
-import { Badge, Button, EmptyState, InfoTip, Panel } from "../../components/ui.js";
+import { Badge, Button, EmptyState, InfoTip, Pager, Panel } from "../../components/ui.js";
 import { trpc } from "../../lib/trpc.js";
 
 /**
@@ -289,12 +289,12 @@ const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountR
   { key: "cooling", label: "冷却中", match: (a) => a.health === "quota_exhausted" || a.health === "rate_limited" }
 ];
 
-const MATRIX_PAGE_SIZE = 50;
 
 function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: AccountFleetTick | undefined }) {
   const [filter, setFilter] = React.useState<MatrixFilterKey>("attention");
   const [query, setQuery] = React.useState("");
   const [page, setPage] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState(50);
 
   const q = query.trim().toLowerCase();
   const activeMatch = (MATRIX_FILTERS.find((f) => f.key === filter) ?? MATRIX_FILTERS[1]!).match;
@@ -316,9 +316,9 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
   // filter/search 变化时回到第 1 页
   React.useEffect(() => setPage(0), [filter, q]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / MATRIX_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(safePage * MATRIX_PAGE_SIZE, (safePage + 1) * MATRIX_PAGE_SIZE);
+  const pageRows = filtered.slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   const chipBar = (
     <div className="matrix-toolbar">
@@ -481,17 +481,19 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
           </table>
         </div>
       )}
-      {pageCount > 1 ? (
+      {filtered.length > 0 ? (
         <div className="matrix-pager">
-          <Button size="sm" variant="ghost" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-            上一页
-          </Button>
-          <span className="muted small">
-            {safePage * MATRIX_PAGE_SIZE + 1}–{Math.min((safePage + 1) * MATRIX_PAGE_SIZE, filtered.length)} / {filtered.length}
-          </span>
-          <Button size="sm" variant="ghost" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)}>
-            下一页
-          </Button>
+          <Pager
+            page={safePage}
+            pageCount={pageCount}
+            total={filtered.length}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={(s) => {
+              setPageSize(s);
+              setPage(0);
+            }}
+          />
         </div>
       ) : null}
     </Panel>
@@ -803,7 +805,7 @@ function RegisterControl(props: { unitCostUsd: number }) {
         title="立刻注册 N 个新账号并插队到所有队列任务前面。每个账号都会向接码平台取号、产生费用。"
         onClick={() => setConfirming(true)}
       >
-        注册一批…
+        立即注册
       </Button>
       <Button
         size="sm"
