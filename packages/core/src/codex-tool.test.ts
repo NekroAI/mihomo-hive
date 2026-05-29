@@ -74,7 +74,7 @@ describe("buildCodexToolConfigJson", () => {
         regionHint: { country: "12", operator: "any", last_success_at: "2026-05-29T10:20:00Z", ttl_seconds: 1800 }
       }
     });
-    const phoneSms = (out as Record<string, Record<string, unknown>>).phone_sms;
+    const phoneSms = (out as { phone_sms: Record<string, unknown> }).phone_sms;
     expect(phoneSms.region_hint).toEqual({
       country: "12",
       operator: "any",
@@ -85,7 +85,7 @@ describe("buildCodexToolConfigJson", () => {
 
   it("regionHint 缺省时 phone_sms.region_hint 不出现", () => {
     const out = buildCodexToolConfigJson(baseConfig);
-    const phoneSms = (out as Record<string, Record<string, unknown>>).phone_sms;
+    const phoneSms = (out as { phone_sms: Record<string, unknown> }).phone_sms;
     expect(phoneSms).not.toHaveProperty("region_hint");
   });
 
