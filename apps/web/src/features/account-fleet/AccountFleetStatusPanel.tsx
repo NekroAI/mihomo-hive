@@ -111,6 +111,9 @@ function SmsRegionHintCard(props: {
     ? (hint.hint as Record<string, unknown>)
     : null;
   const country = hintObj && typeof hintObj.country === "string" ? hintObj.country : null;
+  // P7：codex-tool 现在回传 country_name(国家名)，运维一眼看懂是哪个地区，光代号看不出
+  const countryName =
+    hintObj && typeof hintObj.country_name === "string" && hintObj.country_name ? hintObj.country_name : null;
   const operator = hintObj && typeof hintObj.operator === "string" ? hintObj.operator : null;
   const lastSuccessAt = hintObj && typeof hintObj.last_success_at === "string" ? hintObj.last_success_at : null;
   const ttlSeconds =
@@ -133,7 +136,10 @@ function SmsRegionHintCard(props: {
         </div>
         <div>
           <div className="muted small">上次成功地区</div>
-          <div className="mono-strong">{country ?? "—"}{operator ? ` · ${operator}` : ""}</div>
+          <div className="mono-strong">
+            {countryName ? `${countryName}（${country ?? "?"}）` : (country ?? "—")}
+            {operator ? ` · ${operator}` : ""}
+          </div>
         </div>
         <div>
           <div className="muted small">记忆更新时间</div>

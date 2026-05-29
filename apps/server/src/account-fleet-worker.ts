@@ -991,6 +991,10 @@ export function describeRegistrationFailure(error: string, attemptCount: number)
     "otp",
     "验证码"
   ];
+  // P7：被预算/SIGTERM 优雅中止(超时但已保留地区经验)
+  if (e.includes("中止") || e.includes("budget_exceeded") || e.includes("sigterm") || e.includes("abort")) {
+    return `注册超时中止（已保留地区经验，下次跳过坏区）${suffix}`;
+  }
   if (regionMarkers.some((k) => e.includes(k))) {
     return `地区不可用（取不到号或收不到验证码）${suffix}`;
   }

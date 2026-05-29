@@ -269,6 +269,8 @@ export interface CodexToolSpawnRequest {
   args: string[];
   stdinJson: string | null;
   timeoutMs: number;
+  /** P7：超时后先 SIGTERM 优雅停，再等这么久才 SIGKILL 兜底。默认 15s。 */
+  graceMs?: number;
   /**
    * P5-AT：实时 stderr 行回调（codex-tool 进度日志走 stderr，stdout 留给 JSON
    * 信封 / token）。**绝不回调 stdout**。调用方负责 redact 后再落地。
@@ -322,7 +324,13 @@ interface CreateAdapterOptions {
 
 export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAdapter {
   const spawner = opts.spawner ?? createDefaultSpawner(opts.config.binPath);
-  const configJson = JSON.stringify(buildCodexToolConfigJson(opts.config));
+  // P7：把"内部软预算"塞进 config.timeouts.total_budget_seconds —— 让 codex-tool 在我们
+  // 的硬超时(registerMs)之前自己优雅停下并输出带地区经验的信封，避免被 SIGKILL 杀掉丢经验。
+  // 预算 = registerMs - 20s 余量(覆盖一次在途网络调用 + 收尾)，最低 30s。
+  const cfgObj = buildCodexToolConfigJson(opts.config);
+  const budgetSeconds = Math.max(30, Math.round(opts.defaults.registerMs / 1000) - 20);
+  cfgObj.timeouts = { ...(cfgObj.timeouts as Record<string, unknown> | undefined), total_budget_seconds: budgetSeconds };
+  const configJson = JSON.stringify(cfgObj);
 
   /**
    * @param lenient 默认 false：ok=false 直接抛 envelope_not_ok。如果调用方（如
@@ -343,10 +351,17 @@ export function createCodexToolAdapter(opts: CreateAdapterOptions): CodexToolAda
       ...(onStderr ? { onStderr } : {})
     });
     if (res.timedOut) {
-      throw new CodexToolError(
-        `codex-tool timed out after ${timeoutMs}ms (signal=${res.signal ?? "none"})`,
-        "timeout"
-      );
+      // P7：硬超时(SIGTERM 后)——若 codex-tool 已优雅输出可解析信封(含地区经验)，就用它，
+      // 不当成完全失败丢掉经验；否则(真卡死被 SIGKILL、无信封)才抛 timeout。
+      try {
+        const partial = parseEnvelope(res.stdout);
+        return partial;
+      } catch {
+        throw new CodexToolError(
+          `codex-tool timed out after ${timeoutMs}ms (signal=${res.signal ?? "none"})`,
+          "timeout"
+        );
+      }
     }
     if (res.exitCode === null) {
       throw new CodexToolError(
@@ -649,7 +664,7 @@ function buildChildEnv(): NodeJS.ProcessEnv {
 }
 
 function createDefaultSpawner(binPath: string): CodexToolSpawner {
-  return async ({ args, stdinJson, timeoutMs, onStderr }) => {
+  return async ({ args, stdinJson, timeoutMs, onStderr, graceMs = 15_000 }) => {
     return new Promise<CodexToolSpawnResult>((resolve, reject) => {
       let child: ChildProcess;
       try {
@@ -697,13 +712,21 @@ function createDefaultSpawner(binPath: string): CodexToolSpawner {
         }
       });
 
+      // P7：超时不再直接 SIGKILL。先发 SIGTERM 让 codex-tool 优雅收尾(输出带地区经验的
+      // 信封)，等 graceMs 还没退出才 SIGKILL 兜底。graceMs 覆盖一次在途网络调用。
+      let hardKillTimer: NodeJS.Timeout | undefined;
+      const clearTimers = () => {
+        clearTimeout(killTimer);
+        if (hardKillTimer) clearTimeout(hardKillTimer);
+      };
       const killTimer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGKILL");
+        child.kill("SIGTERM");
+        hardKillTimer = setTimeout(() => child.kill("SIGKILL"), graceMs);
       }, timeoutMs);
 
       child.on("error", (err) => {
-        clearTimeout(killTimer);
+        clearTimers();
         const code = (err as NodeJS.ErrnoException).code;
         if (code === "ENOENT") {
           reject(new CodexToolError(`codex-tool binary not found at ${binPath}`, "bin_not_found"));
@@ -713,7 +736,7 @@ function createDefaultSpawner(binPath: string): CodexToolSpawner {
       });
 
       child.on("close", (exitCode, signal) => {
-        clearTimeout(killTimer);
+        clearTimers();
         resolve({
           stdout,
           stderr,

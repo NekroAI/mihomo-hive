@@ -353,6 +353,56 @@ describe("CodexToolAdapter", () => {
   });
 
   describe("registerOne", () => {
+    it("P7：注入 timeouts.total_budget_seconds（registerMs-20s 余量）", async () => {
+      const { spawner, recorded } = makeRecordingSpawner({
+        exitCode: 0,
+        stdout: JSON.stringify({ ok: true, command: "all", data: { accounts: [], recoverable_accounts: [], registration_failures: [], summary: {} } }),
+        stderr: "",
+        timedOut: false,
+        signal: null
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      await adapter.registerOne();
+      const cfg = JSON.parse(recorded[0]!.stdinJson!);
+      // defaults.registerMs=60_000 → 60-20=40
+      expect(cfg.timeouts.total_budget_seconds).toBe(40);
+    });
+
+    it("P7：超时但 codex-tool 优雅输出了信封 → 解析(不抛)，吸收地区经验", async () => {
+      const { spawner } = makeRecordingSpawner({
+        exitCode: null,
+        stdout: JSON.stringify({
+          ok: true,
+          command: "all",
+          data: {
+            accounts: [],
+            recoverable_accounts: [],
+            registration_failures: [
+              {
+                index: 1,
+                status: "registration_failed",
+                error: "注册中止：budget_exceeded",
+                aborted: true,
+                abort_reason: "budget_exceeded",
+                sms_region_attempts: [{ country: "73", country_name: "巴西", status: "number_failed" }],
+                sms_region_result: { country: "73", country_name: "巴西", status: "number_failed" }
+              }
+            ],
+            summary: { requested: 1, registration_failed: 1 }
+          },
+          error: null
+        }),
+        stderr: "",
+        timedOut: true,
+        signal: "SIGTERM"
+      });
+      const adapter = createCodexToolAdapter({ config: baseConfig, defaults, spawner });
+      const r = await adapter.registerOne();
+      if (r.kind !== "registration_failed") throw new Error("expected registration_failed (not thrown)");
+      expect(r.sms.result).toBeTruthy();
+      expect((r.sms.result as Record<string, unknown>).country_name).toBe("巴西");
+    });
+
     it("returns token_ready when account in accounts[]", async () => {
       const { spawner } = makeRecordingSpawner({
         exitCode: 0,
