@@ -497,14 +497,15 @@ select {
   margin: 0 auto;
 }
 
-/* 系统页（P5-AK）—— 多个 Panel 纵向堆叠，整页可滚。
-   参考 .orchestration-spec-panel 的稳定模式：flex column + overflow auto + min-height: 0。
-   大屏限制最大宽度避免内容过宽（系统配置是低密度内容）。 */
+/* 系统页（P5-AK）—— 多个 Panel 纵向堆叠占满整个工作区，整页可滚。
+   不像代理编排/账号编排那样分左右两栏 —— 系统页是配置/工具集合，没有需要
+   独占视野的状态面板（账号矩阵 / 节点矩阵）。横向占满整个工作区，无 max-width
+   限制。参考 .orchestration-spec-panel 的稳定模式：flex column + overflow auto +
+   min-height: 0。 */
 .system-workspace {
   height: 100%;
   min-height: 0;
   overflow: auto;
-  padding-right: 4px;
 }
 
 .system-stack {
@@ -512,11 +513,10 @@ select {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  max-width: 1320px;
-  margin: 0 auto;
+  width: 100%;
 }
 
-/* 系统页内每个 panel 的 body 给点呼吸感（接管面板 / 维护工具 / 导出篮子 内容较密） */
+/* 子 panel 防被 flex 挤压（接管面板有可滚表格，需要保自身高度） */
 .system-stack > .panel,
 .system-stack > details {
   flex-shrink: 0;

@@ -260,6 +260,11 @@ function truncateError(s: string, max = 80): string {
   return s.slice(0, max - 1) + "…";
 }
 
+/**
+ * 项目规范的 NumberInput —— 跟 OrchestrationSpecPanel / AccountFleetSpecPanel 里的本地
+ * NumberInput 同款 className 和行为。这里复制一份是为了让 CodexToolConnectionPanel 可独立
+ * 复用，不依赖 SpecPanel 内部实现。未来 ui.tsx 可以收口三处共用。
+ */
 function NumberInput(props: {
   label: string;
   value: number;
@@ -269,15 +274,19 @@ function NumberInput(props: {
   onChange: (next: number) => void;
 }) {
   return (
-    <label className="number-input">
-      <span className="input-label">{props.label}</span>
+    <label className="field">
+      <span>{props.label}</span>
       <input
+        className="text-input font-mono"
         type="number"
-        value={props.value}
+        value={Number.isFinite(props.value) ? props.value : 0}
         min={props.min}
         max={props.max}
-        step={props.step}
-        onChange={(e) => props.onChange(Number(e.target.value) || 0)}
+        step={props.step ?? 1}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          if (Number.isFinite(next)) props.onChange(next);
+        }}
       />
     </label>
   );
