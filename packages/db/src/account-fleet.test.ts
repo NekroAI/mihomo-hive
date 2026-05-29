@@ -265,6 +265,33 @@ describe("HiveRepository account-fleet", () => {
       expect(repo.countRunningAccountJobs()).toBe(1);
     });
 
+    it("resetStaleRunningAccountJobs revives orphaned running → queued (P5-AR)", () => {
+      repo.enqueueAccountJob(makeJob({ id: "q", status: "queued" }));
+      repo.enqueueAccountJob(makeJob({ id: "r1" }));
+      repo.enqueueAccountJob(makeJob({ id: "r2" }));
+      repo.updateAccountJob("r1", { status: "running", startedAt: new Date().toISOString() });
+      repo.updateAccountJob("r2", { status: "running", startedAt: new Date().toISOString() });
+      expect(repo.countRunningAccountJobs()).toBe(2);
+
+      const revived = repo.resetStaleRunningAccountJobs();
+      expect(revived).toBe(2);
+      expect(repo.countRunningAccountJobs()).toBe(0);
+      expect(repo.countQueuedAccountJobs()).toBe(3);
+      // started_at 被清空，便于重新认领
+      expect(repo.getAccountJob("r1")?.startedAt).toBeNull();
+    });
+
+    it("listRunningAccountJobs + countQueuedAccountJobs", () => {
+      repo.enqueueAccountJob(makeJob({ id: "q1", status: "queued" }));
+      repo.enqueueAccountJob(makeJob({ id: "q2", status: "queued" }));
+      repo.enqueueAccountJob(makeJob({ id: "run" }));
+      repo.updateAccountJob("run", { status: "running", startedAt: new Date().toISOString() });
+      expect(repo.countQueuedAccountJobs()).toBe(2);
+      const running = repo.listRunningAccountJobs();
+      expect(running).toHaveLength(1);
+      expect(running[0]?.id).toBe("run");
+    });
+
     it("pruneAccountJobs only removes terminal old jobs", () => {
       const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const recent = new Date().toISOString();

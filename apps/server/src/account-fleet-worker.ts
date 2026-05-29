@@ -172,6 +172,16 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
   }
 
   if (!options.manualOnly) {
+    // 启动前清理上一进程残留的僵尸 running job（容器重建后它们永远卡在 running、
+    // 既污染"进行中"视图又不会被重新认领）。重置为 queued 让 poll 重新消费。
+    try {
+      const revived = repo.resetStaleRunningAccountJobs();
+      if (revived > 0) {
+        console.log(`AccountJobsWorker: reset ${revived} stale running job(s) → queued on startup.`);
+      }
+    } catch (err) {
+      console.warn("AccountJobsWorker: failed to reset stale running jobs:", err);
+    }
     void poll();
   }
 

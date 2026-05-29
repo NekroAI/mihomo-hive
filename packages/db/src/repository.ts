@@ -1140,6 +1140,38 @@ export class HiveRepository {
       .c;
   }
 
+  /** 当前 status=running 的 job（最久的排前面，便于 UI 显示"进行中 + 已运行时长"）。 */
+  listRunningAccountJobs(): AccountJob[] {
+    const rows = this.sqlite
+      .prepare("SELECT * FROM account_jobs WHERE status = 'running' ORDER BY started_at ASC")
+      .all() as AccountJobRow[];
+    return rows.map(accountJobFromRow);
+  }
+
+  countQueuedAccountJobs(): number {
+    return (this.sqlite.prepare("SELECT COUNT(*) AS c FROM account_jobs WHERE status = 'queued'").get() as { c: number })
+      .c;
+  }
+
+  /**
+   * worker 启动时调用：把上一进程残留的 running job 重置回 queued。
+   *
+   * 背景：worker 的并发计数是内存态（重启归零），但 DB 里被前一进程标成 running 的
+   * job 不会自动复原 —— 进程没了它们却永远卡在 running，既污染"进行中"视图，又永远
+   * 不会被重新认领。每次容器重建都会积累一批这种僵尸。
+   *
+   * 重置为 queued（清掉 started_at，保留已自增的 attempt）让它们重新进入认领队列；
+   * codex_login 这类幂等重试本来就允许再跑一次。返回被重置的条数。
+   */
+  resetStaleRunningAccountJobs(): number {
+    const now = new Date().toISOString();
+    return this.sqlite
+      .prepare(
+        "UPDATE account_jobs SET status = 'queued', started_at = NULL, updated_at = ? WHERE status = 'running'"
+      )
+      .run(now).changes;
+  }
+
   pruneAccountJobs(keepDays = 14): number {
     const cutoff = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000).toISOString();
     return this.sqlite

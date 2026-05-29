@@ -1312,6 +1312,8 @@ export const appRouter = t.router({
       const accounts = ctx.repo.listAccounts();
       const recentTicks = ctx.repo.listRecentAccountFleetTickSummaries(50);
       const recentJobs = ctx.repo.listAccountJobs(50);
+      const runningJobs = ctx.repo.listRunningAccountJobs();
+      const queuedJobCount = ctx.repo.countQueuedAccountJobs();
       const lastTickSummary = recentTicks[0];
       const lastTick = lastTickSummary ? ctx.repo.getAccountFleetTick(lastTickSummary.id) : undefined;
 
@@ -1366,6 +1368,8 @@ export const appRouter = t.router({
         recentTicks,
         accounts: accountViews,
         recentJobs,
+        runningJobs,
+        queuedJobCount,
         kpis: {
           totalAccounts: accountViews.length,
           healthyCount,

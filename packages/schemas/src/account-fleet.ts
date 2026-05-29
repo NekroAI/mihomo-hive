@@ -534,6 +534,13 @@ export const accountFleetStatusSnapshotSchema = z.object({
   recentTicks: z.array(accountFleetTickSummarySchema),
   accounts: z.array(accountRecordViewSchema),
   recentJobs: z.array(accountJobSchema),
+  /**
+   * 当前 status=running 的 job（P5-AR）。单独拎出来，因为 recentJobs 按时间取最近
+   * 50 条，真正在跑的 1~2 个会被一堆 queued 淹没；UI 需要一个明确的"进行中"区。
+   */
+  runningJobs: z.array(accountJobSchema),
+  /** 当前排队中的 job 总数（P5-AR：让用户知道积压规模，不必把全部 queued 塞进列表）。 */
+  queuedJobCount: z.number().int().nonnegative().default(0),
   kpis: z.object({
     totalAccounts: z.number().int().nonnegative(),
     healthyCount: z.number().int().nonnegative(),

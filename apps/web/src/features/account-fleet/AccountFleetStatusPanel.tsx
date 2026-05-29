@@ -71,6 +71,7 @@ export function AccountFleetStatusPanel(props: {
       <div className="account-fleet-main">
         <AccountMatrix accounts={snap.accounts} />
         <div className="account-fleet-side">
+          <RunningJobsCard running={snap.runningJobs} queuedCount={snap.queuedJobCount} accounts={snap.accounts} />
           <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
           <RecentTicksCard ticks={snap.recentTicks} />
           <RecentJobsCard jobs={snap.recentJobs} />
@@ -551,6 +552,75 @@ function tickActionLabel(kind: AccountFleetTick["plannedActions"][number]["kind"
     defer: "延后重试"
   };
   return map[kind] ?? kind;
+}
+
+/**
+ * P5-AR「进行中」卡片 —— 把真正在跑的 job 从一堆 queued 里单独拎出来。
+ * 显示 kind / 账号 / 已运行时长 / 尝试次数 + 当前排队积压。
+ * 已运行时长随每次 snapshot 轮询（5s）刷新；超过阈值标黄/红提示疑似卡死。
+ */
+function RunningJobsCard(props: {
+  running: AccountJob[];
+  queuedCount: number;
+  accounts: AccountRecordView[];
+}) {
+  const emailById = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of props.accounts) m.set(a.id, a.email);
+    return m;
+  }, [props.accounts]);
+
+  const title = `进行中 (${props.running.length})${props.queuedCount > 0 ? ` · 排队 ${props.queuedCount}` : ""}`;
+
+  if (props.running.length === 0) {
+    return (
+      <Panel title={title}>
+        <EmptyState
+          title="当前无运行中的 job"
+          description={
+            props.queuedCount > 0
+              ? `有 ${props.queuedCount} 个任务排队中，worker 受并发上限串行消费，稍候会逐个进入运行。`
+              : "队列为空。掉线账号会在下个调和 tick 入队恢复任务。"
+          }
+        />
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel title={title}>
+      <div className="reconcile-feed">
+        {props.running.map((job) => {
+          const email = job.accountId ? emailById.get(job.accountId) : undefined;
+          const who = email && !email.startsWith("unknown-") ? email : job.accountId?.slice(0, 12) ?? "—";
+          const elapsed = job.startedAt ? Date.now() - new Date(job.startedAt).getTime() : 0;
+          const tone = elapsed > 240_000 ? "danger" : elapsed > 120_000 ? "warning" : "info";
+          return (
+            <article key={job.id} className="reconcile-row reconcile-running">
+              <div className="reconcile-row-head" style={{ cursor: "default" }}>
+                <Loader2 size={14} className="animate-spin" />
+                <span>
+                  <strong>{jobKindLabel(job.kind)}</strong>
+                  <span className="muted small"> · {who}</span>
+                </span>
+                <span className="muted small">尝试 {job.attempt}/{job.maxAttempts}</span>
+                <Badge tone={tone}>已运行 {formatElapsed(elapsed)}</Badge>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return "0s";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m${rem.toString().padStart(2, "0")}s`;
 }
 
 function RecentJobsCard(props: { jobs: AccountJob[] }) {

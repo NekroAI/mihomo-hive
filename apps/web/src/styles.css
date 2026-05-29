@@ -1466,6 +1466,16 @@ select {
   opacity: 0.7;
 }
 
+/* P5-AR「进行中」行：左侧蓝色高亮条 + 转圈图标，跟历史 jobs 视觉区分 */
+.reconcile-row.reconcile-running {
+  border-color: color-mix(in srgb, var(--accent, #2563eb) 45%, var(--border));
+  border-left-width: 3px;
+  border-left-color: var(--accent, #2563eb);
+}
+.reconcile-row.reconcile-running .reconcile-row-head > svg {
+  color: var(--accent, #2563eb);
+}
+
 /* flex 而非刚性 grid —— tick 行 4 元素(无 chevron) / jobs 行 5 元素(有 chevron)
    共用此 class，固定列数会让 tick 行时间被挤进 icon 列重叠、badge 落到 1fr 列撑成
    超宽条。flex 自适应元素数，badge 用 margin-left:auto 始终靠右。 */
