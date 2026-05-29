@@ -31,6 +31,12 @@ describe("classifyCodexFailure region markers (P5-AX)", () => {
     expect(classifyCodexFailure("跟随 OAuth 跳转失败：缺少目标 URL")).toBe("account_unusable");
   });
 
+  it("token revoked / invalidated oauth → account_unusable（不再空转重试）", () => {
+    expect(classifyCodexFailure("Sub2API: Token revoked (401): Encountered invalidated oauth token")).toBe(
+      "account_unusable"
+    );
+  });
+
   it("sentinel/超时 → network_or_proxy", () => {
     expect(classifyCodexFailure("sentinel 提取失败")).toBe("network_or_proxy");
     expect(classifyCodexFailure("curl timed out")).toBe("network_or_proxy");

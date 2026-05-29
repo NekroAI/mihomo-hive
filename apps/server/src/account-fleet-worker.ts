@@ -997,7 +997,17 @@ export function describeRegistrationFailure(error: string, attemptCount: number)
 
 export function classifyCodexFailure(message: string): "account_unusable" | "network_or_proxy" | "oauth_failed" {
   const m = message.toLowerCase();
-  if (m.includes("缺少目标") || m.includes("missing target url") || m.includes("account_unusable") || m.includes("没有 code")) {
+  // 终态废账号标记。P6-13 补充：Sub2API 报 token revoked / invalidated oauth token —— 账号
+  // 授权已被吊销，反复重登/刷新都救不回，应直接退役而非在退避里空转(实测有账号 codex_login
+  // 成功后 refresh 一直 401 revoked，被当 network 类 ×3 反复重试浪费槽位)。
+  if (
+    m.includes("缺少目标") ||
+    m.includes("missing target url") ||
+    m.includes("account_unusable") ||
+    m.includes("没有 code") ||
+    m.includes("revoked") ||
+    m.includes("invalidated oauth")
+  ) {
     return "account_unusable";
   }
   // P5-AX：地区不可用（取不到号/收不到验证码）也算可重试的瞬时类，不退役账号

@@ -65,12 +65,14 @@ export function AccountFleetStatusPanel(props: {
 
   return (
     <div className="orchestration-status-panel account-fleet-status-panel">
-      {/* 顶部满宽 Hero：一眼定性"池子行不行" + 分段条；下方成本/吞吐 KPI 条；
-          再下双列：左账号矩阵满高内滚 / 右信息列独立内滚（高度解耦）。 */}
-      <PoolHealthHero snapshot={snap} />
+      {/* 顶部 KPI 条(含健康定性)；下方双列：左=账号矩阵+分布条 / 右=信息列。
+          分布条放矩阵下方、只占左列宽，不侵占右侧。 */}
       <KpiCards snapshot={snap} />
       <div className="account-fleet-main">
-        <AccountMatrix accounts={snap.accounts} lastTick={snap.lastTick} />
+        <div className="account-fleet-matrix-col">
+          <AccountMatrix accounts={snap.accounts} lastTick={snap.lastTick} />
+          <PoolDistributionBar snapshot={snap} />
+        </div>
         <div className="account-fleet-side">
           <SmsRegionHintCard hint={snap.smsRegionHint} kpis={snap.kpis} />
           <RunningJobsCard
@@ -149,23 +151,21 @@ function SmsRegionHintCard(props: {
   );
 }
 
-/**
- * P6-02 池子健康 Hero —— 满宽横条，一眼回答"池子行不行"。
- * 左：健康 N/目标 M + 定性；中：分段条(健康/可恢复/冷却中/真死/未知) + 图例；
- * 右：自动维护状态 + 上次巡检。充分利用桌面横向空间。
- */
-function PoolHealthHero(props: { snapshot: AccountFleetStatusSnapshot }) {
-  const { kpis, spec } = props.snapshot;
+/** 池子健康定性（健康数/目标的比例 → 充足/偏紧/严重不足）。供 KPI 卡复用。 */
+function poolVerdict(kpis: AccountFleetStatusSnapshot["kpis"]): { label: string; tone: KpiTone } {
   const ratio = kpis.target > 0 ? kpis.healthyCount / kpis.target : 1;
-  const verdict =
-    kpis.target === 0
-      ? { label: "未设目标", tone: "neutral" as const }
-      : ratio >= 0.9
-        ? { label: "充足", tone: "success" as const }
-        : ratio >= 0.5
-          ? { label: "偏紧", tone: "warning" as const }
-          : { label: "严重不足", tone: "danger" as const };
+  if (kpis.target === 0) return { label: "未设目标", tone: "neutral" };
+  if (ratio >= 0.9) return { label: "充足", tone: "success" };
+  if (ratio >= 0.5) return { label: "偏紧", tone: "warning" };
+  return { label: "严重不足", tone: "danger" };
+}
 
+/**
+ * P6-13 账号分布条 —— 放在账号矩阵【下方】，只占左列宽（不侵占右侧信息列）。
+ * 一条分段条把池子拆成 健康/可恢复/冷却中/失效/未知 + 图例计数。
+ */
+function PoolDistributionBar(props: { snapshot: AccountFleetStatusSnapshot }) {
+  const { kpis } = props.snapshot;
   const cooling = kpis.quotaExhaustedCount + kpis.rateLimitedCount;
   const unknown = Math.max(
     0,
@@ -175,53 +175,34 @@ function PoolHealthHero(props: { snapshot: AccountFleetStatusSnapshot }) {
     { key: "healthy", label: "健康", count: kpis.healthyCount, cls: "seg-healthy" },
     { key: "recoverable", label: "可恢复", count: kpis.recoverableCount, cls: "seg-recoverable" },
     { key: "cooling", label: "冷却中", count: cooling, cls: "seg-cooling" },
-    { key: "dead", label: "真死", count: kpis.deadCount, cls: "seg-dead" },
+    { key: "dead", label: "失效", count: kpis.deadCount, cls: "seg-dead" },
     { key: "unknown", label: "未知", count: unknown, cls: "seg-unknown" }
   ].filter((s) => s.count > 0);
   const total = Math.max(1, kpis.totalAccounts);
 
   return (
-    <section className={`pool-hero pool-hero-${verdict.tone}`}>
-      <div className="pool-hero-headline">
-        <div className="pool-hero-figure">
-          <span className="pool-hero-num">{kpis.healthyCount}</span>
-          <span className="pool-hero-target">/ {kpis.target || "—"}</span>
-        </div>
-        <div className="pool-hero-caption">
-          <Badge tone={verdict.tone}>{verdict.label}</Badge>
-          <span className="muted small">健康账号 / 目标</span>
-        </div>
+    <div className="pool-dist">
+      <div className="pool-dist-bar" role="img" aria-label="账号池分布">
+        {segments.map((s) => (
+          <span
+            key={s.key}
+            className={`pool-seg ${s.cls}`}
+            style={{ width: `${(s.count / total) * 100}%` }}
+            title={`${s.label} ${s.count}`}
+          />
+        ))}
       </div>
-
-      <div className="pool-hero-bar-wrap">
-        <div className="pool-hero-bar" role="img" aria-label="账号池健康分布">
-          {segments.map((s) => (
-            <span
-              key={s.key}
-              className={`pool-seg ${s.cls}`}
-              style={{ width: `${(s.count / total) * 100}%` }}
-              title={`${s.label} ${s.count}`}
-            />
-          ))}
-        </div>
-        <div className="pool-hero-legend">
-          {segments.map((s) => (
-            <span key={s.key} className="pool-legend-item">
-              <span className={`pool-legend-dot ${s.cls}`} />
-              {s.label} <strong>{s.count}</strong>
-            </span>
-          ))}
-          <span className="pool-legend-item muted">共 {kpis.totalAccounts}</span>
-          {cooling > 0 ? <span className="pool-legend-item muted">· 冷却中会自然恢复</span> : null}
-        </div>
+      <div className="pool-dist-legend">
+        {segments.map((s) => (
+          <span key={s.key} className="pool-legend-item">
+            <span className={`pool-legend-dot ${s.cls}`} />
+            {s.label} <strong>{s.count}</strong>
+          </span>
+        ))}
+        <span className="pool-legend-item muted">共 {kpis.totalAccounts}</span>
+        {cooling > 0 ? <span className="pool-legend-item muted">· 冷却中会自然恢复</span> : null}
       </div>
-
-      <div className="pool-hero-meta">
-        <Badge tone={spec.enabled ? "success" : "warning"}>
-          {spec.enabled ? "自动维护运行中" : "已暂停"}
-        </Badge>
-      </div>
-    </section>
+    </div>
   );
 }
 
@@ -243,10 +224,17 @@ function KpiCards(props: { snapshot: AccountFleetStatusSnapshot }) {
     kpis.monthlyRegistrationsBudget > 0
       ? Math.round((kpis.monthlyRegistrationsUsed / kpis.monthlyRegistrationsBudget) * 100)
       : 0;
+  const verdict = poolVerdict(kpis);
 
-  // 健康分布已在 Hero 呈现，这里只留"活动 / 成本 / 吞吐"，避免卡片汤。
+  // 健康定性置于首位，其余为活动/成本/吞吐；详细分布在矩阵下方的分布条。
   return (
     <section className="kpi-grid kpi-grid-fleet">
+      <KpiCard
+        title="健康账号"
+        primary={`${kpis.healthyCount} / ${kpis.target || "—"}`}
+        secondary={verdict.label}
+        tone={verdict.tone}
+      />
       <KpiCard
         title="修复中"
         primary={String(kpis.recoveringCount)}
@@ -429,7 +417,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                   </span>
                 </td>
                 <td>
-                  <IntentBadge intent={acc.intent} />
+                  <RecoverStatus acc={acc} />
                 </td>
                 <td>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
@@ -955,7 +943,7 @@ const FAILURE_REASON_META: Record<
 > = {
   region: { label: "地区不可用", tone: "warning", hint: "接码地区取不到号/收不到码。地区经验会逐步累积避开坏区，或检查接码平台余额。" },
   proxy: { label: "代理 / 网络", tone: "warning", hint: "出口代理过不了 Cloudflare/超时。考虑导入并标记高质量「保留节点」专供注册登录。" },
-  account_dead: { label: "账号已死", tone: "danger", hint: "OAuth 授权链终态缺失，账号无法救活，已自动退役、不再消耗重试。" },
+  account_dead: { label: "账号失效", tone: "danger", hint: "OAuth 授权链终态缺失，账号已失效无法恢复，已自动退役、不再消耗重试。" },
   retired: { label: "已退役跳过", tone: "neutral", hint: "死账号的残留任务被执行前拦下跳过，属正常清理，不消耗资源。" },
   oauth: { label: "OAuth 失败", tone: "warning", hint: "授权环节失败，按退避自动重试，达上限退役。" },
   other: { label: "其它", tone: "neutral", hint: "未归类的失败，可展开「最近完成」看具体日志。" }
@@ -1145,6 +1133,32 @@ function splitOrigin(origin: AccountOrigin): {
         tooltip: "本地账号在远端列表里已消失（手动删除/迁移），保留只做审计留痕，不参与调度。"
       };
   }
+}
+
+/**
+ * P6-13 状态徽标 —— 区分"修复中"(正在跑 job)与"等待重试"(recovering 但在退避窗口、
+ * 下次尝试在未来、当前没有活跃 job)。解决"修复中却没有进行中 job"的困惑。
+ */
+function RecoverStatus(props: { acc: AccountRecordView }) {
+  const acc = props.acc;
+  if (acc.intent === "recovering" && acc.nextRecoveryAfter) {
+    const next = new Date(acc.nextRecoveryAfter).getTime();
+    if (Number.isFinite(next) && next > Date.now()) {
+      const hh = new Date(acc.nextRecoveryAfter).toLocaleTimeString();
+      const lines = [
+        `退避中，下次尝试 ${hh}`,
+        `已尝试 ${acc.recoveryAttempts} 次（多次失败后按退避序列拉长间隔，期间不占用修复槽位）`
+      ];
+      if (acc.lastRecoveryError) lines.push(`上次失败：${acc.lastRecoveryError}`);
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+          <Badge tone="warning">等待重试</Badge>
+          <InfoTip text={lines.join("\n")} />
+        </span>
+      );
+    }
+  }
+  return <IntentBadge intent={acc.intent} />;
 }
 
 function IntentBadge(props: { intent: AccountIntent }) {

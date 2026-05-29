@@ -1520,56 +1520,42 @@ input[type="number"] {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
-/* P6-02 池子健康 Hero —— 满宽横条，桌面三段式：定性 | 分段条 | 状态 */
-.pool-hero {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 24px;
-  padding: 14px 18px;
+/* P6-13 账号分布条 —— 放矩阵下方、只占左列宽 */
+.account-fleet-matrix-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+.pool-dist {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-left: 4px solid var(--border);
   border-radius: var(--radius);
   background: var(--panel);
 }
-.pool-hero-danger { border-left-color: var(--danger, #dc2626); background: color-mix(in srgb, var(--danger, #dc2626) 6%, var(--panel)); }
-.pool-hero-warning { border-left-color: var(--warning, #d97706); }
-.pool-hero-success { border-left-color: var(--success, #16a34a); }
-.pool-hero-neutral { border-left-color: var(--border); }
-
-.pool-hero-headline { display: flex; align-items: baseline; gap: 12px; white-space: nowrap; }
-.pool-hero-figure { display: flex; align-items: baseline; gap: 4px; }
-.pool-hero-num { font-size: 34px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-.pool-hero-target { font-size: 16px; color: var(--text-muted, #888); font-variant-numeric: tabular-nums; }
-.pool-hero-caption { display: flex; flex-direction: column; gap: 3px; }
-
-.pool-hero-bar-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.pool-hero-bar {
+.pool-dist-bar {
   display: flex;
   width: 100%;
-  height: 14px;
-  border-radius: 7px;
+  height: 12px;
+  border-radius: 6px;
   overflow: hidden;
   background: var(--panel-subtle);
 }
 .pool-seg { height: 100%; transition: width 0.3s ease; }
-.pool-seg + .pool-seg { box-shadow: inset 1px 0 0 rgba(0,0,0,0.12); }
+.pool-seg + .pool-seg { box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.12); }
 .seg-healthy { background: var(--success, #16a34a); }
 .seg-recoverable { background: var(--accent, #2563eb); }
 .seg-cooling { background: var(--warning, #d97706); }
 .seg-dead { background: var(--danger, #dc2626); }
 .seg-unknown { background: color-mix(in srgb, var(--text-muted, #888) 50%, transparent); }
-
-.pool-hero-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; align-items: center; }
+.pool-dist-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; align-items: center; }
 .pool-legend-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .pool-legend-dot { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
-.pool-hero-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; white-space: nowrap; text-align: right; }
-
-/* 窄屏（控制台缩窗）回退为纵向堆叠，但仍是桌面密度，不是手机卡片 */
-@media (max-width: 1100px) {
-  .pool-hero { grid-template-columns: 1fr; gap: 10px; }
-  .pool-hero-meta { align-items: flex-start; text-align: left; }
-}
 
 @media (min-width: 1400px) {
   /* 整面板不再整体滚动，改为 KPI 固定 + main 双列内部各自滚 */
@@ -1578,7 +1564,7 @@ input[type="number"] {
     padding-right: 0;
   }
   .orchestration-status-panel.account-fleet-status-panel > .kpi-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
   .account-fleet-main {
     flex: 1;
@@ -1589,16 +1575,21 @@ input[type="number"] {
     gap: 12px;
     overflow: hidden;
   }
-  .account-fleet-main > .status-pane-matrix {
+  /* 左列：矩阵(满高内滚) + 分布条(底部固定)，都不侵占右侧 */
+  .account-fleet-main > .account-fleet-matrix-col {
     grid-column: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .account-fleet-matrix-col > .status-pane-matrix {
+    flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
-  /* panel-body 不再自己滚动：改为 flex 容器，让 node-matrix-scroll 成为唯一滚动层，
-     消除"panel-body + node-matrix-scroll"双层嵌套滚动。 */
-  .account-fleet-main > .status-pane-matrix > .panel-body {
+  /* panel-body 不再自己滚动：改为 flex 容器，让 node-matrix-scroll 成为唯一滚动层 */
+  .account-fleet-matrix-col > .status-pane-matrix > .panel-body {
     flex: 1;
     min-height: 0;
     overflow: hidden;
@@ -1606,7 +1597,7 @@ input[type="number"] {
     flex-direction: column;
     padding: 0;
   }
-  .account-fleet-main > .status-pane-matrix .node-matrix-scroll {
+  .account-fleet-matrix-col > .status-pane-matrix .node-matrix-scroll {
     flex: 1;
     min-height: 0;
     max-height: none;
