@@ -38,9 +38,9 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     // 暂停/恢复按钮（取决于 spec.enabled 默认 true，应该看到"暂停自动协调"）
     await expect(page.getByRole("button", { name: /暂停自动协调|恢复自动协调/ })).toBeVisible();
 
-    // 切到账号编排：账号生命周期管理（占位，分阶段交付）
+    // 切到账号编排：账号生命周期管理，左栏第一个面板"自动维护"对应代理编排页的"自动协调"
     await nav.getByRole("tab", { name: "账号编排" }).click();
-    await expect(page.getByRole("heading", { name: "账号编排" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "自动维护" })).toBeVisible();
 
     // 切到导出：纯导出工具，只有导出篮子（Mihomo 控制已下线到节点池页）
     await nav.getByRole("tab", { name: "导出" }).click();

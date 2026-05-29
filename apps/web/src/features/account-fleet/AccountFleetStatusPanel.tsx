@@ -184,8 +184,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
           <thead>
             <tr>
               <th>邮箱</th>
-              <th>类型</th>
-              <th>接管子类</th>
+              <th>来源</th>
               <th>状态</th>
               <th>健康</th>
               <th className="num">配额 5h/7d</th>
@@ -196,21 +195,18 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
           <tbody>
             {sorted.map((acc) => {
               const split = splitOrigin(acc.origin);
+              const egressTitle = formatEgressTooltip(acc);
               return (
               <tr key={acc.id} className={`node-matrix-tr role-${rowRoleByHealth(acc.health)}`}>
                 <td className="cell-name" title={acc.email}>
                   <span className="mono-strong">{acc.email}</span>
                   {acc.externalId ? <span className="muted small"> #{acc.externalId}</span> : null}
                 </td>
-                <td>
+                <td title={split.tooltip} style={{ cursor: "help" }}>
                   <Badge tone={split.typeTone}>{split.typeLabel}</Badge>
-                </td>
-                <td>
                   {split.subLabel ? (
-                    <Badge tone={split.subTone}>{split.subLabel}</Badge>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
+                    <span className="muted small" style={{ marginLeft: 6 }}>· {split.subLabel}</span>
+                  ) : null}
                 </td>
                 <td>
                   <IntentBadge intent={acc.intent} />
@@ -234,9 +230,19 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                     <span className="muted">—</span>
                   )}
                 </td>
-                <td className="muted small cell-sub2api" title={acc.lastRecoveryError ?? undefined}>
-                  {/* egressNodeHash 未在 view 中暴露 → 用 lastRecoveryPath 替代展示策略路径 */}
-                  {acc.lastRecoveryPath ? `via ${acc.lastRecoveryPath}` : "—"}
+                <td className="cell-sub2api" title={egressTitle}>
+                  {acc.currentNodeName ? (
+                    <span className="mono-strong" style={{ cursor: "help" }}>{acc.currentNodeName}</span>
+                  ) : acc.currentProxyId ? (
+                    // Sub2API 关联到了代理，但本地节点表里没有这个 proxy_id（可能是 Sub2API
+                    // 远端另有代理 / 本地尚未推送 / 节点已删除）
+                    <span className="muted small" style={{ cursor: "help" }}>外部代理 #{acc.currentProxyId}</span>
+                  ) : acc.egressNodeHash ? (
+                    // 仅 codex-tool 路径会写，软粘性记录"上次注册/登录走哪个节点出口"
+                    <span className="muted small" style={{ cursor: "help" }}>上次出口 {acc.egressNodeHash.slice(0, 8)}</span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
               </tr>
               );
@@ -441,30 +447,62 @@ function KpiCard(props: { title: string; primary: string; secondary: string; ton
 }
 
 /**
- * 把 5 个 origin 拆成两个视觉字段：
- *   类型 = Hive 注册 / 接管 / 已弃用
- *   接管子类 = 健康 / 已恢复 / 待救援（仅 origin=adopted_* 时显示）
- *
- * 让用户能一眼看出"这账号是 Hive 自己生的还是接管的"，
- * 接管的还能看出"凭据是不是齐了"（决定能否自动修复）。
+ * 账号来源（P5-AG 第二轮）—— 旧设计把 origin 拆成「类型 + 接管子类」两列，
+ * 用户反馈"看到所有账号都是'接管'完全不知道什么意思"。新设计：合并成一列，
+ *   主标 = 这账号是怎么进系统的
+ *   副标 = 凭据/恢复状态（仅 adopted_* 有意义时显示）
+ *   tooltip = 完整含义说明，让"接管"不再是黑话
  */
 function splitOrigin(origin: AccountOrigin): {
   typeLabel: string;
   typeTone: "success" | "warning" | "danger" | "neutral" | "info";
   subLabel: string | null;
   subTone: "success" | "warning" | "danger" | "neutral" | "info";
+  tooltip: string;
 } {
   switch (origin) {
     case "hive_registered":
-      return { typeLabel: "Hive 注册", typeTone: "success", subLabel: null, subTone: "neutral" };
+      return {
+        typeLabel: "Hive 注册",
+        typeTone: "success",
+        subLabel: null,
+        subTone: "neutral",
+        tooltip: "由 Hive 通过 codex-tool 自动注册（SkyMail 拿邮箱 + 接码 + ChatGPT OAuth），凭据齐全可自动维护。"
+      };
     case "adopted_active":
-      return { typeLabel: "接管", typeTone: "info", subLabel: "健康", subTone: "success" };
+      return {
+        typeLabel: "远端发现",
+        typeTone: "info",
+        subLabel: "凭据齐",
+        subTone: "success",
+        tooltip:
+          "在 Sub2API 远端列表里发现的存量账号，带 refresh_token 等凭据可自动刷新。Hive 不会去碰它的密码，仅做健康观察 + 配额采样。"
+      };
     case "adopted_recovered":
-      return { typeLabel: "接管", typeTone: "info", subLabel: "已恢复", subTone: "success" };
+      return {
+        typeLabel: "远端发现",
+        typeTone: "info",
+        subLabel: "已恢复",
+        subTone: "success",
+        tooltip: "来源是远端发现，但凭据掉了后由 Hive 触发 codex-tool 重新登录/注册成功，现已恢复可用。"
+      };
     case "adopted_observing":
-      return { typeLabel: "接管", typeTone: "info", subLabel: "待救援", subTone: "warning" };
+      return {
+        typeLabel: "远端发现",
+        typeTone: "info",
+        subLabel: "凭据缺",
+        subTone: "warning",
+        tooltip:
+          "在 Sub2API 远端发现，但没有 refresh_token 等可自动恢复的凭据，Hive 无法自动修复。需要远端补凭据或本地建新账号顶替。"
+      };
     case "retired_legacy":
-      return { typeLabel: "已弃用", typeTone: "neutral", subLabel: null, subTone: "neutral" };
+      return {
+        typeLabel: "已弃用",
+        typeTone: "neutral",
+        subLabel: null,
+        subTone: "neutral",
+        tooltip: "本地账号在远端列表里已消失（手动删除/迁移），保留只做审计留痕，不参与调度。"
+      };
   }
 }
 
@@ -500,6 +538,34 @@ function HealthBadge(props: { health: AccountHealth }) {
     unknown: "neutral"
   };
   return <Badge tone={tone[props.health]}>{label[props.health]}</Badge>;
+}
+
+/**
+ * 出口节点列 tooltip —— 把多源数据拼成一句话解释，让用户知道这个节点名是哪来的、
+ * 旁边的灰字"上次出口 xxx"是怎么回事。
+ */
+function formatEgressTooltip(acc: AccountRecordView): string {
+  const lines: string[] = [];
+  if (acc.currentNodeName) {
+    lines.push(`Sub2API 当前把此账号绑在「${acc.currentNodeName}」上`);
+    if (acc.currentProxyId) lines.push(`(远端代理 ID #${acc.currentProxyId})`);
+  } else if (acc.currentProxyId) {
+    lines.push(`Sub2API 远端代理 #${acc.currentProxyId}：本地节点表里查不到对应节点`);
+    lines.push("可能是手动建的外部代理 / 节点已删 / 尚未推送");
+  } else {
+    lines.push("Sub2API 远端未给此账号绑代理");
+  }
+  if (acc.egressNodeHash) {
+    lines.push("");
+    lines.push(`上次 codex-tool 出口走的节点 hash: ${acc.egressNodeHash}`);
+  }
+  if (acc.lastRecoveryPath) {
+    lines.push(`最近修复路径: ${acc.lastRecoveryPath}`);
+  }
+  if (acc.lastRecoveryError) {
+    lines.push(`上次修复错误: ${acc.lastRecoveryError}`);
+  }
+  return lines.join("\n");
 }
 
 function quotaToneClass(percent: number | null): string {

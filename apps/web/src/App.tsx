@@ -568,6 +568,41 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "策略保存失败", error.message)
   });
+  // P5-AF: codex-tool 独立保存（不动其它策略子树）+ 连通测试
+  const saveCodexTool = trpc.accountFleet.codexTool.save.useMutation({
+    onMutate: () => startTask(setTask, "正在保存 codex-tool 配置", "只覆盖 codexTool 子树，其它策略字段保持不变。"),
+    onSuccess: async () => {
+      await finishTask(setTask, pushToast, "codex-tool 配置已保存", "下一次调和按新配置生效。");
+      await utils.accountFleet.spec.get.invalidate();
+      await utils.accountFleet.status.invalidate();
+    },
+    onError: (error) => failTask(setTask, pushToast, "codex-tool 保存失败", error.message)
+  });
+  const [lastCodexTest, setLastCodexTest] = React.useState<
+    | { ok: true; provider: string; service: string; countriesSampled: number; totalCountries: number }
+    | { ok: false; error: string }
+    | null
+  >(null);
+  const testCodexTool = trpc.accountFleet.codexTool.test.useMutation({
+    onMutate: () => startTask(setTask, "正在测试 codex-tool 连通", "调用 sms countries 一次，验证 binary + SkyMail + 接码链路。"),
+    onSuccess: async (res) => {
+      setLastCodexTest(res);
+      if (res.ok) {
+        await finishTask(
+          setTask,
+          pushToast,
+          "codex-tool 连通正常",
+          `${res.provider} · 抽样 ${res.countriesSampled}/${res.totalCountries} 个地区`
+        );
+      } else {
+        failTask(setTask, pushToast, "codex-tool 连通失败", res.error);
+      }
+    },
+    onError: (error) => {
+      setLastCodexTest({ ok: false, error: error.message });
+      failTask(setTask, pushToast, "codex-tool 连通失败", error.message);
+    }
+  });
   const triggerAccountFleetTick = trpc.accountFleet.tick.triggerNow.useMutation({
     onMutate: () => startTask(setTask, "正在调和账号池", "观察 → 判定 → 计划 → 限速。当前 P4 阶段为 dry-run。"),
     onSuccess: async (tick) => {
@@ -768,9 +803,12 @@ function Dashboard(props: { onLogout: () => void }) {
           status={accountFleetStatus.data}
           statusLoading={accountFleetStatus.isLoading}
           sub2apiConnected={Boolean(sub2apiConfig.data?.configured)}
+          lastCodexTest={lastCodexTest ?? null}
           mutations={{
             saveSpec: saveAccountFleetSpec,
-            triggerNow: triggerAccountFleetTick
+            triggerNow: triggerAccountFleetTick,
+            saveCodexTool: saveCodexTool,
+            testCodexTool: testCodexTool
           }}
         />
       ) : null}

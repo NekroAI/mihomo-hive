@@ -649,7 +649,7 @@ function incrementRegistrationsBudget(repo: HiveRepository, spec: AccountFleetSp
   });
 }
 
-async function buildCodexToolAdapter(
+export async function buildCodexToolAdapter(
   repo: HiveRepository,
   crypto: AccountCrypto,
   spec: AccountFleetSpec,
@@ -777,7 +777,7 @@ function requireSub2apiClient(repo: HiveRepository): Sub2ApiClient {
   return createSub2ApiClient(conn);
 }
 
-function safeLoadCrypto(): AccountCrypto {
+export function safeLoadCrypto(): AccountCrypto {
   try {
     return loadAccountCrypto();
   } catch (err) {

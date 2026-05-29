@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Pause, Play, Save, Wand2, Zap } from "lucide-react";
+import { Activity, CheckCircle2, Pause, Play, Save, Wand2, XCircle, Zap } from "lucide-react";
 import type { AccountFleetSpec } from "@mihomo-hive/schemas";
 import {
   Badge,
@@ -10,6 +10,11 @@ import {
   SelectInput,
   TextInput
 } from "../../components/ui.js";
+
+/** codex-tool 连通测试结果（P5-AF）。null = 未测过 */
+export type CodexToolTestResult =
+  | { ok: true; provider: string; service: string; countriesSampled: number; totalCountries: number }
+  | { ok: false; error: string };
 
 /**
  * 账号编排 Spec 编辑左栏。
@@ -29,6 +34,12 @@ export function AccountFleetSpecPanel(props: {
   canTrigger?: boolean;
   onSaveSpec: (next: AccountFleetSpec) => void;
   onTriggerNow: () => void;
+  /** P5-AF: codex-tool 区块独立保存（不动其它策略）+ 连通测试。 */
+  savingCodexTool?: boolean;
+  testingCodexTool?: boolean;
+  lastCodexTest?: CodexToolTestResult | null | undefined;
+  onSaveCodexTool?: (next: AccountFleetSpec["codexTool"]) => void;
+  onTestCodexTool?: () => void;
 }) {
   const [draft, setDraft] = React.useState<AccountFleetSpec>(props.spec);
   const [dirty, setDirty] = React.useState(false);
@@ -287,6 +298,56 @@ export function AccountFleetSpecPanel(props: {
             />
           ) : null}
         </div>
+
+        {/* P5-AF: 独立测试 + 独立保存。意图：让用户在调通 binPath / SkyMail / 接码 三件套
+            过程中可以边改边测，而不必把其它策略改动一起提交；保存成功后下次进页面
+            该折叠面板默认折叠（保存逻辑里 setItem panel state = "0"）。 */}
+        {props.onSaveCodexTool && props.onTestCodexTool ? (
+          <div className="spec-save-bar" style={{ marginTop: 12 }}>
+            <Button
+              icon={<Save size={16} />}
+              loading={props.savingCodexTool}
+              onClick={() => {
+                props.onSaveCodexTool!(draft.codexTool);
+                // 保存成功后下次默认折叠 —— 用 CollapsiblePanel 的 storage key 直接写
+                try {
+                  window.localStorage.setItem("mihomo-hive.panel.account-fleet-codex-tool", "0");
+                } catch {
+                  // ignore
+                }
+                // 子树保存了就把这部分 dirty 清掉：把 codexTool 同步回 props.spec 的其它字段
+                setDirty(
+                  JSON.stringify({ ...draft, codexTool: undefined }) !==
+                    JSON.stringify({ ...props.spec, codexTool: undefined })
+                );
+              }}
+            >
+              保存 codex-tool 配置
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Activity size={16} />}
+              loading={props.testingCodexTool}
+              onClick={props.onTestCodexTool}
+              title="调用 codex-tool sms countries 一次，验证 binary 可执行 + SkyMail 链路 + 接码 apiKey 都对。不写库、不下发 job。"
+            >
+              测试连通
+            </Button>
+            {props.lastCodexTest ? (
+              props.lastCodexTest.ok ? (
+                <span className="muted small" title={`provider=${props.lastCodexTest.provider} service=${props.lastCodexTest.service}`}>
+                  <CheckCircle2 size={12} style={{ verticalAlign: "middle", marginRight: 4, color: "var(--success)" }} />
+                  连通正常（{props.lastCodexTest.provider} · 抽样 {props.lastCodexTest.countriesSampled}/{props.lastCodexTest.totalCountries} 个地区）
+                </span>
+              ) : (
+                <span className="muted small" title={props.lastCodexTest.error}>
+                  <XCircle size={12} style={{ verticalAlign: "middle", marginRight: 4, color: "var(--danger)" }} />
+                  连通失败：{truncateError(props.lastCodexTest.error)}
+                </span>
+              )
+            ) : null}
+          </div>
+        ) : null}
       </CollapsiblePanel>
 
       <Panel
@@ -597,6 +658,11 @@ export function AccountFleetSpecPanel(props: {
       </div>
     </aside>
   );
+}
+
+function truncateError(s: string, max = 80): string {
+  if (s.length <= max) return s;
+  return s.slice(0, max - 1) + "…";
 }
 
 function NumberInput(props: {

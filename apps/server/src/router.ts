@@ -44,6 +44,7 @@ import {
   sub2ApiProtectedProxyRuleSchema
 } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
+import { buildCodexToolAdapter, safeLoadCrypto } from "./account-fleet-worker.js";
 import type {
   AccountFleetSpec,
   AccountFleetStatusSnapshot,
@@ -1227,14 +1228,88 @@ export const appRouter = t.router({
         }),
       defaults: protectedProcedure.query(() => defaultAccountFleetSpec)
     }),
-    status: protectedProcedure.query(({ ctx }): AccountFleetStatusSnapshot => {
+    // P5-AF: codex-tool 子区块独立保存 + 连通测试。
+    // 独立保存的意义：用户在加密 password / api key 时需要边测边调，不希望
+    // 每改一个字段都把整张 spec 全表单 dirty 起来逼着用户其它面板上下文丢失。
+    codexTool: t.router({
+      // 保存只覆盖 spec.codexTool 子树；其它字段保持原值（避免与其它面板编辑撞车）
+      save: protectedProcedure
+        .input(accountFleetSpecSchema.shape.codexTool)
+        .mutation(({ ctx, input }) => {
+          const current = ctx.repo.getAccountFleetSpec();
+          const saved = ctx.repo.saveAccountFleetSpec({ ...current, codexTool: input });
+          if (ctx.accountFleetScheduler) {
+            void ctx.accountFleetScheduler.triggerNow().catch(() => undefined);
+          }
+          return saved.codexTool;
+        }),
+      /**
+       * 连通测试 —— 用 codex-tool 的 sms countries 命令打全链路：
+       *   spawn binary → 解析 envelope → 链路里需要 SkyMail 配置 + phoneSms apiKey 都齐
+       * 任一环节失败都能精确报错，比一个 --version 更有用。
+       *
+       * 不写库 / 不下发 job，只对 currently-persisted spec 测一次。
+       */
+      test: protectedProcedure.mutation(async ({ ctx }) => {
+        const spec = ctx.repo.getAccountFleetSpec();
+        try {
+          const adapter = await buildCodexToolAdapter(ctx.repo, safeLoadCrypto(), spec, null);
+          const result = await adapter.smsCountries({ limit: 1, timeoutMs: 15_000 });
+          return {
+            ok: true as const,
+            provider: result.provider,
+            service: result.service,
+            countriesSampled: result.countries.length,
+            totalCountries: result.total
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return { ok: false as const, error: message };
+        }
+      })
+    }),
+    status: protectedProcedure.query(async ({ ctx }): Promise<AccountFleetStatusSnapshot> => {
       const spec = ctx.repo.getAccountFleetSpec();
       const accounts = ctx.repo.listAccounts();
       const recentTicks = ctx.repo.listRecentAccountFleetTickSummaries(50);
       const recentJobs = ctx.repo.listAccountJobs(50);
       const lastTickSummary = recentTicks[0];
       const lastTick = lastTickSummary ? ctx.repo.getAccountFleetTick(lastTickSummary.id) : undefined;
-      const accountViews: AccountRecordView[] = accounts.map((a) => toAccountView(a));
+
+      // P5-AG: 拼"当前出口节点" —— Sub2API account.proxy_id → 本地 nodes.sub2apiProxyId
+      //   失败（Sub2API 未配置 / 离线 / 接口报错）静默 fallback，账号视图仍能返回，
+      //   currentNodeName 留 null 即可，UI 自有 fallback 链。
+      let proxyIdByExternalId = new Map<number, number>();
+      try {
+        const sub2apiAccounts = await createConfiguredSub2ApiClient(ctx.repo).listAllAccounts(
+          sub2ApiAccountFiltersSchema.parse({})
+        );
+        proxyIdByExternalId = new Map(
+          sub2apiAccounts
+            .filter((a): a is typeof a & { proxy_id: number } => typeof a.proxy_id === "number")
+            .map((a) => [a.id, a.proxy_id])
+        );
+      } catch {
+        // Sub2API 未配置或失败 —— currentNodeName 全显示 —
+      }
+      const nodeByProxyId = new Map<number, { hash: string; name: string }>();
+      for (const n of ctx.repo.listNodes()) {
+        if (n.sub2apiProxyId) nodeByProxyId.set(n.sub2apiProxyId, { hash: n.hash, name: n.name });
+      }
+
+      const accountViews: AccountRecordView[] = accounts.map((a) => {
+        const base = toAccountView(a);
+        if (a.externalId === null) return base;
+        const proxyId = proxyIdByExternalId.get(a.externalId);
+        if (!proxyId) return base;
+        const node = nodeByProxyId.get(proxyId);
+        return {
+          ...base,
+          currentProxyId: proxyId,
+          currentNodeHash: node?.hash ?? null,
+          currentNodeName: node?.name ?? null
+        };
+      });
       const healthyCount = accountViews.filter((a) => a.health === "healthy").length;
       const brokenCount = accountViews.filter((a) => a.health === "broken").length;
       const recoveringCount = accountViews.filter((a) => a.intent === "recovering").length;

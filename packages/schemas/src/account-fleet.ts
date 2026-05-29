@@ -136,6 +136,23 @@ export const accountRecordViewSchema = z.object({
   registeredAt: z.string().nullable(),
   egressNodeHash: z.string().nullable(),
 
+  /**
+   * 当前代理编排把这账号绑到了哪个本地节点 —— 通过 Sub2API account.proxy_id
+   * → 本地 nodes.sub2apiProxyId 反查得到。
+   *
+   * 与 egressNodeHash 的区别：
+   *   • egressNodeHash 是"上次 codex-tool 出口走的节点"（注册 / 登录时写入），
+   *     adopted_* 路径不会有
+   *   • currentNodeHash / Name 是"远端 Sub2API 此刻把这账号挂在哪个代理上"，
+   *     由代理编排 reconcile 同步过去
+   *
+   * 仅在 status snapshot 时 server 端关联 Sub2API + 本地节点表填充。
+   * 如果 Sub2API 未连接 / 账号没绑代理 / 节点不在本地，则为 null。
+   */
+  currentProxyId: z.number().int().positive().nullable().optional(),
+  currentNodeHash: z.string().nullable().optional(),
+  currentNodeName: z.string().nullable().optional(),
+
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 });
