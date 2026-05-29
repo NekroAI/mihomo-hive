@@ -518,7 +518,11 @@ function planActions(
       ? policy.registration.emergencyMode.perTickCap
       : policy.registration.perTickCap;
     const gap = Math.max(0, summary.targetGap);
-    const count = Math.min(cap, gap);
+    // P5-AW 均衡度：只用注册补缺口的一部分(bias%)，其余留给重登旧账号恢复。
+    // 紧急模式下忽略 bias（缺口已低于安全线，能补多少补多少）。
+    const bias = summary.emergencyMode ? 100 : policy.target.registerBias;
+    const biasedGap = Math.ceil((gap * bias) / 100);
+    const count = Math.min(cap, biasedGap);
     for (let i = 0; i < count; i++) {
       out.push({
         kind: "register_new",

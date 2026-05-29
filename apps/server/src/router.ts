@@ -1472,6 +1472,19 @@ export const appRouter = t.router({
 
     // 手动账号操作 —— 收编工作台 / 单条账号 dropdown 触发
     actions: t.router({
+      /**
+       * P5-AW 重新编排队列：取消所有 queued 的恢复类 job(不动 running)，再触发一次新
+       * tick 重新规划。用于调整均衡度/策略后、或旧队列被陈旧重复任务卡住时一键重置。
+       */
+      regenerateQueue: protectedProcedure.mutation(async ({ ctx }) => {
+        const cancelled = ctx.repo.cancelAllQueuedRecoveryJobs();
+        let tick: Awaited<ReturnType<NonNullable<typeof ctx.accountFleetScheduler>["triggerNow"]>> | null = null;
+        if (ctx.accountFleetScheduler) {
+          tick = await ctx.accountFleetScheduler.triggerNow();
+        }
+        if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+        return { cancelled, replanned: tick !== null };
+      }),
       /** 手动入队 codex_login 修复 job。要求账号已有 phone+password。 */
       enqueueRecoverLogin: protectedProcedure
         .input(z.object({ accountId: z.string().min(1) }))

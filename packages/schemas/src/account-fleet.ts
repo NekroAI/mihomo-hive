@@ -235,6 +235,15 @@ export const accountFleetTargetPolicySchema = z.object({
   healthyAccountsTarget: z.number().int().nonnegative().default(50),
   targetGroupId: z.number().int().positive().default(2),
   minHealthyRatio: z.number().min(0).max(1).default(0.8),
+  /**
+   * P5-AW 均衡度（0-100）：补充健康账号时更倾向"重登旧账号"还是"注册新账号"。
+   *   0   = 完全靠重登旧的掉线账号(codex_login)，本 tick 不主动注册新号；
+   *   100 = 健康缺口尽量用注册新号补满(codex_register)；
+   *   中间值 = 缺口按比例只注册一部分，其余留给重登恢复。
+   * 仅影响"注册新号补缺口"的数量（recover_via_login 对掉线账号始终照常尝试）。
+   * registration.enabled=false 时此项无效（根本不注册）。
+   */
+  registerBias: z.number().int().min(0).max(100).default(40),
   naming: z
     .object({
       template: z.string().min(1).default("Hive-{date}-{seq}"),

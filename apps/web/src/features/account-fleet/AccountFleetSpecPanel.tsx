@@ -170,6 +170,34 @@ export function AccountFleetSpecPanel(props: {
             onChange={(v) => patchTarget((c) => ({ ...c, minHealthyRatio: v }))}
           />
         </div>
+        <div className="form-field" style={{ marginTop: 8 }}>
+          <label className="form-label">
+            补充策略均衡度：{draft.target.registerBias <= 15
+              ? "重登旧账号优先"
+              : draft.target.registerBias >= 85
+                ? "注册新账号优先"
+                : `重登 ${100 - draft.target.registerBias}% / 注册 ${draft.target.registerBias}%`}
+          </label>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span className="muted small">重登旧账号</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={draft.target.registerBias}
+              onChange={(e) => patchTarget((c) => ({ ...c, registerBias: Number(e.target.value) }))}
+              style={{ flex: 1 }}
+            />
+            <span className="muted small">注册新账号</span>
+            <span className="mono-strong" style={{ width: 40, textAlign: "right" }}>{draft.target.registerBias}</span>
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            健康账号不足时，缺口里有多大比例用"注册新号"补满，其余留给"重登掉线旧号"恢复。
+            掉线账号始终会照常尝试重登；此项只调注册新号的积极程度（紧急模式下忽略，全力补给）。
+            注册需先开启「注册」开关。
+          </div>
+        </div>
         <div className="form-grid">
           <TextInput
             label="账号命名模板"

@@ -292,7 +292,8 @@ describe("planAccountFleet", () => {
         target: {
           ...defaultAccountFleetSpec.target,
           healthyAccountsTarget: 10,
-          minHealthyRatio: 0 // 关掉 emergency 触发
+          minHealthyRatio: 0, // 关掉 emergency 触发
+          registerBias: 100 // 全力注册补满，隔离 cap 行为（不受均衡度影响）
         },
         registration: {
           ...defaultAccountFleetSpec.registration,
@@ -308,6 +309,25 @@ describe("planAccountFleet", () => {
       );
       const news = r.gatedActions.filter((a) => a.kind === "register_new");
       expect(news).toHaveLength(spec.registration.perTickCap); // default 5
+    });
+
+    it("registerBias 缩减注册数量，缺口其余留给重登 (P5-AW)", () => {
+      const spec = makeSpec({
+        target: {
+          ...defaultAccountFleetSpec.target,
+          healthyAccountsTarget: 10,
+          minHealthyRatio: 0,
+          registerBias: 30 // 缺口 10 → ceil(10*0.3)=3
+        },
+        registration: {
+          ...defaultAccountFleetSpec.registration,
+          enabled: true,
+          perTickCap: 20, // 不让 cap 成为约束
+          emergencyMode: { ...defaultAccountFleetSpec.registration.emergencyMode, enabled: false }
+        }
+      });
+      const r = planAccountFleet(baseInput({ spec, localAccounts: [] }));
+      expect(r.gatedActions.filter((a) => a.kind === "register_new")).toHaveLength(3);
     });
 
     it("daily budget exhausted → no register, inferredSkippedReason=budget_exhausted", () => {

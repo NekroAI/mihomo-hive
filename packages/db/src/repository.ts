@@ -1201,6 +1201,19 @@ export class HiveRepository {
       .run(now, now).changes;
   }
 
+  /**
+   * 取消所有 queued 的恢复类 job（P5-AW "重新编排"）。不动 running。返回取消条数。
+   * 之后由调用方触发一次新 tick 重新规划，避免旧队列里陈旧/重复的任务一直卡着。
+   */
+  cancelAllQueuedRecoveryJobs(reason = "重新编排队列"): number {
+    const now = new Date().toISOString();
+    return this.sqlite
+      .prepare(
+        "UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = ?, updated_at = ? WHERE status = 'queued' AND kind IN ('codex_login','codex_register')"
+      )
+      .run(now, reason, now).changes;
+  }
+
   /** 当前有 queued 或 running job 的账号 id 集合（P5-AV：调度器据此去重，避免重复入队）。 */
   accountIdsWithPendingJobs(): Set<string> {
     const rows = this.sqlite

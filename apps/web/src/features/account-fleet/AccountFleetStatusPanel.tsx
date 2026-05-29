@@ -576,11 +576,9 @@ function tickActionLabel(kind: AccountFleetTick["plannedActions"][number]["kind"
 function RegisterControl() {
   const [count, setCount] = React.useState(5);
   const utils = trpc.useUtils();
-  const m = trpc.accountFleet.actions.enqueueRegisterNew.useMutation({
-    onSuccess: () => {
-      void utils.accountFleet.status.invalidate();
-    }
-  });
+  const refresh = () => void utils.accountFleet.status.invalidate();
+  const reg = trpc.accountFleet.actions.enqueueRegisterNew.useMutation({ onSuccess: refresh });
+  const regen = trpc.accountFleet.actions.regenerateQueue.useMutation({ onSuccess: refresh });
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
       <input
@@ -595,11 +593,20 @@ function RegisterControl() {
       <Button
         size="sm"
         variant="secondary"
-        loading={m.isPending}
+        loading={reg.isPending}
         title="立刻入队 N 个注册任务并插队到所有队列任务前面（priority=5）。手动下发不受自动注册开关限制。"
-        onClick={() => m.mutate({ count, jumpQueue: true })}
+        onClick={() => reg.mutate({ count, jumpQueue: true })}
       >
         注册插队
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        loading={regen.isPending}
+        title="取消所有排队中的恢复任务并按当前策略重新规划队列。用于调整均衡度/策略后，或旧队列被陈旧重复任务卡住时一键重置。"
+        onClick={() => regen.mutate()}
+      >
+        重新编排
       </Button>
     </span>
   );
