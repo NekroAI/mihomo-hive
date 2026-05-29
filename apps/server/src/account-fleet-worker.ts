@@ -448,6 +448,7 @@ async function runImportCodexToolAccount(
       email: string | null;
       batchId: string | null;
       status: string;
+      createdAt: string | null;
       idToken: string | null;
       accessToken: string | null;
       refreshToken: string | null;
@@ -477,7 +478,9 @@ async function runImportCodexToolAccount(
         lastRecoveryError: null,
         lastRecoveryFailureCategory: null,
         recoveryAttempts: 0,
-        nextRecoveryAfter: null
+        nextRecoveryAfter: null,
+        // P5-AQ: 缺首见时间的旧记录用 codex-tool created_at 回填
+        ...(!existing.firstSeenAt && src.createdAt ? { firstSeenAt: src.createdAt } : {})
       });
     } else {
       // 本地完全没记录，新建一条
@@ -491,7 +494,9 @@ async function runImportCodexToolAccount(
         encPassword,
         encRefreshToken: encRefresh,
         batchId: src.batchId,
-        registeredAt: src.lastRefresh ?? now
+        registeredAt: src.lastRefresh ?? now,
+        // P5-AQ: 首见时间优先用 codex-tool 端 created_at（账号真实出生时间）
+        firstSeenAt: src.createdAt ?? src.lastRefresh ?? now
       });
       repo.upsertAccount(fresh);
     }
@@ -536,6 +541,7 @@ async function runImportCodexToolAccount(
       encRefreshToken: crypto.encryptOptional(refreshed.refresh_token),
       batchId: src.batchId,
       registeredAt: src.lastRefresh ?? now,
+      firstSeenAt: src.createdAt ?? src.lastRefresh ?? now,
       lastRecoveryPath: null
     });
     repo.upsertAccount(fresh);
@@ -554,7 +560,9 @@ async function runImportCodexToolAccount(
       health: "unknown",
       encPhone,
       encPassword,
-      ...(src.batchId ? { batchId: src.batchId } : {})
+      ...(src.batchId ? { batchId: src.batchId } : {}),
+      // P5-AQ: 缺首见时间的旧记录用 codex-tool created_at 回填
+      ...(!existing.firstSeenAt && src.createdAt ? { firstSeenAt: src.createdAt } : {})
     });
   } else {
     const fresh = makeFreshAccount({
@@ -565,7 +573,8 @@ async function runImportCodexToolAccount(
       encPhone,
       encPassword,
       batchId: src.batchId,
-      registeredAt: src.lastRefresh ?? now
+      registeredAt: src.lastRefresh ?? now,
+      firstSeenAt: src.createdAt ?? src.lastRefresh ?? now
     });
     repo.upsertAccount(fresh);
   }
@@ -699,6 +708,11 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
       lastRecoveryPath: "codex_login",
       // 恢复成功后清掉上次失败分类（让 UI 不再显示旧的红色告警）
       lastRecoveryFailureCategory: null,
+      // P5-AQ: codex_login 修复成功 = 一次重新登录，单调累加 + 记录时间。
+      // recoveryAttempts 已在上面清零（那是"当前连续尝试"），reloginCount 是"历史总重登次数"。
+      ...(input.isRecovery
+        ? { reloginCount: (account.reloginCount ?? 0) + 1, lastRecoveredAt: now }
+        : {}),
       // 仅在本次成功用过 egress 时回填；保留原值的 fallback：传 null 会覆盖，传 undefined 会跳过
       ...(input.egressNodeHash !== undefined ? { egressNodeHash: input.egressNodeHash } : {})
     });
@@ -826,6 +840,9 @@ function makeFreshAccount(overrides: Partial<AccountRecordInternal>): AccountRec
     smsCountry: null,
     smsCostCents: null,
     egressNodeHash: null,
+    firstSeenAt: now,
+    reloginCount: 0,
+    lastRecoveredAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides

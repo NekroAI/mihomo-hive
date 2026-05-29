@@ -135,6 +135,9 @@ function ensureSchema(sqlite: HiveSqlite): void {
       sms_country TEXT,
       sms_cost_cents INTEGER,
       egress_node_hash TEXT,
+      first_seen_at TEXT,
+      relogin_count INTEGER NOT NULL DEFAULT 0,
+      last_recovered_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -227,6 +230,12 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "accounts", "sms_country", "TEXT");
   addColumnIfMissing(sqlite, "accounts", "sms_cost_cents", "INTEGER");
   addColumnIfMissing(sqlite, "accounts", "last_recovery_failure_category", "TEXT");
+  // P5-AQ: 账号质量指标。first_seen_at 回填为 created_at（接管/创建时间）作首次时间兜底；
+  // relogin_count 累计 codex_login 成功修复次数；last_recovered_at 最近一次修复成功时间。
+  addColumnIfMissing(sqlite, "accounts", "first_seen_at", "TEXT");
+  addColumnIfMissing(sqlite, "accounts", "relogin_count", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "accounts", "last_recovered_at", "TEXT");
+  sqlite.exec("UPDATE accounts SET first_seen_at = created_at WHERE first_seen_at IS NULL;");
   // P5-AK/3: account_jobs.kind 加 import_codex_tool_account。SQLite 不能 ALTER CHECK，
   // 老 DB 必须 rebuild 表（rename → create → copy → drop → 重建 indexes）。
   rebuildAccountJobsCheckIfNeeded(sqlite);

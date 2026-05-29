@@ -1705,6 +1705,9 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     smsCountry: a.smsCountry,
     smsCostCents: a.smsCostCents,
     egressNodeHash: a.egressNodeHash,
+    firstSeenAt: a.firstSeenAt,
+    reloginCount: a.reloginCount,
+    lastRecoveredAt: a.lastRecoveredAt,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt
   };

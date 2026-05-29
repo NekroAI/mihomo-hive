@@ -120,6 +120,19 @@ export const accountRecordInternalSchema = z.object({
    */
   egressNodeHash: z.string().nullable(),
 
+  /**
+   * 账号质量指标（P5-AQ）：
+   *   firstSeenAt     —— 首次进入系统的时间。优先级：codex-tool 导出的 created_at >
+   *                      hive 注册时间 > 接管时间。用来算"存活天数"。
+   *   reloginCount    —— 累计 codex_login 修复成功次数（不随成功重置，单调递增）。
+   *                      跟 recoveryAttempts（当前连续尝试，成功即清零）区别开。
+   *   lastRecoveredAt —— 最近一次修复成功时间。
+   * 三者结合 health / quota 帮用户判断账号质量（存活越久、重登越少越稳）。
+   */
+  firstSeenAt: z.string().nullable(),
+  reloginCount: z.number().int().nonnegative().default(0),
+  lastRecoveredAt: z.string().nullable(),
+
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 });
@@ -162,6 +175,11 @@ export const accountRecordViewSchema = z.object({
   smsCountry: z.string().nullable(),
   smsCostCents: z.number().int().nonnegative().nullable(),
   egressNodeHash: z.string().nullable(),
+
+  // P5-AQ 账号质量
+  firstSeenAt: z.string().nullable(),
+  reloginCount: z.number().int().nonnegative().default(0),
+  lastRecoveredAt: z.string().nullable(),
 
   /**
    * 当前代理编排把这账号绑到了哪个本地节点 —— 通过 Sub2API account.proxy_id

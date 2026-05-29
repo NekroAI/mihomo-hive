@@ -53,6 +53,9 @@ function makeAcc(overrides: Partial<AccountRecordInternal> = {}): AccountRecordI
     smsCountry: null,
     smsCostCents: null,
     egressNodeHash: null,
+    firstSeenAt: NOW.toISOString(),
+    reloginCount: 0,
+    lastRecoveredAt: null,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString(),
     ...overrides

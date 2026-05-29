@@ -152,6 +152,9 @@ interface AccountRow {
   sms_country: string | null;
   sms_cost_cents: number | null;
   egress_node_hash: string | null;
+  first_seen_at: string | null;
+  relogin_count: number;
+  last_recovered_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -859,6 +862,7 @@ export class HiveRepository {
           recovery_attempts, next_recovery_after, last_recovery_error, last_recovery_path,
           last_recovery_failure_category,
           batch_id, registered_at, sms_country, sms_cost_cents, egress_node_hash,
+          first_seen_at, relogin_count, last_recovered_at,
           created_at, updated_at
         ) VALUES (
           @id, @externalId, @origin, @intent, @health,
@@ -871,6 +875,7 @@ export class HiveRepository {
           @recoveryAttempts, @nextRecoveryAfter, @lastRecoveryError, @lastRecoveryPath,
           @lastRecoveryFailureCategory,
           @batchId, @registeredAt, @smsCountry, @smsCostCents, @egressNodeHash,
+          @firstSeenAt, @reloginCount, @lastRecoveredAt,
           @createdAt, @updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -908,6 +913,9 @@ export class HiveRepository {
           sms_country = excluded.sms_country,
           sms_cost_cents = excluded.sms_cost_cents,
           egress_node_hash = excluded.egress_node_hash,
+          first_seen_at = excluded.first_seen_at,
+          relogin_count = excluded.relogin_count,
+          last_recovered_at = excluded.last_recovered_at,
           updated_at = excluded.updated_at
       `
       )
@@ -977,6 +985,10 @@ export class HiveRepository {
       smsCountry: string | null;
       smsCostCents: number | null;
       lastRecoveryFailureCategory: AccountRecordInternal["lastRecoveryFailureCategory"];
+      // P5-AQ: 质量指标
+      firstSeenAt: string | null;
+      reloginCount: number;
+      lastRecoveredAt: string | null;
       email: string;
     }>
   ): AccountRecordInternal | undefined {
@@ -1012,7 +1024,10 @@ export class HiveRepository {
       registeredAt: "registered_at",
       smsCountry: "sms_country",
       smsCostCents: "sms_cost_cents",
-      egressNodeHash: "egress_node_hash"
+      egressNodeHash: "egress_node_hash",
+      firstSeenAt: "first_seen_at",
+      reloginCount: "relogin_count",
+      lastRecoveredAt: "last_recovered_at"
     };
     const sets: string[] = [];
     const values: Record<string, unknown> = {};
@@ -1431,6 +1446,9 @@ function toAccountRow(record: AccountRecordInternal): Record<string, unknown> {
     smsCountry: record.smsCountry,
     smsCostCents: record.smsCostCents,
     egressNodeHash: record.egressNodeHash,
+    firstSeenAt: record.firstSeenAt,
+    reloginCount: record.reloginCount,
+    lastRecoveredAt: record.lastRecoveredAt,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
@@ -1473,6 +1491,9 @@ function accountFromRow(row: AccountRow): AccountRecordInternal {
     smsCountry: row.sms_country,
     smsCostCents: row.sms_cost_cents,
     egressNodeHash: row.egress_node_hash,
+    firstSeenAt: row.first_seen_at,
+    reloginCount: row.relogin_count,
+    lastRecoveredAt: row.last_recovered_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   });

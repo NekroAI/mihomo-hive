@@ -191,6 +191,10 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
       smsCountry: null,
       smsCostCents: null,
       egressNodeHash: null,
+      // P5-AQ: 接管时没有更早的来源时间 → 用接管时间作首见时间兜底
+      firstSeenAt: nowIso,
+      reloginCount: 0,
+      lastRecoveredAt: null,
       createdAt: nowIso,
       updatedAt: nowIso
     });

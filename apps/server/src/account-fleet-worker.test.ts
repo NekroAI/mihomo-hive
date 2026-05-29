@@ -51,6 +51,9 @@ function makeAccount(crypto: AccountCrypto, overrides: Partial<AccountRecordInte
     smsCountry: null,
     smsCostCents: null,
     egressNodeHash: null,
+    firstSeenAt: now,
+    reloginCount: 0,
+    lastRecoveredAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides

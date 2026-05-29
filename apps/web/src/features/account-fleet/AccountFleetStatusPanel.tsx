@@ -269,7 +269,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
               <th>状态</th>
               <th>健康</th>
               <th className="num">配额 5h/7d</th>
-              <th className="num">已重试</th>
+              <th className="num">存活/重登</th>
               <th>出口节点</th>
             </tr>
           </thead>
@@ -319,11 +319,13 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                   </span>
                 </td>
                 <td className="num">
-                  {acc.recoveryAttempts > 0 ? (
-                    <strong>{acc.recoveryAttempts}</strong>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2, justifyContent: "flex-end" }}>
+                    <span className="mono-strong">{formatDaysAlive(acc.firstSeenAt)}</span>
+                    {acc.reloginCount > 0 ? (
+                      <span className="muted small">· 重登 {acc.reloginCount}</span>
+                    ) : null}
+                    <InfoTip text={formatQualityTooltip(acc)} />
+                  </span>
                 </td>
                 <td className="cell-sub2api" title={egressTitle}>
                   {acc.currentNodeName ? (
@@ -776,6 +778,38 @@ function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFai
     case "oauth_failed":
       return "普通 OAuth 失败";
   }
+}
+
+/**
+ * P5-AQ 账号质量列。把"存活天数 + 历史重登次数"压成一个单元格，
+ * 配 InfoTip 给出首见时间 / 重登次数 / 最近修复时间的完整解读。
+ * 存活越久、重登越少 → 账号越稳，是判断质量的核心直观指标。
+ */
+function formatDaysAlive(firstSeenAt: string | null): string {
+  if (!firstSeenAt) return "—";
+  const ms = Date.now() - new Date(firstSeenAt).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const days = Math.floor(ms / 86_400_000);
+  if (days >= 1) return `${days}天`;
+  const hours = Math.floor(ms / 3_600_000);
+  return hours >= 1 ? `${hours}时` : "今天";
+}
+
+function formatQualityTooltip(acc: AccountRecordView): string {
+  const lines: string[] = [];
+  lines.push(
+    acc.firstSeenAt
+      ? `首见时间: ${new Date(acc.firstSeenAt).toLocaleString()}`
+      : "首见时间: 未知"
+  );
+  lines.push(`累计重新登录: ${acc.reloginCount} 次`);
+  if (acc.lastRecoveredAt) {
+    lines.push(`最近修复成功: ${new Date(acc.lastRecoveredAt).toLocaleString()}`);
+  }
+  if (acc.recoveryAttempts > 0) {
+    lines.push(`当前连续修复尝试: ${acc.recoveryAttempts} 次（成功即清零）`);
+  }
+  return lines.join("\n");
 }
 
 function quotaToneClass(percent: number | null): string {

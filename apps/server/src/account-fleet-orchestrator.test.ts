@@ -52,6 +52,9 @@ function makeAccount(overrides: Partial<AccountRecordInternal> = {}): AccountRec
     smsCountry: null,
     smsCostCents: null,
     egressNodeHash: null,
+    firstSeenAt: now,
+    reloginCount: 0,
+    lastRecoveredAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides

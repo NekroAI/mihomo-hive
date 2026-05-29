@@ -44,6 +44,9 @@ function makeAccount(overrides: Partial<AccountRecordInternal> = {}): AccountRec
     smsCountry: null,
     smsCostCents: null,
     egressNodeHash: null,
+    firstSeenAt: now,
+    reloginCount: 0,
+    lastRecoveredAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides
@@ -171,6 +174,28 @@ describe("HiveRepository account-fleet", () => {
       expect(() =>
         sqlite.prepare("UPDATE accounts SET origin = 'bad' WHERE id = ?").run(a.id)
       ).toThrow();
+    });
+
+    it("P5-AQ quality metrics roundtrip + relogin_count patch", () => {
+      const a = makeAccount({
+        firstSeenAt: "2026-01-01T00:00:00.000Z",
+        reloginCount: 2,
+        lastRecoveredAt: "2026-05-01T00:00:00.000Z"
+      });
+      repo.upsertAccount(a);
+      const got = repo.getAccountById(a.id)!;
+      expect(got.firstSeenAt).toBe("2026-01-01T00:00:00.000Z");
+      expect(got.reloginCount).toBe(2);
+      expect(got.lastRecoveredAt).toBe("2026-05-01T00:00:00.000Z");
+
+      const patched = repo.patchAccount(a.id, {
+        reloginCount: 3,
+        lastRecoveredAt: "2026-05-29T00:00:00.000Z"
+      });
+      expect(patched?.reloginCount).toBe(3);
+      expect(patched?.lastRecoveredAt).toBe("2026-05-29T00:00:00.000Z");
+      // firstSeenAt 不变
+      expect(patched?.firstSeenAt).toBe("2026-01-01T00:00:00.000Z");
     });
   });
 
