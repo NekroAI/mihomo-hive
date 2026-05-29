@@ -20,7 +20,7 @@ import type {
   AccountOrigin,
   AccountRecordView
 } from "@mihomo-hive/schemas";
-import { Badge, EmptyState, InfoTip, Panel } from "../../components/ui.js";
+import { Badge, Button, EmptyState, InfoTip, Panel } from "../../components/ui.js";
 import { trpc } from "../../lib/trpc.js";
 
 /**
@@ -304,11 +304,25 @@ function AccountMatrix(props: { accounts: AccountRecordView[] }) {
                 </td>
                 <td>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-                    <HealthBadge health={acc.health} />
-                    {acc.lastRecoveryFailureCategory ? (
-                      <InfoTip text={formatFailureCategory(acc.lastRecoveryFailureCategory)} />
-                    ) : null}
-                    <CooldownHint acc={acc} />
+                    {(() => {
+                      const remain = recoveryRemainingLabel(acc);
+                      // 限流中 → 健康标签与恢复时间合并成一个标签，竖杠连接
+                      return remain ? (
+                        <>
+                          <Badge tone={HEALTH_TONE[acc.health]}>
+                            {HEALTH_LABEL[acc.health]} | {remain}
+                          </Badge>
+                          <InfoTip text={recoveryTooltip(acc)} />
+                        </>
+                      ) : (
+                        <>
+                          <HealthBadge health={acc.health} />
+                          {acc.lastRecoveryFailureCategory ? (
+                            <InfoTip text={formatFailureCategory(acc.lastRecoveryFailureCategory)} />
+                          ) : null}
+                        </>
+                      );
+                    })()}
                   </span>
                 </td>
                 <td className="num">
@@ -556,6 +570,42 @@ function tickActionLabel(kind: AccountFleetTick["plannedActions"][number]["kind"
 }
 
 /**
+ * P5-AW 手动注册控件 —— 立刻入队一批 codex_register 并插队到所有任务前面
+ * (priority=5)，不受自动注册开关门控。用于"现在就补一批健康账号"。
+ */
+function RegisterControl() {
+  const [count, setCount] = React.useState(5);
+  const utils = trpc.useUtils();
+  const m = trpc.accountFleet.actions.enqueueRegisterNew.useMutation({
+    onSuccess: () => {
+      void utils.accountFleet.status.invalidate();
+    }
+  });
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="number"
+        min={1}
+        max={50}
+        value={count}
+        onChange={(e) => setCount(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
+        style={{ width: 52 }}
+        title="一次注册几个"
+      />
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={m.isPending}
+        title="立刻入队 N 个注册任务并插队到所有队列任务前面（priority=5）。手动下发不受自动注册开关限制。"
+        onClick={() => m.mutate({ count, jumpQueue: true })}
+      >
+        注册插队
+      </Button>
+    </span>
+  );
+}
+
+/**
  * P5-AR「进行中」卡片 —— 把真正在跑的 job 从一堆 queued 里单独拎出来。
  * 显示 kind / 账号 / 已运行时长 / 尝试次数 + 当前排队积压。
  * 已运行时长随每次 snapshot 轮询（5s）刷新；超过阈值标黄/红提示疑似卡死。
@@ -583,7 +633,7 @@ function RunningJobsCard(props: {
 
   if (props.running.length === 0) {
     return (
-      <Panel title={title}>
+      <Panel title={title} actions={<RegisterControl />}>
         <EmptyState
           title="当前无运行中的 job"
           description={
@@ -597,7 +647,7 @@ function RunningJobsCard(props: {
   }
 
   return (
-    <Panel title={title}>
+    <Panel title={title} actions={<RegisterControl />}>
       <div className="reconcile-feed">
         {props.running.map((job) => {
           const email = job.accountId ? emailById.get(job.accountId) : undefined;
@@ -841,22 +891,23 @@ function IntentBadge(props: { intent: AccountIntent }) {
   return <Badge tone={tone[props.intent]}>{label[props.intent]}</Badge>;
 }
 
+const HEALTH_LABEL: Record<AccountHealth, string> = {
+  healthy: "健康",
+  rate_limited: "限流",
+  quota_exhausted: "配额耗尽",
+  broken: "掉线",
+  unknown: "未知"
+};
+const HEALTH_TONE: Record<AccountHealth, "success" | "warning" | "danger" | "neutral" | "info"> = {
+  healthy: "success",
+  rate_limited: "warning",
+  quota_exhausted: "warning",
+  broken: "danger",
+  unknown: "neutral"
+};
+
 function HealthBadge(props: { health: AccountHealth }) {
-  const label: Record<AccountHealth, string> = {
-    healthy: "健康",
-    rate_limited: "限流",
-    quota_exhausted: "配额耗尽",
-    broken: "掉线",
-    unknown: "未知"
-  };
-  const tone: Record<AccountHealth, "success" | "warning" | "danger" | "neutral" | "info"> = {
-    healthy: "success",
-    rate_limited: "warning",
-    quota_exhausted: "warning",
-    broken: "danger",
-    unknown: "neutral"
-  };
-  return <Badge tone={tone[props.health]}>{label[props.health]}</Badge>;
+  return <Badge tone={HEALTH_TONE[props.health]}>{HEALTH_LABEL[props.health]}</Badge>;
 }
 
 /**
@@ -900,25 +951,30 @@ function formatEgressTooltip(acc: AccountRecordView): string {
 }
 
 /**
- * P5-AU: Sub2API "限流中" 冷却提示。配额耗尽时 Sub2API 会给账号设冷却截止
- * (temp_unschedulable_until) / 配额重置预计时间 (rate_limit_reset_at)。展示预计
- * 恢复时间，让用户知道账号会自然恢复、不必在冷却期内瞎触发恢复。
+ * P5-AU: Sub2API "限流中" 冷却恢复时间。配额耗尽时 Sub2API 给账号设冷却截止
+ * (temp_unschedulable_until) / 配额重置预计时间 (rate_limit_reset_at)。
+ * 返回剩余时长标签（>24h 显示 "Xd Yh"，否则 "Xh Ym" / "Ym"），过期/无则 null。
  */
-function CooldownHint(props: { acc: AccountRecordView }) {
-  const until = props.acc.tempUnschedulableUntil ?? props.acc.rateLimitResetAt ?? null;
+function recoveryRemainingLabel(acc: AccountRecordView): string | null {
+  const until = acc.tempUnschedulableUntil ?? acc.rateLimitResetAt ?? null;
   if (!until) return null;
   const ms = new Date(until).getTime() - Date.now();
-  if (!Number.isFinite(ms) || ms <= 0) return null; // 已过期 → 不显示
-  const mins = Math.round(ms / 60000);
-  const label = mins >= 60 ? `${Math.floor(mins / 60)}h${mins % 60}m` : `${mins}m`;
-  const lines = [`Sub2API 限流中，预计 ${new Date(until).toLocaleString()} 恢复（约 ${label} 后）`];
-  if (props.acc.tempUnschedulableReason) lines.push(`原因: ${props.acc.tempUnschedulableReason}`);
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-      <Badge tone="warning">限流 {label}</Badge>
-      <InfoTip text={lines.join("\n")} />
-    </span>
-  );
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const totalMin = Math.round(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  if (days >= 1) return `${days}d${hours}h`; // 超过 24h → 几d几h
+  if (hours >= 1) return `${hours}h${mins}m`;
+  return `${mins}m`;
+}
+
+function recoveryTooltip(acc: AccountRecordView): string {
+  const until = acc.tempUnschedulableUntil ?? acc.rateLimitResetAt ?? null;
+  const lines = [`Sub2API 限流中，预计 ${until ? new Date(until).toLocaleString() : "未知"} 恢复`];
+  if (acc.tempUnschedulableReason) lines.push(`原因: ${acc.tempUnschedulableReason}`);
+  lines.push("（账号会自然恢复，不必在冷却期内手动触发恢复）");
+  return lines.join("\n");
 }
 
 function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFailureCategory"]>): string {

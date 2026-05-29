@@ -1511,32 +1511,52 @@ export const appRouter = t.router({
           }
           return { enqueued: true };
         }),
-      /** 手动入队 codex_register 注册一个新账号（不绑定某个旧账号）。 */
-      enqueueRegisterNew: protectedProcedure.mutation(({ ctx }) => {
-        const now = new Date().toISOString();
-        ctx.repo.enqueueAccountJob({
-          id: randomUUID(),
-          kind: "codex_register",
-          accountId: null,
-          status: "queued",
-          attempt: 0,
-          maxAttempts: 1,
-          priority: 80,
-          scheduledAt: now,
-          startedAt: null,
-          finishedAt: null,
-          durationMs: null,
-          payloadJson: JSON.stringify({ reason: "manual" }),
-          resultJson: null,
-          errorMessage: null,
-          triggeredBy: "manual",
-          triggeredTickId: null,
-          createdAt: now,
-          updatedAt: now
-        });
-        if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
-        return { enqueued: true };
-      }),
+      /**
+       * 手动入队 codex_register 批量注册新账号（不绑定旧账号）。
+       *   count    —— 一次入队几个（1-50）。
+       *   jumpQueue—— true(默认) 时给极高优先级(priority=5)插到所有队列任务前面
+       *              （恢复 codex_login=100、自动注册=默认更低优先；5 会被最先认领）。
+       *              codex-tool 串行闸门下它们仍逐个执行，但排在所有 queued 之前。
+       * 手动入队不受 spec.registration.enabled 门控（那个只管自动规划）——用户主动
+       * 下发就执行，方便"现在就注册一批"。
+       */
+      enqueueRegisterNew: protectedProcedure
+        .input(
+          z
+            .object({
+              count: z.number().int().min(1).max(50).default(1),
+              jumpQueue: z.boolean().default(true)
+            })
+            .default({})
+        )
+        .mutation(({ ctx, input }) => {
+          const now = new Date().toISOString();
+          const priority = input.jumpQueue ? 5 : 80;
+          for (let i = 0; i < input.count; i++) {
+            ctx.repo.enqueueAccountJob({
+              id: randomUUID(),
+              kind: "codex_register",
+              accountId: null,
+              status: "queued",
+              attempt: 0,
+              maxAttempts: 1,
+              priority,
+              scheduledAt: now,
+              startedAt: null,
+              finishedAt: null,
+              durationMs: null,
+              payloadJson: JSON.stringify({ reason: "manual", batch: input.count }),
+              resultJson: null,
+              errorMessage: null,
+              triggeredBy: "manual",
+              triggeredTickId: null,
+              createdAt: now,
+              updatedAt: now
+            });
+          }
+          if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
+          return { enqueued: input.count, priority };
+        }),
       /** 试探导入：用户提供 refresh_token，看是否还能复活账号。 */
       enqueueImportRefreshToken: protectedProcedure
         .input(z.object({ refreshToken: z.string().min(1), existingAccountId: z.string().optional() }))

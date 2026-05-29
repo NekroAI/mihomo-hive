@@ -149,9 +149,22 @@ export function startAccountFleetScheduler(
       // 用户在 UI 显式打开后 plan 才会产出对应 actions。
       const triggeredJobIds: string[] = [];
       const tickId = randomUUID();
+      // P5-AV：去重 —— 已有 queued/running job 的账号本 tick 不再重复入队恢复任务，
+      // 避免同一账号堆积几十个 codex_login（之前死账号能囤 17 个 queued 死磕槽位）。
+      const pending = repo.accountIdsWithPendingJobs();
       for (const action of result.gatedActions) {
+        const isRecovery =
+          action.kind === "recover_via_login" ||
+          action.kind === "recover_via_register" ||
+          action.kind === "register_new";
+        if (isRecovery && action.accountId && pending.has(action.accountId)) {
+          continue; // 该账号已有在途 job，跳过本次入队
+        }
         const jobId = enqueueJobForAction(repo, action, startedAt, tickId);
-        if (jobId) triggeredJobIds.push(jobId);
+        if (jobId) {
+          triggeredJobIds.push(jobId);
+          if (action.accountId) pending.add(action.accountId); // 防本 tick 内重复
+        }
       }
 
       const tick = persistTick({

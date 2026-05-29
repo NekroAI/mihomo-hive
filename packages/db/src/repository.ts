@@ -1172,6 +1172,45 @@ export class HiveRepository {
       .c;
   }
 
+  /**
+   * 取消某账号所有 queued job（P5-AV）。账号退役 / 判定不可用时调用，避免残留的
+   * 重复 codex_login 继续占用串行槽位死磕。返回取消条数。
+   */
+  cancelQueuedJobsForAccount(accountId: string, reason = "account retired"): number {
+    const now = new Date().toISOString();
+    return this.sqlite
+      .prepare(
+        "UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = ?, updated_at = ? WHERE account_id = ? AND status = 'queued'"
+      )
+      .run(now, reason, now, accountId).changes;
+  }
+
+  /**
+   * 一次性清理：取消所有"账号已退役"的 queued 恢复 job（P5-AV）。worker 启动时调用，
+   * 立刻清掉历史堆积的死账号重复任务，把槽位让出来。返回取消条数。
+   */
+  cancelQueuedJobsForRetiredAccounts(): number {
+    const now = new Date().toISOString();
+    return this.sqlite
+      .prepare(
+        `UPDATE account_jobs SET status = 'cancelled', finished_at = ?, error_message = '账号已退役，启动时清理', updated_at = ?
+         WHERE status = 'queued'
+           AND kind IN ('codex_login','codex_register')
+           AND account_id IN (SELECT id FROM accounts WHERE intent = 'retired')`
+      )
+      .run(now, now).changes;
+  }
+
+  /** 当前有 queued 或 running job 的账号 id 集合（P5-AV：调度器据此去重，避免重复入队）。 */
+  accountIdsWithPendingJobs(): Set<string> {
+    const rows = this.sqlite
+      .prepare(
+        "SELECT DISTINCT account_id FROM account_jobs WHERE account_id IS NOT NULL AND status IN ('queued','running')"
+      )
+      .all() as Array<{ account_id: string }>;
+    return new Set(rows.map((r) => r.account_id));
+  }
+
   /** 当前 status=running 的 job（最久的排前面，便于 UI 显示"进行中 + 已运行时长"）。 */
   listRunningAccountJobs(): AccountJob[] {
     const rows = this.sqlite

@@ -282,6 +282,20 @@ describe("HiveRepository account-fleet", () => {
       expect(repo.getAccountJob("r1")?.startedAt).toBeNull();
     });
 
+    it("cancelQueuedJobsForAccount + accountIdsWithPendingJobs (P5-AV)", () => {
+      repo.enqueueAccountJob(makeJob({ id: "j1", accountId: "acc-x", status: "queued" }));
+      repo.enqueueAccountJob(makeJob({ id: "j2", accountId: "acc-x", status: "queued" }));
+      repo.enqueueAccountJob(makeJob({ id: "j3", accountId: "acc-y", status: "queued" }));
+      repo.updateAccountJob("j3", { status: "running" });
+      expect(repo.accountIdsWithPendingJobs()).toEqual(new Set(["acc-x", "acc-y"]));
+
+      const cancelled = repo.cancelQueuedJobsForAccount("acc-x");
+      expect(cancelled).toBe(2);
+      expect(repo.getAccountJob("j1")?.status).toBe("cancelled");
+      // running 的不动；acc-y 仍有 running
+      expect(repo.accountIdsWithPendingJobs()).toEqual(new Set(["acc-y"]));
+    });
+
     it("listRunningAccountJobs + countQueuedAccountJobs", () => {
       repo.enqueueAccountJob(makeJob({ id: "q1", status: "queued" }));
       repo.enqueueAccountJob(makeJob({ id: "q2", status: "queued" }));

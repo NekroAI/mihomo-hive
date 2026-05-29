@@ -94,6 +94,20 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
     if (running >= maxConcurrent) return false;
     const job = repo.claimNextAccountJob();
     if (!job) return false;
+    // P5-AV 执行前防御：恢复类 job 真正 spawn codex-tool 之前，复查账号当前状态。
+    // 若账号已退役（多为 account_unusable 死账号）→ 直接作废这条残留 queued job，
+    // 不浪费串行 codex-tool 槽位死磕。返回 true 让 poll 立刻继续下一条。
+    if (job.accountId && (job.kind === "codex_login" || job.kind === "codex_register")) {
+      const acc = repo.getAccountById(job.accountId);
+      if (acc && acc.intent === "retired") {
+        repo.updateAccountJob(job.id, {
+          status: "cancelled",
+          finishedAt: new Date().toISOString(),
+          errorMessage: `账号已退役（${acc.lastRecoveryFailureCategory ?? "retired"}），跳过`
+        });
+        return true;
+      }
+    }
     // 抢占式：再次检查后才标 running，避免重复消费
     running++;
     const startedAt = new Date();
@@ -184,6 +198,11 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
       const revived = repo.resetStaleRunningAccountJobs();
       if (revived > 0) {
         console.log(`AccountJobsWorker: reset ${revived} stale running job(s) → queued on startup.`);
+      }
+      // P5-AV：清掉历史堆积的"死账号(已退役)"queued 恢复任务，别再死磕。
+      const purged = repo.cancelQueuedJobsForRetiredAccounts();
+      if (purged > 0) {
+        console.log(`AccountJobsWorker: cancelled ${purged} queued job(s) for retired accounts on startup.`);
       }
     } catch (err) {
       console.warn("AccountJobsWorker: failed to reset stale running jobs:", err);
@@ -987,6 +1006,12 @@ function applyRecoveryFailure(
       lastRecoveryPath: path,
       lastRecoveryFailureCategory: "account_unusable"
     });
+    // P5-AV：取消该账号残留的 queued job，别让重复任务继续死磕已退役的死账号、
+    // 把宝贵的串行 codex-tool 槽位让给其它账号。
+    const cancelled = repo.cancelQueuedJobsForAccount(account.id, "account_unusable，已退役");
+    if (cancelled > 0) {
+      console.log(`applyRecoveryFailure: 账号 ${account.id} 不可用退役，取消 ${cancelled} 个残留 queued job。`);
+    }
     return;
   }
 
