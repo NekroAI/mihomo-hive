@@ -71,6 +71,7 @@ export interface NodesRouteProps {
     attachToMihomo: PendingMutation & { mutate: (input: { hashes: string[] }) => void };
     rebuildMihomo: PendingMutation & { mutate: () => void };
     resetIntent: PendingMutation & { mutate: (input: { hashes: string[]; liftFromRetired?: boolean }) => void };
+    setCodexReserved: PendingMutation & { mutate: (input: { hashes: string[]; reserved: boolean }) => void };
     deleteSubscription: PendingMutation & { mutate: (input: { id: string }) => void };
   };
 }
@@ -235,6 +236,14 @@ export function NodesRoute(props: NodesRouteProps) {
               run: async () => m.resetIntent.mutate({ hashes: props.selectedHashesList, liftFromRetired: true })
             });
           }}
+          reserving={m.setCodexReserved.isPending}
+          selectedReservedCount={selectedNodes.filter((n) => n.codexReserved).length}
+          onMarkReserved={() =>
+            m.setCodexReserved.mutate({ hashes: props.selectedHashesList, reserved: true })
+          }
+          onUnmarkReserved={() =>
+            m.setCodexReserved.mutate({ hashes: props.selectedHashesList, reserved: false })
+          }
           onDisableSelected={() =>
             m.setLifecycle.mutate({ hashes: props.selectedHashesList, lifecycleStatus: "disabled" })
           }

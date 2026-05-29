@@ -89,6 +89,9 @@ function node(input: Partial<ProxyNode> & Pick<ProxyNode, "hash" | "status">): P
     schedulable: input.schedulable ?? (input.status === "active"),
     protected: input.protected ?? false,
     ...(input.assignedPort ? { assignedPort: input.assignedPort } : {}),
+    codexLoginSuccess: input.codexLoginSuccess ?? 0,
+    codexLoginFailure: input.codexLoginFailure ?? 0,
+    codexReserved: input.codexReserved ?? false,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z"
   };

@@ -28,6 +28,9 @@ function makeNode(overrides: Partial<ProxyNode> = {}): ProxyNode {
       { targetId: "openai", ok: true, latencyMs: 200, httpStatus: 401, message: "ok" },
       { targetId: "claude", ok: true, latencyMs: 250, httpStatus: 405, message: "ok" }
     ]),
+    codexLoginSuccess: 0,
+    codexLoginFailure: 0,
+    codexReserved: false,
     createdAt: now,
     updatedAt: now,
     ...overrides
@@ -235,6 +238,89 @@ describe("selectEgressForLogin", () => {
         rand: () => 0.5
       })
     ).toThrow(NoEgressAvailableError);
+  });
+
+  // ── P5-AS codex 反馈 + 保留节点 ──
+  it("skips sticky preferred when its last codex outcome is failure", () => {
+    const nodes = [
+      makeNode({ hash: "sticky-failed", codexLastOutcome: "failure", codexLoginFailure: 3 }),
+      makeNode({ hash: "fresh" })
+    ];
+    const r = selectEgressForLogin({
+      nodes,
+      egressLoadByNodeHash: new Map(),
+      preferredHash: "sticky-failed",
+      rand: () => 0.5
+    });
+    expect(r.hash).not.toBe("sticky-failed");
+    expect(r.hash).toBe("fresh");
+  });
+
+  it("login deterministically prefers a codex-proven node over untried", () => {
+    const nodes = [
+      makeNode({ hash: "untried-a" }),
+      makeNode({ hash: "proven", codexLoginSuccess: 4, codexLoginFailure: 1 }),
+      makeNode({ hash: "untried-b" })
+    ];
+    const r = selectEgressForLogin({
+      nodes,
+      egressLoadByNodeHash: new Map(),
+      preferredHash: null,
+      rand: () => 0.999
+    });
+    expect(r.hash).toBe("proven");
+    expect(r.reason).toBe("codex_proven");
+  });
+
+  it("login uses reserved node as backup over a proven non-reserved one", () => {
+    const nodes = [
+      makeNode({ hash: "proven-normal", codexLoginSuccess: 9 }),
+      makeNode({ hash: "reserved-node", codexReserved: true })
+    ];
+    const r = selectEgressForLogin({
+      nodes,
+      egressLoadByNodeHash: new Map(),
+      preferredHash: null,
+      rand: () => 0.5
+    });
+    expect(r.hash).toBe("reserved-node");
+    expect(r.reason).toBe("codex_reserved");
+    expect(r.reserved).toBe(true);
+  });
+
+  it("login still reuses sticky even if a reserved node exists (last working node first)", () => {
+    const nodes = [
+      makeNode({ hash: "last-working", codexLastOutcome: "success", codexLoginSuccess: 2 }),
+      makeNode({ hash: "reserved-node", codexReserved: true })
+    ];
+    const r = selectEgressForLogin({
+      nodes,
+      egressLoadByNodeHash: new Map(),
+      preferredHash: "last-working",
+      rand: () => 0.5
+    });
+    expect(r.hash).toBe("last-working");
+    expect(r.reason).toBe("preferred");
+  });
+});
+
+describe("selectEgressForRegister reserved-first (P5-AS)", () => {
+  it("register prefers reserved nodes when any exist", () => {
+    const nodes = [
+      makeNode({ hash: "normal-1" }),
+      makeNode({ hash: "reserved-1", codexReserved: true }),
+      makeNode({ hash: "normal-2" })
+    ];
+    const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: () => 0.5 });
+    expect(r.hash).toBe("reserved-1");
+    expect(r.reason).toBe("codex_reserved");
+  });
+
+  it("register falls back to normal pool when no reserved nodes", () => {
+    const nodes = [makeNode({ hash: "normal-only" })];
+    const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: () => 0.5 });
+    expect(r.hash).toBe("normal-only");
+    expect(r.reason).toBe("weighted_quality");
   });
 });
 

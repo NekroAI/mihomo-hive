@@ -227,18 +227,29 @@ async function runCodexLogin(
 
   const egress = resolveEgressForLogin(repo, spec, account);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
-  // 串行化：codex-tool 的 chromium/Sentinel 调用不能并发（见 withCodexToolLock）
-  const outcome = await withCodexToolLock(() =>
-    adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs })
-  );
+  // 串行化：codex-tool 的 chromium/Sentinel 调用不能并发（见 withCodexToolLock）。
+  // P5-AS：抛出型失败（超时/非零退出）也要给节点记一笔（多为网络/代理类）。
+  let outcome: Awaited<ReturnType<typeof adapter.login>>;
+  try {
+    outcome = await withCodexToolLock(() =>
+      adapter.login({ phone, password, timeoutMs: spec.codexTool.timeouts.loginMs })
+    );
+  } catch (err) {
+    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
   // login 失败统一抛错，由 executor catch → applyRecoveryFailure 按错误消息分类处理
   // （account_unusable 退役 / network_or_proxy 换出口重试 / oauth_failed 退避）。
   // 不在这里 patch —— 否则会和 applyRecoveryFailure 的 intent 写回打架（先退役又被翻回）。
   // outcome.classification 若有则拼进消息，让分类器也能命中 codex-tool 的判定。
   if (outcome.kind === "failed") {
     const cat = outcome.classification.failureCategory;
-    throw new Error(cat ? `${outcome.error} [${cat}]` : outcome.error);
+    const msg = cat ? `${outcome.error} [${cat}]` : outcome.error;
+    recordNodeOutcome(repo, egress, { failedMessage: msg });
+    throw new Error(msg);
   }
+  // P5-AS：成功 = 这个节点能过 Sentinel，记一笔成功（驱动后续优先复用）
+  recordNodeOutcome(repo, egress, "success");
   await landOnSub2api({
     repo,
     crypto,
@@ -268,9 +279,15 @@ async function runCodexRegister(
   const egress = resolveEgressForRegister(repo, spec);
   const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
   // 串行化：与 login 共用同一闸门，避免两个 chromium 同时跑
-  const outcome = await withCodexToolLock(() =>
-    adapter.registerOne({ timeoutMs: spec.codexTool.timeouts.registerMs })
-  );
+  let outcome: Awaited<ReturnType<typeof adapter.registerOne>>;
+  try {
+    outcome = await withCodexToolLock(() =>
+      adapter.registerOne({ timeoutMs: spec.codexTool.timeouts.registerMs })
+    );
+  } catch (err) {
+    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
 
   // P5-AI: 不管成功失败，只要 codex-tool 返回了 sms_region_result 就回灌经验
@@ -289,6 +306,10 @@ async function runCodexRegister(
   }
   if (outcome.kind === "oauth_failed") {
     const { costCents, country } = persistSms(outcome.recoverable.sms, outcome.recoverable.sms.country);
+    // P5-AS：OAuth 失败若属网络/代理/Sentinel 类，给节点记一笔失败（account_unusable 不记）
+    recordNodeOutcome(repo, egress, {
+      failedMessage: `${outcome.recoverable.error} [${outcome.recoverable.classification.failureCategory ?? "oauth_failed"}]`
+    });
     // 按 OAuth 失败分类决定怎么落库（external-integration.md §"OAuth 失败分类"）：
     //   account_unusable → 直接 retired，不进恢复队列
     //   network_or_proxy → 进恢复队列但拉长延后，可能换代理后能救
@@ -326,6 +347,8 @@ async function runCodexRegister(
   }
 
   // token_ready
+  // P5-AS：注册成功 = 节点能过 Sentinel，记一笔成功
+  recordNodeOutcome(repo, egress, "success");
   const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country);
   await landOnSub2api({
     repo,
@@ -893,6 +916,27 @@ function classifyCodexFailure(message: string): "account_unusable" | "network_or
   ];
   if (networkMarkers.some((k) => m.includes(k))) return "network_or_proxy";
   return "oauth_failed";
+}
+
+/**
+ * P5-AS: 把一次 codex_login/register 经某节点出口的实战结果回写到节点。
+ * 失败仅在 network_or_proxy（含 Sentinel）类时记账 —— account_unusable / oauth_failed
+ * 是账号自身问题，不该污染节点的"能否过 Sentinel"信誉。egress 为 null（egress.mode=none）
+ * 时 no-op。
+ */
+function recordNodeOutcome(
+  repo: HiveRepository,
+  egress: EgressSelection | null,
+  result: "success" | { failedMessage: string }
+): void {
+  if (!egress) return;
+  if (result === "success") {
+    repo.recordNodeCodexOutcome(egress.hash, "success");
+    return;
+  }
+  if (classifyCodexFailure(result.failedMessage) === "network_or_proxy") {
+    repo.recordNodeCodexOutcome(egress.hash, "failure");
+  }
 }
 
 function applyRecoveryFailure(

@@ -26,6 +26,9 @@ describe("renderMihomoConfig", () => {
         schedulable: true,
         protected: false,
         assignedPort: port,
+        codexLoginSuccess: 0,
+        codexLoginFailure: 0,
+        codexReserved: false,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       };

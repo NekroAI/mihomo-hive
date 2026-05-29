@@ -210,6 +210,24 @@ export const appRouter = t.router({
 
   nodes: t.router({
     list: protectedProcedure.query(({ ctx }) => ctx.repo.listNodes()),
+    /**
+     * P5-AS: 标记/取消「保留节点」—— 专用于账号注册/登录的高质量备用出口。
+     * 批量切换；返回更新后的节点列表。
+     */
+    setCodexReserved: protectedProcedure
+      .input(
+        z.object({
+          hashes: z.array(z.string().min(8)).min(1),
+          reserved: z.boolean()
+        })
+      )
+      .mutation(({ ctx, input }) => {
+        let updated = 0;
+        for (const hash of input.hashes) {
+          if (ctx.repo.setNodeCodexReserved(hash, input.reserved)) updated += 1;
+        }
+        return { updated, nodes: ctx.repo.listNodes() };
+      }),
     setLifecycle: protectedProcedure
       .input(
         z.object({

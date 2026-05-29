@@ -41,6 +41,9 @@ function buildNode(input: Partial<ProxyNode> & { hash: string; sub2apiProxyId: n
     intentRole: input.intentRole ?? "serving",
     ...(input.backoffUntil !== undefined ? { backoffUntil: input.backoffUntil } : {}),
     backoffAttempts: input.backoffAttempts ?? 0,
+    codexLoginSuccess: 0,
+    codexLoginFailure: 0,
+    codexReserved: false,
     createdAt: NOW.toISOString(),
     updatedAt: NOW.toISOString()
   };

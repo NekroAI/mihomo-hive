@@ -12,6 +12,8 @@ import {
   Replace,
   RotateCcw,
   Snowflake,
+  Star,
+  StarOff,
   Trash2,
   XSquare
 } from "lucide-react";
@@ -40,6 +42,11 @@ export interface NodeToolbarProps {
   /** 重置所选节点的编排意图（清 intent_role / backoff / health_score），让 reconcile 重新评估。
    *  用于恢复被误判 quarantined / evicted 的节点。 */
   onResetIntent: () => void;
+  /** P5-AS: 把所选节点标记为保留节点（专用于账号注册/登录的备用出口）。 */
+  onMarkReserved: () => void;
+  onUnmarkReserved: () => void;
+  reserving: boolean;
+  selectedReservedCount: number;
   onDisableSelected: () => void;
   onCoolingDownSelected: () => void;
   onRetireSelected: () => void;
@@ -195,6 +202,24 @@ export function NodeToolbar(props: NodeToolbarProps) {
               onClick={props.onResetIntent}
             >
               重置编排状态
+            </DropdownItem>
+          </DropdownGroup>
+          <DropdownGroup label="保留节点（所选）">
+            <DropdownItem
+              icon={<Star size={14} />}
+              disabled={props.busy || props.reserving || !hasSelection}
+              hint="标记为保留节点：专用于账号注册/登录的高质量备用出口。注册优先统一走保留节点；登录恢复时先复用账号上次成功的节点，失败后才启用保留节点，避免在普通节点里瞎轮换触发账号风控。不影响日常 serving 绑定。"
+              onClick={props.onMarkReserved}
+            >
+              标记为保留节点
+            </DropdownItem>
+            <DropdownItem
+              icon={<StarOff size={14} />}
+              disabled={props.busy || props.reserving || props.selectedReservedCount === 0}
+              hint="取消所选节点的保留标记。"
+              onClick={props.onUnmarkReserved}
+            >
+              取消保留{props.selectedReservedCount > 0 ? `（${props.selectedReservedCount}）` : ""}
             </DropdownItem>
           </DropdownGroup>
           <DropdownGroup label="生命周期（所选）">

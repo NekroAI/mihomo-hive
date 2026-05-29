@@ -361,6 +361,13 @@ function Dashboard(props: { onLogout: () => void }) {
     },
     onError: (error) => failTask(setTask, pushToast, "重置编排状态失败", error.message)
   });
+  const setCodexReserved = trpc.nodes.setCodexReserved.useMutation({
+    onSuccess: async (result) => {
+      pushToast("success", "保留标记已更新", `${result.updated} 个节点。保留节点专用于账号注册/登录的备用出口。`);
+      await refreshOperationalData();
+    },
+    onError: (error) => pushToast("danger", "标记保留节点失败", error.message)
+  });
   const attachToMihomo = trpc.nodes.attachToMihomo.useMutation({
     onMutate: () =>
       startTask(setTask, "正在接入 Mihomo", "给所选节点分配端口并刷新 Mihomo 本地监听；不会推送到 Sub2API。"),
@@ -809,6 +816,7 @@ function Dashboard(props: { onLogout: () => void }) {
             attachToMihomo,
             rebuildMihomo,
             resetIntent,
+            setCodexReserved,
             deleteSubscription
           }}
         />

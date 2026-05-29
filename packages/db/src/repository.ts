@@ -81,6 +81,11 @@ interface NodeRow {
   backoff_attempts: number;
   health_score: number | null;
   last_health_check: string | null;
+  codex_login_success: number;
+  codex_login_failure: number;
+  codex_last_outcome: "success" | "failure" | null;
+  codex_last_outcome_at: string | null;
+  codex_reserved: 0 | 1;
   created_at: string;
   updated_at: string;
 }
@@ -361,6 +366,30 @@ export class HiveRepository {
   listNodes(): ProxyNode[] {
     const rows = this.sqlite.prepare("SELECT * FROM nodes ORDER BY assigned_port, name").all() as NodeRow[];
     return rows.map(nodeFromRow);
+  }
+
+  /**
+   * 记录一次 codex_login 经某节点出口的实战结果（P5-AS）。原子自增对应计数，
+   * 并写最近结果/时间。节点不存在（hash 已删）时静默 no-op。
+   */
+  recordNodeCodexOutcome(nodeHash: string, outcome: "success" | "failure"): void {
+    const now = new Date().toISOString();
+    const col = outcome === "success" ? "codex_login_success" : "codex_login_failure";
+    this.sqlite
+      .prepare(
+        `UPDATE nodes SET ${col} = ${col} + 1, codex_last_outcome = ?, codex_last_outcome_at = ?, updated_at = ? WHERE hash = ?`
+      )
+      .run(outcome, now, now, nodeHash);
+  }
+
+  /** 标记/取消保留节点（P5-AS）。返回是否命中某行。 */
+  setNodeCodexReserved(nodeHash: string, reserved: boolean): boolean {
+    const now = new Date().toISOString();
+    return (
+      this.sqlite
+        .prepare("UPDATE nodes SET codex_reserved = ?, updated_at = ? WHERE hash = ?")
+        .run(reserved ? 1 : 0, now, nodeHash).changes > 0
+    );
   }
 
   saveNodes(nodes: ProxyNode[]): void {
@@ -1383,6 +1412,11 @@ function nodeFromRow(row: NodeRow): ProxyNode {
     backoffAttempts: row.backoff_attempts ?? 0,
     healthScore: row.health_score,
     lastHealthCheck: row.last_health_check,
+    codexLoginSuccess: row.codex_login_success ?? 0,
+    codexLoginFailure: row.codex_login_failure ?? 0,
+    codexLastOutcome: row.codex_last_outcome,
+    codexLastOutcomeAt: row.codex_last_outcome_at,
+    codexReserved: Boolean(row.codex_reserved),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

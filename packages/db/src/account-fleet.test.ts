@@ -413,4 +413,53 @@ describe("HiveRepository account-fleet", () => {
       expect(b.registrationsBudget).toBe(50);
     });
   });
+
+  describe("node codex feedback (P5-AS)", () => {
+    function insertNode(hash: string) {
+      const now = new Date().toISOString();
+      repo.upsertNodes([
+        {
+          hash,
+          sourceId: "src",
+          name: hash,
+          originalName: hash,
+          type: "ss",
+          region: "jp",
+          raw: {},
+          status: "active",
+          lifecycleStatus: "schedulable",
+          schedulable: true,
+          protected: false,
+          assignedPort: 12000,
+          codexLoginSuccess: 0,
+          codexLoginFailure: 0,
+          codexReserved: false,
+          createdAt: now,
+          updatedAt: now
+        }
+      ]);
+    }
+
+    it("recordNodeCodexOutcome increments counters + last outcome", () => {
+      insertNode("node-aaaaaaaa");
+      repo.recordNodeCodexOutcome("node-aaaaaaaa", "success");
+      repo.recordNodeCodexOutcome("node-aaaaaaaa", "success");
+      repo.recordNodeCodexOutcome("node-aaaaaaaa", "failure");
+      const n = repo.listNodes().find((x) => x.hash === "node-aaaaaaaa")!;
+      expect(n.codexLoginSuccess).toBe(2);
+      expect(n.codexLoginFailure).toBe(1);
+      expect(n.codexLastOutcome).toBe("failure");
+      expect(n.codexLastOutcomeAt).toBeTruthy();
+    });
+
+    it("setNodeCodexReserved toggles flag; preserved across recordOutcome", () => {
+      insertNode("node-bbbbbbbb");
+      expect(repo.setNodeCodexReserved("node-bbbbbbbb", true)).toBe(true);
+      repo.recordNodeCodexOutcome("node-bbbbbbbb", "success");
+      const n = repo.listNodes().find((x) => x.hash === "node-bbbbbbbb")!;
+      expect(n.codexReserved).toBe(true);
+      expect(n.codexLoginSuccess).toBe(1);
+      expect(repo.setNodeCodexReserved("missing-hash", true)).toBe(false);
+    });
+  });
 });

@@ -20,6 +20,7 @@ import {
   MessageSquare,
   MinusCircle,
   Search,
+  Star,
   Users,
   XCircle
 } from "lucide-react";
@@ -76,7 +77,14 @@ export function NodeTable(props: {
       {
         accessorKey: "name",
         header: "节点名称",
-        cell: ({ row }) => <span className="node-name" title={row.original.name}>{row.original.name}</span>,
+        cell: ({ row }) => (
+          <span className="node-name" title={row.original.name} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {row.original.codexReserved ? (
+              <Star size={13} className="text-warning" fill="currentColor" aria-label="保留节点" />
+            ) : null}
+            {row.original.name}
+          </span>
+        ),
         size: 300
       },
       {
@@ -114,6 +122,12 @@ export function NodeTable(props: {
         header: "质量",
         cell: ({ row }) => <QualityCell score={row.original.qualityScore ?? null} />,
         size: 80
+      },
+      {
+        id: "codexOutcome",
+        header: "登录战绩",
+        cell: ({ row }) => <CodexOutcomeCell node={row.original} />,
+        size: 96
       },
       {
         accessorKey: "lastTestStatus",
@@ -294,6 +308,23 @@ function QualityCell(props: { score: number | null | undefined }) {
   }
   const tone: "success" | "warning" | "danger" = props.score >= 80 ? "success" : props.score >= 50 ? "warning" : "danger";
   return <Badge tone={tone}>{props.score}</Badge>;
+}
+
+/**
+ * codex_login 实战战绩（P5-AS）：经此节点出口真实登录/注册的 成功 / 失败 次数。
+ * 区别于"质量"（openai 连通性测试）—— 这一列反映"能否过 Cloudflare Sentinel"。
+ * 成功>0 绿、纯失败红、没跑过灰。
+ */
+function CodexOutcomeCell(props: { node: ProxyNode }) {
+  const ok = props.node.codexLoginSuccess ?? 0;
+  const fail = props.node.codexLoginFailure ?? 0;
+  if (ok === 0 && fail === 0) return <span className="muted small" title="尚未经此节点跑过登录/注册">未试</span>;
+  const tone: "success" | "warning" | "danger" = ok > 0 ? "success" : "danger";
+  return (
+    <Badge tone={tone}>
+      {ok}✓ / {fail}✗
+    </Badge>
+  );
 }
 
 /**

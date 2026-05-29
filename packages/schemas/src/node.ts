@@ -61,6 +61,29 @@ export const proxyNodeSchema = z.object({
   backoffAttempts: z.number().int().min(0).optional(),
   healthScore: z.number().int().min(0).max(100).optional().nullable(),
   lastHealthCheck: z.string().optional().nullable(),
+  /**
+   * codex_login 实战反馈（P5-AS）。背景：节点能否进 egress 池原本只看 openai
+   * 连通性测试（能否连上 auth.openai.com），但"能连上 ≠ 能过 Cloudflare Sentinel"。
+   * 机房 IP 大多 openai 测试通过却被 Sentinel 挡，导致恢复盲目轮换、成功率极低。
+   * 这里累计每个节点真实 codex_login 的成功/失败次数，驱动 egress 选择确定性地
+   * 偏向"证明能过 Sentinel"的节点、惩罚反复失败的节点（对齐"禁止随机 fallback"）。
+   *   codexLoginSuccess —— 经此节点出口 codex_login 成功累计
+   *   codexLoginFailure —— 经此节点 network_or_proxy/sentinel 类失败累计
+   *   codexLastOutcome  —— 最近一次结果，用于"刚失败的节点短期降级/排除"
+   */
+  codexLoginSuccess: z.number().int().nonnegative().default(0),
+  codexLoginFailure: z.number().int().nonnegative().default(0),
+  codexLastOutcome: z.enum(["success", "failure"]).optional().nullable(),
+  codexLastOutcomeAt: z.string().optional().nullable(),
+  /**
+   * 保留节点（P5-AS）。用户手动标记的高质量代理，专用于账号注册/登录这类高风控
+   * 敏感流程，作为"备用出口池"：
+   *   - 注册：优先统一走保留节点（出生 IP 干净）；没有保留节点才回退普通节点。
+   *   - 登录恢复：先复用账号"上次成功的节点"（sticky），失败后才启用保留节点，
+   *     避免在一堆普通节点里瞎轮换触发更严重的账号风控。
+   * 标记本身不影响日常 serving 绑定逻辑（仅影响 codex egress 选择优先级）。
+   */
+  codexReserved: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string()
 });

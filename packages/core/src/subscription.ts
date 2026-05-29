@@ -127,6 +127,9 @@ function toProxyNode(raw: RawProxy, sourceId: string): ProxyNode {
     lifecycleStatus: "candidate",
     schedulable: false,
     protected: false,
+    codexLoginSuccess: 0,
+    codexLoginFailure: 0,
+    codexReserved: false,
     createdAt: now,
     updatedAt: now
   };

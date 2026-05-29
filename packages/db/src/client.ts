@@ -222,6 +222,13 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "last_health_check", "TEXT");
   // P5-R: 每个测试目标（openai / claude / ...）的独立结果，JSON 数组字符串
   addColumnIfMissing(sqlite, "nodes", "last_test_targets", "TEXT");
+  // P5-AS: 节点 codex_login 实战反馈（能否过 Cloudflare Sentinel，区别于 openai 连通性测试）
+  addColumnIfMissing(sqlite, "nodes", "codex_login_success", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "codex_login_failure", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "codex_last_outcome", "TEXT");
+  addColumnIfMissing(sqlite, "nodes", "codex_last_outcome_at", "TEXT");
+  // P5-AS: 保留节点标记（专用于注册/登录的高质量备用出口）
+  addColumnIfMissing(sqlite, "nodes", "codex_reserved", "INTEGER NOT NULL DEFAULT 0");
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：
   // 旧 accounts 表升级时补 egress_node_hash 字段
   addColumnIfMissing(sqlite, "accounts", "egress_node_hash", "TEXT");
