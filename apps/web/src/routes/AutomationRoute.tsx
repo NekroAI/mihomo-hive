@@ -1,13 +1,11 @@
 import type {
   OrchestrationSpec,
   OrchestrationStatusSnapshot,
-  Sub2ApiMaintenancePreview,
   Sub2ApiProxyRecord,
   Sub2ApiSafeConnectionConfig
 } from "@mihomo-hive/schemas";
 import {
   OrchestrationSpecPanel,
-  type ConnectionDraft,
   type StrategySwitchPreview
 } from "../features/automation/OrchestrationSpecPanel.js";
 import { OrchestrationStatusPanel } from "../features/automation/OrchestrationStatusPanel.js";
@@ -16,6 +14,14 @@ interface PendingMutation {
   isPending: boolean;
 }
 
+/**
+ * 代理编排路由（日常运维）—— P5-AK 重构后只关注：
+ *   - 策略编辑（intake / 容量 / 稳定性 / 故障 / 健康判定）
+ *   - 状态观察（KPI / tick / 计划应用）
+ *
+ * Sub2API 连接配置、运维工具箱（推送/质量检查/排空/清理）已搬到「系统」tab。
+ * `connection` prop 只用来在未连接时显示引导提示，完整保存/测试在系统页做。
+ */
 export interface AutomationRouteProps {
   spec: OrchestrationSpec;
   status: OrchestrationStatusSnapshot | undefined;
@@ -23,32 +29,17 @@ export interface AutomationRouteProps {
   connection: Sub2ApiSafeConnectionConfig | undefined;
   connectionLoading: boolean;
   proxies: Sub2ApiProxyRecord[];
-  maintenance: Sub2ApiMaintenancePreview | undefined;
-  connectionDraft: ConnectionDraft;
-  setConnectionDraft: (draft: ConnectionDraft) => void;
   mutations: {
     saveSpec: PendingMutation & { mutate: (next: OrchestrationSpec) => void };
     applyOnce: PendingMutation & { mutate: () => void };
     pause: PendingMutation & { mutate: () => void };
     resume: PendingMutation & { mutate: () => void };
-    saveConnection: PendingMutation & {
-      mutate: (input: {
-        baseUrl: string;
-        adminApiKey?: string | undefined;
-        timezone: string;
-        managedProxyPrefix: string;
-      }) => void;
-    };
-    testConnection: PendingMutation & { mutate: () => void };
     previewStrategySwitch: PendingMutation & {
       mutateAsync: (input: { target: "stable-hash" | "rendezvous-hash" }) => Promise<StrategySwitchPreview>;
     };
     applyStrategySwitch: PendingMutation & {
       mutateAsync: (input: { target: "stable-hash" | "rendezvous-hash" }) => Promise<unknown>;
     };
-    cleanupEmpty: PendingMutation & { mutate: () => void };
-    drainManaged: PendingMutation & { mutate: () => void };
-    qualityCheck: PendingMutation & { mutate: () => void };
   };
 }
 
@@ -64,19 +55,6 @@ export function AutomationRoute(props: AutomationRouteProps) {
         proxies={props.proxies}
         saving={m.saveSpec.isPending}
         applying={m.applyOnce.isPending}
-        testing={m.testConnection.isPending}
-        savingConnection={m.saveConnection.isPending}
-        connectionDraft={props.connectionDraft}
-        onConnectionDraftChange={props.setConnectionDraft}
-        onSaveConnection={() =>
-          m.saveConnection.mutate({
-            baseUrl: props.connectionDraft.baseUrl,
-            adminApiKey: props.connectionDraft.apiKey || undefined,
-            timezone: props.connectionDraft.timezone || "Asia/Shanghai",
-            managedProxyPrefix: props.connectionDraft.managedPrefix || "MH-"
-          })
-        }
-        onTestConnection={() => m.testConnection.mutate()}
         onSaveSpec={(next) => m.saveSpec.mutate(next)}
         onApplyOnce={() => m.applyOnce.mutate()}
         onPause={() => m.pause.mutate()}
@@ -92,13 +70,6 @@ export function AutomationRoute(props: AutomationRouteProps) {
         onApplyStrategySwitch={async (target) => {
           await m.applyStrategySwitch.mutateAsync({ target });
         }}
-        maintenance={props.maintenance}
-        cleaningEmpty={m.cleanupEmpty.isPending}
-        draining={m.drainManaged.isPending}
-        checkingQuality={m.qualityCheck.isPending}
-        onCleanupEmpty={() => m.cleanupEmpty.mutate()}
-        onDrainManaged={() => m.drainManaged.mutate()}
-        onQualityCheck={() => m.qualityCheck.mutate()}
       />
       <OrchestrationStatusPanel
         snapshot={props.status}

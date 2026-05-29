@@ -34,12 +34,6 @@ export function AccountFleetSpecPanel(props: {
   canTrigger?: boolean;
   onSaveSpec: (next: AccountFleetSpec) => void;
   onTriggerNow: () => void;
-  /** P5-AF: codex-tool 区块独立保存（不动其它策略）+ 连通测试。 */
-  savingCodexTool?: boolean;
-  testingCodexTool?: boolean;
-  lastCodexTest?: CodexToolTestResult | null | undefined;
-  onSaveCodexTool?: (next: AccountFleetSpec["codexTool"]) => void;
-  onTestCodexTool?: () => void;
 }) {
   const [draft, setDraft] = React.useState<AccountFleetSpec>(props.spec);
   const [dirty, setDirty] = React.useState(false);
@@ -74,10 +68,7 @@ export function AccountFleetSpecPanel(props: {
     setDraft((c) => ({ ...c, retirement: updater(c.retirement) }));
     setDirty(true);
   }
-  function patchCodexTool(updater: (c: AccountFleetSpec["codexTool"]) => AccountFleetSpec["codexTool"]) {
-    setDraft((c) => ({ ...c, codexTool: updater(c.codexTool) }));
-    setDirty(true);
-  }
+  // P5-AK: codexTool 子树编辑已下沉到系统页 features/system/CodexToolConnectionPanel.tsx
 
   const enabled = draft.enabled;
   // codex-tool 配置是否完整（用于"自动维护可以开吗"的提示）
@@ -140,215 +131,18 @@ export function AccountFleetSpecPanel(props: {
         </div>
       </Panel>
 
-      <CollapsiblePanel
-        title="codex-tool 连接"
-        storageKey="account-fleet-codex-tool"
-        defaultOpen={!codexConfigured}
-        hint="codex-tool 二进制路径 + SkyMail + ChatGPT OAuth + 接码 provider。Spec 仅在 server 端保存，UI 不脱敏（私有部署）；生产建议改用 enc_secrets 字段加密。"
-        actions={<Badge tone={codexConfigured ? "success" : "warning"}>{codexConfigured ? "已配置" : "待配置"}</Badge>}
-      >
-        <div className="form-grid">
-          <TextInput
-            label="二进制路径"
-            value={draft.codexTool.binPath}
-            onChange={(v) => patchCodexTool((c) => ({ ...c, binPath: v }))}
-            placeholder="codex-tool"
-            mono
-          />
-          <NumberInput
-            label="login 超时（秒）"
-            value={Math.round(draft.codexTool.timeouts.loginMs / 1000)}
-            min={5}
-            onChange={(v) => patchCodexTool((c) => ({ ...c, timeouts: { ...c.timeouts, loginMs: v * 1000 } }))}
-          />
-          <NumberInput
-            label="register 超时（秒）"
-            value={Math.round(draft.codexTool.timeouts.registerMs / 1000)}
-            min={5}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, timeouts: { ...c.timeouts, registerMs: v * 1000 } }))
-            }
-          />
-        </div>
-        <div className="config-subgroup-label">SkyMail（邮箱 OTP）</div>
-        <div className="form-grid">
-          <TextInput
-            label="base URL"
-            value={draft.codexTool.skymail.baseUrl}
-            onChange={(v) => patchCodexTool((c) => ({ ...c, skymail: { ...c.skymail, baseUrl: v } }))}
-            placeholder="https://mail.example.com"
-            mono
-          />
-          <TextInput
-            label="管理员邮箱"
-            value={draft.codexTool.skymail.adminEmail}
-            onChange={(v) => patchCodexTool((c) => ({ ...c, skymail: { ...c.skymail, adminEmail: v } }))}
-            placeholder="admin@example.com"
-            mono
-          />
-          <TextInput
-            label="管理员密码"
-            value={draft.codexTool.skymail.adminPasswordRef}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, skymail: { ...c.skymail, adminPasswordRef: v } }))
-            }
-            type="password"
-            mono
-          />
-        </div>
-        <div className="config-subgroup-label">ChatGPT OAuth</div>
-        <div className="form-grid">
-          <TextInput
-            label="mail domain"
-            value={draft.codexTool.chatgpt.mailDomain}
-            onChange={(v) => patchCodexTool((c) => ({ ...c, chatgpt: { ...c.chatgpt, mailDomain: v } }))}
-            placeholder="example.com"
-            mono
-          />
-          <TextInput
-            label="chat web client_id"
-            value={draft.codexTool.chatgpt.chatWebClientId}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, chatgpt: { ...c.chatgpt, chatWebClientId: v } }))
-            }
-            placeholder="app_xxx"
-            mono
-          />
-          <TextInput
-            label="codex client_id"
-            value={draft.codexTool.chatgpt.codexClientId}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, chatgpt: { ...c.chatgpt, codexClientId: v } }))
-            }
-            placeholder="app_xxx"
-            mono
-          />
-        </div>
-        <div className="config-subgroup-label">接码平台</div>
-        <div className="form-grid">
-          <SelectInput
-            label="provider"
-            value={draft.codexTool.phoneSms.provider}
-            onChange={(v) =>
-              patchCodexTool((c) => ({
-                ...c,
-                phoneSms: {
-                  ...c.phoneSms,
-                  provider: v as AccountFleetSpec["codexTool"]["phoneSms"]["provider"]
-                }
-              }))
-            }
-            options={[
-              { label: "HeroSMS", value: "herosms" },
-              { label: "5sim", value: "fivesim" },
-              { label: "NexSMS", value: "nexsms" }
-            ]}
-          />
-          <TextInput
-            label="API key"
-            value={draft.codexTool.phoneSms.apiKeyRef}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, phoneSms: { ...c.phoneSms, apiKeyRef: v } }))
-            }
-            type="password"
-            mono
-          />
-          <TextInput
-            label="service code"
-            value={draft.codexTool.phoneSms.service}
-            onChange={(v) =>
-              patchCodexTool((c) => ({ ...c, phoneSms: { ...c.phoneSms, service: v } }))
-            }
-            placeholder="dr"
-            mono
-          />
-        </div>
-        <div className="config-subgroup-label">出口代理（codex-tool 走的本地节点）</div>
-        <div className="form-grid">
-          <SelectInput
-            label="模式"
-            value={draft.codexTool.egress.mode}
-            onChange={(v) =>
-              patchCodexTool((c) => ({
-                ...c,
-                egress: {
-                  ...c.egress,
-                  mode: v as AccountFleetSpec["codexTool"]["egress"]["mode"]
-                }
-              }))
-            }
-            options={[
-              { label: "managed-node（按质量+负载加权随机）", value: "managed-node" },
-              { label: "pinned-node（钉死一个节点）", value: "pinned-node" },
-              { label: "none（不走本地代理直连）", value: "none" }
-            ]}
-          />
-          {draft.codexTool.egress.mode === "pinned-node" ? (
-            <TextInput
-              label="节点 hash"
-              value={draft.codexTool.egress.pinnedNodeHash ?? ""}
-              onChange={(v) =>
-                patchCodexTool((c) => ({
-                  ...c,
-                  egress: { ...c.egress, pinnedNodeHash: v.trim() || null }
-                }))
-              }
-              placeholder="本地节点 hash 前缀（节点池里看）"
-              mono
-            />
-          ) : null}
-        </div>
-
-        {/* P5-AF: 独立测试 + 独立保存。意图：让用户在调通 binPath / SkyMail / 接码 三件套
-            过程中可以边改边测，而不必把其它策略改动一起提交；保存成功后下次进页面
-            该折叠面板默认折叠（保存逻辑里 setItem panel state = "0"）。 */}
-        {props.onSaveCodexTool && props.onTestCodexTool ? (
-          <div className="spec-save-bar" style={{ marginTop: 12 }}>
-            <Button
-              icon={<Save size={16} />}
-              loading={props.savingCodexTool}
-              onClick={() => {
-                props.onSaveCodexTool!(draft.codexTool);
-                // 保存成功后下次默认折叠 —— 用 CollapsiblePanel 的 storage key 直接写
-                try {
-                  window.localStorage.setItem("mihomo-hive.panel.account-fleet-codex-tool", "0");
-                } catch {
-                  // ignore
-                }
-                // 子树保存了就把这部分 dirty 清掉：把 codexTool 同步回 props.spec 的其它字段
-                setDirty(
-                  JSON.stringify({ ...draft, codexTool: undefined }) !==
-                    JSON.stringify({ ...props.spec, codexTool: undefined })
-                );
-              }}
-            >
-              保存 codex-tool 配置
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<Activity size={16} />}
-              loading={props.testingCodexTool}
-              onClick={props.onTestCodexTool}
-              title="调用 codex-tool sms countries 一次，验证 binary 可执行 + SkyMail 链路 + 接码 apiKey 都对。不写库、不下发 job。"
-            >
-              测试连通
-            </Button>
-            {props.lastCodexTest ? (
-              props.lastCodexTest.ok ? (
-                <span className="muted small" title={`provider=${props.lastCodexTest.provider} service=${props.lastCodexTest.service}`}>
-                  <CheckCircle2 size={12} style={{ verticalAlign: "middle", marginRight: 4, color: "var(--success)" }} />
-                  连通正常（{props.lastCodexTest.provider} · 抽样 {props.lastCodexTest.countriesSampled}/{props.lastCodexTest.totalCountries} 个地区）
-                </span>
-              ) : (
-                <span className="muted small" title={props.lastCodexTest.error}>
-                  <XCircle size={12} style={{ verticalAlign: "middle", marginRight: 4, color: "var(--danger)" }} />
-                  连通失败：{truncateError(props.lastCodexTest.error)}
-                </span>
-              )
-            ) : null}
-          </div>
-        ) : null}
-      </CollapsiblePanel>
+      {/* P5-AK: codex-tool 连接已搬到「系统」tab。账号编排页只保留策略 + 账号矩阵。 */}
+      {!codexConfigured ? (
+        <Panel
+          title="codex-tool 连接"
+          actions={<Badge tone="warning">待配置</Badge>}
+          hint="账号编排依赖 codex-tool —— 请到「系统」tab 配置 binPath + SkyMail + ChatGPT OAuth + 接码 provider 并测试连通。"
+        >
+          <p className="muted small" style={{ margin: 0 }}>
+            未配置 codex-tool 连接，自动维护无法触发 codex_login / codex_register。
+          </p>
+        </Panel>
+      ) : null}
 
       <Panel
         title="目标产能"

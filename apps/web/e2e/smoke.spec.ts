@@ -17,7 +17,7 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await expect(nav.getByRole("tab", { name: "节点池" })).toBeVisible();
     await expect(nav.getByRole("tab", { name: "代理编排" })).toBeVisible();
     await expect(nav.getByRole("tab", { name: "账号编排" })).toBeVisible();
-    await expect(nav.getByRole("tab", { name: "导出" })).toBeVisible();
+    await expect(nav.getByRole("tab", { name: "系统" })).toBeVisible();
 
     // 默认在节点池：能看到导入订阅表单 + 节点池操作栏
     await expect(page.getByRole("heading", { name: "导入订阅" })).toBeVisible();
@@ -42,9 +42,9 @@ test.describe("Mihomo Hive 首次访问 + 主导航", () => {
     await nav.getByRole("tab", { name: "账号编排" }).click();
     await expect(page.getByRole("heading", { name: "自动维护" })).toBeVisible();
 
-    // 切到导出：纯导出工具，只有导出篮子（Mihomo 控制已下线到节点池页）
-    await nav.getByRole("tab", { name: "导出" }).click();
-    await expect(page.getByRole("heading", { name: "导出篮子" })).toBeVisible();
+    // 切到系统：连接配置 + 运维工具 + 导出篮子集中地（P5-AK 重构）
+    await nav.getByRole("tab", { name: "系统" }).click();
+    await expect(page.getByRole("heading", { name: "Sub2API 连接" })).toBeVisible();
 
     // 回到节点池
     await nav.getByRole("tab", { name: "节点池" }).click();

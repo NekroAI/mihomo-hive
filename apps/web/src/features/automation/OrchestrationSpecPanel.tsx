@@ -42,16 +42,11 @@ import {
  */
 export function OrchestrationSpecPanel(props: {
   spec: OrchestrationSpec;
+  /** P5-AK 后只剩"是否已连接"信号，用来在未连接时显示引导提示。完整连接配置在系统页。 */
   connection: Sub2ApiSafeConnectionConfig | undefined;
   proxies: Sub2ApiProxyRecord[];
   saving: boolean;
   applying: boolean;
-  testing: boolean;
-  savingConnection: boolean;
-  connectionDraft: ConnectionDraft;
-  onConnectionDraftChange: (draft: ConnectionDraft) => void;
-  onSaveConnection: () => void;
-  onTestConnection: () => void;
   onSaveSpec: (next: OrchestrationSpec) => void;
   onApplyOnce: () => void;
   onPause: () => void;
@@ -60,14 +55,6 @@ export function OrchestrationSpecPanel(props: {
   onPreviewStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<StrategySwitchPreview | undefined>;
   onApplyStrategySwitch?: (target: "stable-hash" | "rendezvous-hash") => Promise<void>;
   switchingStrategy?: boolean;
-  // Sub2API 维护工具：低频救援动作，默认折叠
-  maintenance?: Sub2ApiMaintenancePreview | undefined;
-  cleaningEmpty?: boolean | undefined;
-  draining?: boolean | undefined;
-  checkingQuality?: boolean | undefined;
-  onCleanupEmpty?: (() => void) | undefined;
-  onDrainManaged?: (() => void) | undefined;
-  onQualityCheck?: (() => void) | undefined;
 }) {
   const [strategyPreview, setStrategyPreview] = React.useState<StrategySwitchPreview | undefined>();
   const [previewing, setPreviewing] = React.useState(false);
@@ -146,68 +133,18 @@ export function OrchestrationSpecPanel(props: {
         </div>
       </Panel>
 
-      <CollapsiblePanel
-        title="Sub2API 连接"
-        storageKey="spec-connection"
-        defaultOpen={!connected}
-        hint="Sub2API baseUrl + 管理员 API Key + 托管代理前缀。低频修改，默认收起。"
-        actions={<Badge tone={connected ? "success" : "warning"}>{connected ? "已连接" : "待配置"}</Badge>}
-      >
-        <div className="sub2api-fields">
-          <TextInput
-            label="Sub2API 地址"
-            value={props.connectionDraft.baseUrl}
-            onChange={(v) => props.onConnectionDraftChange({ ...props.connectionDraft, baseUrl: v })}
-            placeholder="https://sub2api.example.com"
-            mono
-          />
-          <TextInput
-            label={
-              props.connection?.apiKeyConfigured && !props.connectionDraft.apiKey
-                ? "管理员 API Key（已保存，留空不变）"
-                : "管理员 API Key"
-            }
-            value={props.connectionDraft.apiKey}
-            onChange={(v) => props.onConnectionDraftChange({ ...props.connectionDraft, apiKey: v })}
-            placeholder="x-api-key"
-            type="password"
-            mono
-          />
-          <TextInput
-            label="时区"
-            value={props.connectionDraft.timezone}
-            onChange={(v) => props.onConnectionDraftChange({ ...props.connectionDraft, timezone: v })}
-            placeholder="Asia/Shanghai"
-            mono
-          />
-          <TextInput
-            label="Hive 托管代理前缀"
-            value={props.connectionDraft.managedPrefix}
-            onChange={(v) => props.onConnectionDraftChange({ ...props.connectionDraft, managedPrefix: v })}
-            placeholder="MH-"
-            mono
-          />
-        </div>
-        <div className="button-row wrap">
-          <Button
-            icon={<Save size={16} />}
-            loading={props.savingConnection}
-            disabled={!props.connectionDraft.baseUrl || (!props.connectionDraft.apiKey && !props.connection?.apiKeyConfigured)}
-            onClick={props.onSaveConnection}
-          >
-            保存连接
-          </Button>
-          <Button
-            variant="secondary"
-            icon={<Activity size={16} />}
-            loading={props.testing}
-            disabled={!connected}
-            onClick={props.onTestConnection}
-          >
-            测试连接
-          </Button>
-        </div>
-      </CollapsiblePanel>
+      {/* P5-AK: Sub2API 连接区块已搬到 系统 tab。代理编排页只保留策略编辑 + 调度状态。 */}
+      {!connected ? (
+        <Panel
+          title="Sub2API 连接"
+          actions={<Badge tone="warning">待配置</Badge>}
+          hint="代理编排依赖 Sub2API 连接 —— 请到「系统」tab 配置 baseUrl + API Key。"
+        >
+          <p className="muted small" style={{ margin: 0 }}>
+            未配置 Sub2API 连接，调度功能受限。完成下方策略编辑后，再到「系统」tab 完成连接保存。
+          </p>
+        </Panel>
+      ) : null}
 
       <Panel
         title="入站代理"
@@ -438,66 +375,8 @@ export function OrchestrationSpecPanel(props: {
         </div>
       </CollapsiblePanel>
 
-      <CollapsiblePanel
-        title="Sub2API 维护工具"
-        storageKey="spec-maintenance"
-        hint="低频救援动作。日常调和器会自动完成大部分维护；只有处理'孤儿代理 / 节点下线 / 验证代理质量'等特殊场景时才用这里。"
-      >
-        <div className="maintenance-row">
-          <div className="maintenance-summary">
-            {props.maintenance ? (
-              <>
-                <span className="muted small">
-                  托管代理 <strong>{props.maintenance.summary.managedProxies}</strong>
-                </span>
-                <span className="muted small">
-                  待迁账号 <strong>{props.maintenance.summary.drainChanges}</strong>
-                </span>
-                <span className="muted small">
-                  空代理 <strong>{props.maintenance.summary.emptyManagedProxies}</strong>
-                </span>
-              </>
-            ) : (
-              <span className="muted small">{connected ? "正在加载维护数据..." : "请先配置 Sub2API 连接"}</span>
-            )}
-          </div>
-          <div className="button-row wrap">
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Activity size={14} />}
-              loading={Boolean(props.checkingQuality)}
-              disabled={!connected || !props.maintenance || props.maintenance.summary.managedProxies === 0}
-              onClick={props.onQualityCheck}
-              title="对每个 Hive 托管代理调用 Sub2API quality-check：让 Sub2API 真实出站测一次，分数回写本地节点 qualityScore。开销大，按需用。"
-            >
-              质量检查
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Unlink size={14} />}
-              loading={Boolean(props.draining)}
-              disabled={!connected || !props.maintenance || props.maintenance.summary.drainChanges === 0}
-              onClick={props.onDrainManaged}
-              title="把绑定到 Hive 托管代理的账号迁移到非保护非托管的 active 代理上（least-loaded 优先）；保护代理及其账号不动。常用于下线 Hive 代理前的腾挪。"
-            >
-              排空托管
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              icon={<Trash2 size={14} />}
-              loading={Boolean(props.cleaningEmpty)}
-              disabled={!connected || !props.maintenance || props.maintenance.summary.emptyManagedProxies === 0}
-              onClick={props.onCleanupEmpty}
-              title="删除所有名称带托管前缀、且当前没有任何账号使用的 Sub2API 代理。只删空壳；保护代理永不被识别为托管代理。"
-            >
-              清理空代理
-            </Button>
-          </div>
-        </div>
-      </CollapsiblePanel>
+      {/* P5-AK: Sub2API 运维工具箱（推送本地节点 / 质量检查 / 排空托管 / 清理空代理）
+          已搬到「系统」tab。代理编排页只保留策略 + 调度状态，不再混进低频运维操作。 */}
 
       <div className="spec-save-bar">
         <Button

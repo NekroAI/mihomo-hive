@@ -3,7 +3,10 @@ import { Activity, LogOut, Monitor, Moon, Network, Server, ShieldCheck, Sun } fr
 import { Badge, Button } from "../../components/ui.js";
 import type { Theme } from "../../hooks/useTheme.js";
 
-export type WorkspaceId = "nodes" | "automation" | "account_fleet" | "runtime";
+// "system" 是 P5-AK 引入的新 workspace（替代原 "runtime"）—— 把 Sub2API/codex-tool
+// 连接、运维工具箱、账号接管、节点导出篮子都收纳进去。"runtime" 别名保留向前
+// 兼容（localStorage 里可能有用户旧值），App.tsx 读取时会把 "runtime" 映射成 "system"。
+export type WorkspaceId = "nodes" | "automation" | "account_fleet" | "system";
 
 interface WorkspaceTab {
   id: WorkspaceId;
@@ -14,7 +17,7 @@ const tabs: WorkspaceTab[] = [
   { id: "nodes", label: "节点池" },
   { id: "automation", label: "代理编排" },
   { id: "account_fleet", label: "账号编排" },
-  { id: "runtime", label: "导出" }
+  { id: "system", label: "系统" }
 ];
 
 export function RuntimeHeader(props: {

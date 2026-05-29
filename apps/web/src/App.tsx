@@ -5,7 +5,7 @@ import { AuthScreen } from "./features/auth/AuthScreen.js";
 import { canExportNode, defaultNodeFilters, filterNodes, type NodeFilters } from "./features/nodes/node-utils.js";
 import { RuntimeHeader } from "./features/runtime/RuntimeHeader.js";
 import { AccountFleetRoute } from "./routes/AccountFleetRoute.js";
-import { AdminRoute } from "./routes/AdminRoute.js";
+import { SystemRoute } from "./routes/SystemRoute.js";
 import { AutomationRoute } from "./routes/AutomationRoute.js";
 import { NodesRoute } from "./routes/NodesRoute.js";
 import { useTaskFeedback, type TaskFeedback } from "./hooks/useTaskFeedback.js";
@@ -100,13 +100,19 @@ function Dashboard(props: { onLogout: () => void }) {
     "mihomo-hive.upstream-error-window",
     "1h"
   );
-  const [workspaceRaw, setWorkspace] = useLocalStorageState<"nodes" | "automation" | "account_fleet" | "runtime">(
+  const [workspaceRaw, setWorkspace] = useLocalStorageState<"nodes" | "automation" | "account_fleet" | "system">(
     "mihomo-hive.workspace",
     "nodes"
   );
-  // 兼容旧 localStorage 值 "sub2api" / "tasks" → 现 "automation"（代理编排）
-  const workspace: "nodes" | "automation" | "account_fleet" | "runtime" =
-    (workspaceRaw as string) === "sub2api" || (workspaceRaw as string) === "tasks" ? "automation" : workspaceRaw;
+  // 兼容旧 localStorage 值：
+  //   - "sub2api" / "tasks" → "automation"（代理编排）
+  //   - "runtime"           → "system"（P5-AK 把 runtime 改名 system + 扩内容）
+  const workspace: "nodes" | "automation" | "account_fleet" | "system" =
+    (workspaceRaw as string) === "sub2api" || (workspaceRaw as string) === "tasks"
+      ? "automation"
+      : (workspaceRaw as string) === "runtime"
+        ? "system"
+        : workspaceRaw;
   // 节点池页 30s 自动刷新：后台编排器会更新 sub2apiProxyId / qualityScore / intentRole 等字段，
   // 不刷的话表格内容会跟实际状态脱节。
   const nodes = trpc.nodes.list.useQuery(undefined, {
@@ -188,7 +194,7 @@ function Dashboard(props: { onLogout: () => void }) {
     enabled: Boolean(sub2apiConfig.data?.configured)
   });
   const jobs = trpc.sub2api.jobs.list.useQuery(undefined, {
-    enabled: workspace === "automation" || workspace === "runtime",
+    enabled: workspace === "automation" || workspace === "system",
     refetchInterval: 3000
   });
   const upstreamErrorSummary = trpc.sub2api.automation.upstreamErrorSummary.useQuery(
@@ -583,6 +589,17 @@ function Dashboard(props: { onLogout: () => void }) {
     | { ok: false; error: string }
     | null
   >(null);
+  // P5-AK: 系统页 codex-tool 表单 draft —— 跟账号编排 spec 的 codexTool 子树同步，
+  // 但编辑时不直接污染 spec draft（保存通过独立 codexTool.save endpoint）。null 表
+  // 示尚未编辑过，渲染时 fallback 到 accountFleetSpec.data.codexTool。
+  const [codexToolDraft, setCodexToolDraft] = React.useState<
+    typeof defaultAccountFleetSpec["codexTool"] | null
+  >(null);
+  // 上游 spec 变了 → 重置 draft（除非用户正在编辑，但这里简化处理：保存成功后会自动同步）
+  React.useEffect(() => {
+    if (accountFleetSpec.data) setCodexToolDraft(accountFleetSpec.data.codexTool);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(accountFleetSpec.data?.codexTool)]);
   const testCodexTool = trpc.accountFleet.codexTool.test.useMutation({
     onMutate: () => startTask(setTask, "正在测试 codex-tool 连通", "调用 sms countries 一次，验证 binary + SkyMail + 接码链路。"),
     onSuccess: async (res) => {
@@ -803,12 +820,9 @@ function Dashboard(props: { onLogout: () => void }) {
           status={accountFleetStatus.data}
           statusLoading={accountFleetStatus.isLoading}
           sub2apiConnected={Boolean(sub2apiConfig.data?.configured)}
-          lastCodexTest={lastCodexTest ?? null}
           mutations={{
             saveSpec: saveAccountFleetSpec,
-            triggerNow: triggerAccountFleetTick,
-            saveCodexTool: saveCodexTool,
-            testCodexTool: testCodexTool
+            triggerNow: triggerAccountFleetTick
           }}
         />
       ) : null}
@@ -821,37 +835,39 @@ function Dashboard(props: { onLogout: () => void }) {
           connection={sub2apiConfig.data}
           connectionLoading={sub2apiConfig.isLoading}
           proxies={sub2apiProxies.data ?? []}
-          maintenance={sub2apiMaintenance.data}
-          connectionDraft={{
-            baseUrl: sub2apiBaseUrl,
-            apiKey: sub2apiApiKey,
-            timezone: sub2apiTimezone,
-            managedPrefix: sub2apiManagedPrefix
-          }}
-          setConnectionDraft={(draft) => {
-            setSub2apiBaseUrl(draft.baseUrl);
-            setSub2apiApiKey(draft.apiKey);
-            setSub2apiTimezone(draft.timezone);
-            setSub2apiManagedPrefix(draft.managedPrefix);
-          }}
           mutations={{
             saveSpec: saveOrchestrationSpec,
             applyOnce: applyOrchestrationOnce,
             pause: pauseOrchestrator,
             resume: resumeOrchestrator,
-            saveConnection: saveSub2apiConfig,
-            testConnection: testSub2apiConnection,
             previewStrategySwitch,
-            applyStrategySwitch,
-            cleanupEmpty: cleanupManagedSub2api,
-            drainManaged: drainManagedSub2api,
-            qualityCheck: qualityCheckManaged
+            applyStrategySwitch
           }}
         />
       ) : null}
 
-      {workspace === "runtime" ? (
-        <AdminRoute
+      {workspace === "system" ? (
+        <SystemRoute
+          sub2apiConnection={sub2apiConfig.data}
+          sub2apiConnectionDraft={{
+            baseUrl: sub2apiBaseUrl,
+            apiKey: sub2apiApiKey,
+            timezone: sub2apiTimezone,
+            managedPrefix: sub2apiManagedPrefix
+          }}
+          setSub2apiConnectionDraft={(draft) => {
+            setSub2apiBaseUrl(draft.baseUrl);
+            setSub2apiApiKey(draft.apiKey);
+            setSub2apiTimezone(draft.timezone);
+            setSub2apiManagedPrefix(draft.managedPrefix);
+          }}
+          fleetSpec={accountFleetSpec.data ?? defaultAccountFleetSpec}
+          codexToolDraft={
+            codexToolDraft ?? (accountFleetSpec.data ?? defaultAccountFleetSpec).codexTool
+          }
+          setCodexToolDraft={setCodexToolDraft}
+          lastCodexTest={lastCodexTest ?? null}
+          maintenance={sub2apiMaintenance.data}
           exportHost={exportHost}
           exportFilename={exportFilename}
           failedNodeStatus={failedNodeStatus}
@@ -866,7 +882,17 @@ function Dashboard(props: { onLogout: () => void }) {
           setFailedNodeStatus={setFailedNodeStatus}
           onDownload={downloadExport}
           requestConfirmation={requestConfirmation}
-          mutations={{ writeExport }}
+          mutations={{
+            saveSub2apiConnection: saveSub2apiConfig,
+            testSub2apiConnection: testSub2apiConnection,
+            saveCodexTool: saveCodexTool,
+            testCodexTool: testCodexTool,
+            pushLocalNodes: pushManagedSub2api,
+            qualityCheck: qualityCheckManaged,
+            drainManaged: drainManagedSub2api,
+            cleanupEmpty: cleanupManagedSub2api,
+            writeExport
+          }}
         />
       ) : null}
 
