@@ -289,7 +289,7 @@ async function runCodexLogin(
       });
     });
   } catch (err) {
-    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
+    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) }, "login");
     throw err;
   }
   // login 失败统一抛错，由 executor catch → applyRecoveryFailure 按错误消息分类处理
@@ -299,11 +299,11 @@ async function runCodexLogin(
   if (outcome.kind === "failed") {
     const cat = outcome.classification.failureCategory;
     const msg = cat ? `${outcome.error} [${cat}]` : outcome.error;
-    recordNodeOutcome(repo, egress, { failedMessage: msg });
+    recordNodeOutcome(repo, egress, { failedMessage: msg }, "login");
     throw new Error(msg);
   }
   // P5-AS：成功 = 这个节点能过 Sentinel，记一笔成功（驱动后续优先复用）
-  recordNodeOutcome(repo, egress, "success");
+  recordNodeOutcome(repo, egress, "success", "login");
   await landOnSub2api({
     repo,
     crypto,
@@ -347,7 +347,7 @@ async function runCodexRegister(
       });
     });
   } catch (err) {
-    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
+    recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) }, "register");
     throw err;
   }
   const oldAccount = job.accountId ? repo.getAccountById(job.accountId) : undefined;
@@ -389,7 +389,7 @@ async function runCodexRegister(
     // P5-AS：OAuth 失败若属网络/代理/Sentinel 类，给节点记一笔失败（account_unusable 不记）
     recordNodeOutcome(repo, egress, {
       failedMessage: `${outcome.recoverable.error} [${outcome.recoverable.classification.failureCategory ?? "oauth_failed"}]`
-    });
+    }, "register");
     // 按 OAuth 失败分类决定怎么落库（external-integration.md §"OAuth 失败分类"）：
     //   account_unusable → 直接 retired，不进恢复队列
     //   network_or_proxy → 进恢复队列但拉长延后，可能换代理后能救
@@ -428,7 +428,7 @@ async function runCodexRegister(
 
   // token_ready
   // P5-AS：注册成功 = 节点能过 Sentinel，记一笔成功
-  recordNodeOutcome(repo, egress, "success");
+  recordNodeOutcome(repo, egress, "success", "register");
   const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country, true);
   await landOnSub2api({
     repo,
@@ -1061,15 +1061,16 @@ function egressLabel(repo: HiveRepository, egress: EgressSelection): string {
 function recordNodeOutcome(
   repo: HiveRepository,
   egress: EgressSelection | null,
-  result: "success" | { failedMessage: string }
+  result: "success" | { failedMessage: string },
+  kind: "login" | "register"
 ): void {
   if (!egress) return;
   if (result === "success") {
-    repo.recordNodeCodexOutcome(egress.hash, "success");
+    repo.recordNodeCodexOutcome(egress.hash, "success", kind);
     return;
   }
   if (classifyCodexFailure(result.failedMessage) === "network_or_proxy") {
-    repo.recordNodeCodexOutcome(egress.hash, "failure");
+    repo.recordNodeCodexOutcome(egress.hash, "failure", kind);
   }
 }
 

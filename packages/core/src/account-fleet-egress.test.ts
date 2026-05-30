@@ -256,35 +256,63 @@ describe("selectEgressForLogin", () => {
     expect(r.hash).toBe("fresh");
   });
 
-  it("login deterministically prefers a codex-proven node over untried", () => {
-    const nodes = [
-      makeNode({ hash: "untried-a" }),
-      makeNode({ hash: "proven", codexLoginSuccess: 4, codexLoginFailure: 1 }),
-      makeNode({ hash: "untried-b" })
-    ];
-    const r = selectEgressForLogin({
-      nodes,
-      egressLoadByNodeHash: new Map(),
-      preferredHash: null,
-      rand: () => 0.999
-    });
-    expect(r.hash).toBe("proven");
-    expect(r.reason).toBe("codex_proven");
-  });
+  // 探索-利用策略（用户要求："不要无脑使用验证过的登录节点，避免登录过于集中"）：
+  // 登录选节点 = laplace 成功率 × 1/sqrt(尝试数+1) 探索项 × 保留加成，加权随机。
+  // 已验证节点持续被复用，但未试节点也持续被探索 —— 不再确定性独占。
+  const seededRand = (seed: number) => () => ((seed * 9301 + 49297) % 233280) / 233280;
 
-  it("login prefers a proven node over an untried reserved one (reserved is backup, not forced)", () => {
-    const nodes = [
-      makeNode({ hash: "proven-normal", codexLoginSuccess: 9 }),
-      makeNode({ hash: "reserved-node", codexReserved: true })
-    ];
+  it("login marks a proven pick with reason codex_proven", () => {
+    const nodes = [makeNode({ hash: "proven", codexLoginSuccess: 5 })];
     const r = selectEgressForLogin({
       nodes,
       egressLoadByNodeHash: new Map(),
       preferredHash: null,
       rand: () => 0.5
     });
-    expect(r.hash).toBe("proven-normal");
+    expect(r.hash).toBe("proven");
     expect(r.reason).toBe("codex_proven");
+  });
+
+  it("login spreads across proven + untried nodes (explore-exploit, no concentration)", () => {
+    const nodes = [
+      makeNode({ hash: "proven", codexLoginSuccess: 9, codexLoginFailure: 0 }),
+      makeNode({ hash: "untried-a" }),
+      makeNode({ hash: "untried-b" })
+    ];
+    const picks = new Map<string, number>();
+    for (let i = 0; i < 600; i++) {
+      const r = selectEgressForLogin({
+        nodes,
+        egressLoadByNodeHash: new Map(),
+        preferredHash: null,
+        rand: seededRand(i + 1)
+      });
+      picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
+    }
+    // 已证明能过 Sentinel 的节点持续被复用
+    expect(picks.get("proven") ?? 0).toBeGreaterThan(50);
+    // 未试节点也被持续探索 —— 不集中在单一已验证节点
+    expect(picks.get("untried-a") ?? 0).toBeGreaterThan(50);
+    expect(picks.get("untried-b") ?? 0).toBeGreaterThan(50);
+  });
+
+  it("login gives a reserved node an exploration boost (reserved is not suppressed)", () => {
+    const nodes = [
+      makeNode({ hash: "normal", codexLoginSuccess: 3 }),
+      makeNode({ hash: "reserved-node", codexReserved: true })
+    ];
+    const picks = new Map<string, number>();
+    for (let i = 0; i < 600; i++) {
+      const r = selectEgressForLogin({
+        nodes,
+        egressLoadByNodeHash: new Map(),
+        preferredHash: null,
+        rand: seededRand(i + 1)
+      });
+      picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
+    }
+    // 保留节点（未试 + 保留加成）拿到可观探索量，不被已验证普通节点压制
+    expect(picks.get("reserved-node") ?? 0).toBeGreaterThan(150);
   });
 
   it("login uses reserved node as guaranteed backup when nothing else is eligible", () => {
@@ -349,8 +377,8 @@ describe("selectEgressForRegister discovery + dispersion (P5-AS v2)", () => {
   it("disperses across proven nodes by load instead of winner-take-all", () => {
     // winner 已注册 80 个(load 80)，另一 proven 节点 load 2 → 应大幅偏向低负载者
     const nodes = [
-      makeNode({ hash: "winner", codexLoginSuccess: 80 }),
-      makeNode({ hash: "fresh-proven", codexLoginSuccess: 3 })
+      makeNode({ hash: "winner", codexRegisterSuccess: 80 }),
+      makeNode({ hash: "fresh-proven", codexRegisterSuccess: 3 })
     ];
     const loads = new Map([
       ["winner", 80],
@@ -367,7 +395,7 @@ describe("selectEgressForRegister discovery + dispersion (P5-AS v2)", () => {
 
   it("explores untried nodes even when a proven node exists (discovery mechanism)", () => {
     const nodes = [
-      makeNode({ hash: "proven", codexLoginSuccess: 10 }),
+      makeNode({ hash: "proven", codexRegisterSuccess: 10 }),
       makeNode({ hash: "undiscovered" }) // 未试 —— 应被探索到
     ];
     const picks = new Map<string, number>();

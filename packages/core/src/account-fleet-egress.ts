@@ -38,11 +38,13 @@ export interface EgressCandidate {
   openaiOk: boolean;
   /** 节点是否经过测试 —— 没测过的不优先 */
   tested: boolean;
-  /** P5-AS: 经此节点 codex_login 真实成功次数（能过 Sentinel 的证据） */
-  codexSuccess: number;
-  /** P5-AS: 经此节点 network_or_proxy/sentinel 类失败次数 */
-  codexFailure: number;
-  /** P5-AS: 最近一次 codex_login 结果（用于"刚失败的 sticky 节点不再优先复用"） */
+  /** 经此节点 codex_login 成功/失败累计（**登录专属**，驱动登录选节点）。 */
+  loginSuccess: number;
+  loginFailure: number;
+  /** 经此节点 codex_register 成功/失败累计（**注册专属**，驱动注册选节点）。 */
+  registerSuccess: number;
+  registerFailure: number;
+  /** P5-AS: 最近一次 codex 结果（用于"刚失败的 sticky 节点不再优先复用"） */
   codexLastOutcome: "success" | "failure" | null;
   /** P5-AS: 是否为保留节点（专用于注册/登录的高质量备用出口） */
   reserved: boolean;
@@ -62,18 +64,17 @@ export interface EgressSelection {
   reserved?: boolean;
 }
 
-/** codex 净胜场（成功-失败），用于 proven 节点排序。 */
-function codexNet(c: EgressCandidate): number {
-  return c.codexSuccess - c.codexFailure;
-}
-
-/** failing 池里挑失败最少的（确定性兜底，避免节点池被打成"全失败就抛错"）。 */
-function leastBad(pool: EgressCandidate[]): EgressCandidate | undefined {
-  const failing = pool.filter((c) => c.codexSuccess === 0 && c.codexFailure > 0);
+/** failing 池里挑失败最少的（确定性兜底，避免节点池被打成"全失败就抛错"）。按给定的成败口径。 */
+function leastBad(
+  pool: EgressCandidate[],
+  successOf: (c: EgressCandidate) => number,
+  failureOf: (c: EgressCandidate) => number
+): EgressCandidate | undefined {
+  const failing = pool.filter((c) => successOf(c) === 0 && failureOf(c) > 0);
   if (failing.length === 0) return undefined;
   return [...failing].sort(
     (a, b) =>
-      a.codexFailure - b.codexFailure ||
+      failureOf(a) - failureOf(b) ||
       b.qualityScore - a.qualityScore ||
       (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0)
   )[0];
@@ -118,8 +119,10 @@ export function buildEgressCandidates(input: EgressSelectorInput): {
       load,
       openaiOk,
       tested,
-      codexSuccess: node.codexLoginSuccess ?? 0,
-      codexFailure: node.codexLoginFailure ?? 0,
+      loginSuccess: node.codexLoginSuccess ?? 0,
+      loginFailure: node.codexLoginFailure ?? 0,
+      registerSuccess: node.codexRegisterSuccess ?? 0,
+      registerFailure: node.codexRegisterFailure ?? 0,
       codexLastOutcome: node.codexLastOutcome ?? null,
       reserved: node.codexReserved ?? false
     };
@@ -175,9 +178,10 @@ function pickDispersed(pool: EgressCandidate[], rand: () => number): EgressCandi
  */
 function pickForRegister(relaxed: EgressCandidate[], rand: () => number): EgressSelection | undefined {
   if (relaxed.length === 0) return undefined;
-  const proven = relaxed.filter((c) => c.codexSuccess > 0);
-  const untriedOk = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && c.openaiOk);
-  const untriedRaw = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && !c.openaiOk);
+  // 注册看"注册专属"战绩(与登录分开)。
+  const proven = relaxed.filter((c) => c.registerSuccess > 0);
+  const untriedOk = relaxed.filter((c) => c.registerSuccess === 0 && c.registerFailure === 0 && c.openaiOk);
+  const untriedRaw = relaxed.filter((c) => c.registerSuccess === 0 && c.registerFailure === 0 && !c.openaiOk);
   const hasUntried = untriedOk.length + untriedRaw.length > 0;
 
   const exploit = (): EgressSelection | undefined => {
@@ -201,7 +205,7 @@ function pickForRegister(relaxed: EgressCandidate[], rand: () => number): Egress
     explore() ??
     exploit() ?? // 兜底：上面没走 exploit 分支但 explore 落空时，仍用 proven
     (() => {
-      const least = leastBad(relaxed);
+      const least = leastBad(relaxed, (c) => c.registerSuccess, (c) => c.registerFailure);
       return least
         ? ({ hash: least.hash, port: least.port, reason: "codex_least_bad", reserved: least.reserved } as const)
         : undefined;
@@ -210,33 +214,34 @@ function pickForRegister(relaxed: EgressCandidate[], rand: () => number): Egress
 }
 
 /**
- * 登录选节点（恢复）—— 偏向"能过"的 proven 节点，但在它们之间加权轮换而非死锁单个，
- * 这样登录失败清掉软粘性后每次重试能换不同的干净出口（修复"重登反复撞同一堵墙"）。
- * 保留节点同样不再独占：proven 非保留节点优先于未试的保留节点（保留只作兜底）。
- *   1. proven 节点按净胜场加权随机（轮换，便于重登换出口重试）；
- *   2. 没有 proven → 在未试节点里加权探索（先 openaiOk 再 untested）；
- *   3. 全失败 → leastBad。
+ * 登录选节点 —— 探索-利用加权策略（基于"登录"专属战绩）。深思后的目标：尽量探测节点、
+ * 不只用验证过的、避免登录过于集中,同时仍要尽快成功。
+ *
+ * 每个候选权重 = 平滑登录成功率 × 探索/反集中因子,加权随机抽(非取最优):
+ *   - rate = (loginSuccess+1)/(loginSuccess+loginFailure+2)  拉普拉斯平滑:
+ *       没试过=0.5(可被探索);登录老失败→趋 0(淘汰登录不行的);能过→其真实率。
+ *   - explore = 1/sqrt(loginSuccess+loginFailure+1)  尝试越多权重越低:
+ *       给没试过的节点机会(探索),且强制把登录摊开、不集中在单个节点(反风控/反集中);
+ *       某节点被风控后成功率掉 → 权重也掉,自纠正。
+ * 加权随机 → 概率性铺开。候选取 relaxed(openai 通过 ∪ 未测 ∪ 保留),不预先排除,
+ * 让权重自然淘汰登录不行的、保留对未知节点的探测。
  */
+const LOGIN_RESERVED_BONUS = 1.5; // 保留节点(用户精选)登录时略加权,但不独占
+
+function loginScore(c: EgressCandidate): number {
+  const attempts = c.loginSuccess + c.loginFailure;
+  const rate = (c.loginSuccess + 1) / (attempts + 2);
+  const explore = 1 / Math.sqrt(attempts + 1);
+  return rate * explore * (c.reserved ? LOGIN_RESERVED_BONUS : 1);
+}
+
 function pickForLogin(relaxed: EgressCandidate[], rand: () => number): EgressSelection | undefined {
   if (relaxed.length === 0) return undefined;
-  const proven = relaxed.filter((c) => c.codexSuccess > 0);
-  if (proven.length > 0) {
-    // 在 proven 节点里按净胜场加权随机（越证明能过越优先），而不是死锁单个"最佳"。
-    // 关键：login 失败会清掉账号的出口软粘性 → 每次重试重新走这里；若总返回同一个
-    // "对注册友好但对登录会被质询"的节点，就会反复撞同一堵墙。加权随机让连续重登在
-    // 多个干净节点间轮换，从而真正"换出口重试"，提高重登成功率。
-    const picked = pickWeightedBy(proven, (c) => Math.max(0, codexNet(c)) + 1, rand) ?? proven[0]!;
-    return { hash: picked.hash, port: picked.port, reason: "codex_proven", reserved: picked.reserved };
-  }
-  const untriedOk = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && c.openaiOk);
-  const untriedRaw = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && !c.openaiOk);
-  const ok = pickWeighted(untriedOk, rand);
-  if (ok) return { hash: ok.hash, port: ok.port, reason: "weighted_quality", reserved: ok.reserved };
-  const raw = pickWeighted(untriedRaw, rand);
-  if (raw) return { hash: raw.hash, port: raw.port, reason: "fallback_relaxed", reserved: raw.reserved };
-  const least = leastBad(relaxed);
-  if (least) return { hash: least.hash, port: least.port, reason: "codex_least_bad", reserved: least.reserved };
-  return undefined;
+  const picked = pickWeightedBy(relaxed, loginScore, rand);
+  if (!picked) return undefined;
+  const reason: EgressSelection["reason"] =
+    picked.loginSuccess > 0 ? "codex_proven" : picked.openaiOk ? "weighted_quality" : "fallback_relaxed";
+  return { hash: picked.hash, port: picked.port, reason, reserved: picked.reserved };
 }
 
 /**

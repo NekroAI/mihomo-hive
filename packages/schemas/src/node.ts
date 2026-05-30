@@ -73,6 +73,13 @@ export const proxyNodeSchema = z.object({
    */
   codexLoginSuccess: z.number().int().nonnegative().default(0),
   codexLoginFailure: z.number().int().nonnegative().default(0),
+  /**
+   * 注册(codex_register)经此节点的成败累计。**与登录分开统计** —— 一个节点"能注册"
+   * 不代表"能登录"(登录的 OAuth consent 链对出口 IP 更敏感)。登录选节点只看
+   * codexLogin*,注册选节点只看 codexRegister*,避免互相误导。
+   */
+  codexRegisterSuccess: z.number().int().nonnegative().optional(),
+  codexRegisterFailure: z.number().int().nonnegative().optional(),
   codexLastOutcome: z.enum(["success", "failure"]).optional().nullable(),
   codexLastOutcomeAt: z.string().optional().nullable(),
   /**

@@ -229,6 +229,21 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "nodes", "codex_last_outcome_at", "TEXT");
   // P5-AS: 保留节点标记（专用于注册/登录的高质量备用出口）
   addColumnIfMissing(sqlite, "nodes", "codex_reserved", "INTEGER NOT NULL DEFAULT 0");
+  // P5-BB: 注册战绩与登录分开统计（能注册 ≠ 能登录）。登录选节点只看 codex_login_*。
+  addColumnIfMissing(sqlite, "nodes", "codex_register_success", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(sqlite, "nodes", "codex_register_failure", "INTEGER NOT NULL DEFAULT 0");
+  // 一次性重置被"Linux 容器环境坏掉那段时间"污染的登录战绩 —— 那时每个节点登录都失败,
+  // 把计数刷爆、连能登录的节点也埋成负分。外置 agent 修复环境后,登录战绩需重新学习。
+  // settings flag 守卫,只跑一次;此后新累计的登录战绩保留不动。
+  const loginResetFlag = sqlite
+    .prepare("SELECT 1 FROM settings WHERE key = ?")
+    .get("migrations.codex_login_stats_reset_v1");
+  if (!loginResetFlag) {
+    sqlite.exec("UPDATE nodes SET codex_login_success = 0, codex_login_failure = 0;");
+    sqlite
+      .prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO NOTHING")
+      .run("migrations.codex_login_stats_reset_v1", JSON.stringify({ at: "migration" }));
+  }
   // P5-AT: job 结束时持久化的日志末尾（redact 过），供"最近完成"回看
   addColumnIfMissing(sqlite, "account_jobs", "log_tail", "TEXT");
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：

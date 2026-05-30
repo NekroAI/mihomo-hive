@@ -85,6 +85,8 @@ interface NodeRow {
   last_health_check: string | null;
   codex_login_success: number;
   codex_login_failure: number;
+  codex_register_success: number;
+  codex_register_failure: number;
   codex_last_outcome: "success" | "failure" | null;
   codex_last_outcome_at: string | null;
   codex_reserved: 0 | 1;
@@ -385,9 +387,15 @@ export class HiveRepository {
    * 记录一次 codex_login 经某节点出口的实战结果（P5-AS）。原子自增对应计数，
    * 并写最近结果/时间。节点不存在（hash 已删）时静默 no-op。
    */
-  recordNodeCodexOutcome(nodeHash: string, outcome: "success" | "failure"): void {
+  recordNodeCodexOutcome(
+    nodeHash: string,
+    outcome: "success" | "failure",
+    kind: "login" | "register" = "login"
+  ): void {
     const now = new Date().toISOString();
-    const col = outcome === "success" ? "codex_login_success" : "codex_login_failure";
+    // 登录与注册各自计数:能登录 ≠ 能注册,分开统计才不互相误导选节点。
+    const prefix = kind === "register" ? "codex_register" : "codex_login";
+    const col = outcome === "success" ? `${prefix}_success` : `${prefix}_failure`;
     this.sqlite
       .prepare(
         `UPDATE nodes SET ${col} = ${col} + 1, codex_last_outcome = ?, codex_last_outcome_at = ?, updated_at = ? WHERE hash = ?`
@@ -1560,6 +1568,8 @@ function nodeFromRow(row: NodeRow): ProxyNode {
     lastHealthCheck: row.last_health_check,
     codexLoginSuccess: row.codex_login_success ?? 0,
     codexLoginFailure: row.codex_login_failure ?? 0,
+    codexRegisterSuccess: row.codex_register_success ?? 0,
+    codexRegisterFailure: row.codex_register_failure ?? 0,
     codexLastOutcome: row.codex_last_outcome,
     codexLastOutcomeAt: row.codex_last_outcome_at,
     codexReserved: Boolean(row.codex_reserved),
