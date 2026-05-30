@@ -245,6 +245,8 @@ function ensureSchema(sqlite: HiveSqlite): void {
   addColumnIfMissing(sqlite, "accounts", "relogin_count", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(sqlite, "accounts", "last_recovered_at", "TEXT");
   sqlite.exec("UPDATE accounts SET first_seen_at = created_at WHERE first_seen_at IS NULL;");
+  // 变更历史（JSON 数组，最近 N 条 health/intent/额度变动；附加列，不回填存量）
+  addColumnIfMissing(sqlite, "accounts", "change_history", "TEXT");
   // P5-AK/3: account_jobs.kind 加 import_codex_tool_account。SQLite 不能 ALTER CHECK，
   // 老 DB 必须 rebuild 表（rename → create → copy → drop → 重建 indexes）。
   rebuildAccountJobsCheckIfNeeded(sqlite);

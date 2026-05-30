@@ -41,6 +41,43 @@ export type AccountHealth = z.infer<typeof accountHealthSchema>;
 export const accountRecoveryPathSchema = z.enum(["codex_login", "codex_register"]);
 export type AccountRecoveryPath = z.infer<typeof accountRecoveryPathSchema>;
 
+// ─── 账号变更历史 ────────────────────────────────────
+
+/**
+ * 账号变更历史的单条记录。最近 N 条以环形缓冲存在 accounts.change_history（JSON），
+ * head（数组首位）为最新。捕捉账号真实状态/额度变动，供"最近有变动"筛选 + 排序 + 运维审计：
+ *   - health：健康档位翻转（healthy↔broken↔quota_exhausted↔rate_limited↔unknown）
+ *   - intent：意图翻转（active↔recovering↔retired↔pending）
+ *   - quota：Sub2API 同步来的额度变动；连续的额度变动会"合并"成一条
+ *            （from 保留这一段开始时的值、to 持续更新到最新），避免刷屏，
+ *            从而能看出"这账号从 X% 被用到了 Y%"。
+ *
+ * 设计要点：head 的 at 即"最近一次变动时间"，所以不需要单独的 healthChangedAt 列。
+ */
+export const accountChangeEntrySchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("health"),
+    at: z.string(),
+    from: accountHealthSchema,
+    to: accountHealthSchema
+  }),
+  z.object({
+    kind: z.literal("intent"),
+    at: z.string(),
+    from: accountIntentSchema,
+    to: accountIntentSchema
+  }),
+  z.object({
+    kind: z.literal("quota"),
+    at: z.string(),
+    q5From: z.number().int().min(0).max(100).nullable(),
+    q5To: z.number().int().min(0).max(100).nullable(),
+    q7From: z.number().int().min(0).max(100).nullable(),
+    q7To: z.number().int().min(0).max(100).nullable()
+  })
+]);
+export type AccountChangeEntry = z.infer<typeof accountChangeEntrySchema>;
+
 // ─── 账号记录 ────────────────────────────────────
 
 // 持久化层（含 enc_* 字段）——只在 server 内部使用，不出 API
@@ -133,6 +170,12 @@ export const accountRecordInternalSchema = z.object({
   reloginCount: z.number().int().nonnegative().default(0),
   lastRecoveredAt: z.string().nullable(),
 
+  /**
+   * 最近 N 条变更历史（环形缓冲，head 最新），由持久化层在写入时 diff 旧值自动维护。
+   * 见 accountChangeEntrySchema。新建记录可省略（视为空），从 DB 读出时总是有值。
+   */
+  changeHistory: z.array(accountChangeEntrySchema).optional(),
+
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
 });
@@ -206,6 +249,9 @@ export const accountRecordViewSchema = z.object({
    */
   tempUnschedulableUntil: z.string().nullable().optional(),
   tempUnschedulableReason: z.string().nullable().optional(),
+
+  /** 最近 N 条变更历史（health/intent/额度），head 最新。供"最近有变动"筛选/排序与运维审计。 */
+  changeHistory: z.array(accountChangeEntrySchema).default([]),
 
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1)
@@ -371,6 +417,9 @@ export const accountFleetSpecSchema = z.object({
   reconcileIntervalMs: z.number().int().min(30_000).default(5 * 60_000),
   graceBatchPercent: z.number().min(0).max(100).default(10),
   graceBatchAbs: z.number().int().min(0).default(50),
+
+  /** 每个账号保留的变更历史条数上限（accounts.change_history 环形缓冲）。 */
+  changeHistoryLimit: z.number().int().min(1).max(100).default(10),
 
   target: accountFleetTargetPolicySchema.default({}),
   health: accountFleetHealthPolicySchema.default({}),

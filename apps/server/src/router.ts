@@ -1850,6 +1850,7 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     firstSeenAt: a.firstSeenAt,
     reloginCount: a.reloginCount,
     lastRecoveredAt: a.lastRecoveredAt,
+    changeHistory: a.changeHistory ?? [],
     createdAt: a.createdAt,
     updatedAt: a.updatedAt
   };

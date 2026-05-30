@@ -11,6 +11,7 @@ import {
   XCircle
 } from "lucide-react";
 import type {
+  AccountChangeEntry,
   AccountFleetTick,
   AccountFleetStatusSnapshot,
   AccountFleetTickSummary,
@@ -276,7 +277,10 @@ function describeBudgetTone(tone: KpiTone, ratio: number): string {
   return `占 ${Math.round(ratio * 100)}%，充裕`;
 }
 
-type MatrixFilterKey = "attention" | "all" | "healthy" | "broken" | "recovering" | "cooling";
+type MatrixFilterKey = "attention" | "changed" | "all" | "healthy" | "broken" | "recovering" | "cooling";
+
+/** "最近有变动"窗口：newest change 落在这个时间内才算近期变动。 */
+const RECENT_CHANGE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountRecordView) => boolean }[] = [
   {
@@ -287,6 +291,15 @@ const MATRIX_FILTERS: { key: MatrixFilterKey; label: string; match: (a: AccountR
       (a.health === "broken" && a.intent !== "retired") ||
       a.intent === "recovering" ||
       a.health === "rate_limited"
+  },
+  {
+    key: "changed",
+    label: "最近有变动",
+    // 最近一次真实变动（health/intent/额度）落在 24h 内 —— 由 change_history 头条时间判定
+    match: (a) => {
+      const ms = matrixChangeMs(a);
+      return ms > 0 && Date.now() - ms <= RECENT_CHANGE_WINDOW_MS;
+    }
   },
   { key: "all", label: "全部", match: () => true },
   { key: "healthy", label: "健康", match: (a) => a.health === "healthy" },
@@ -311,13 +324,17 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
           (a) => a.email.toLowerCase().includes(q) || (a.externalId ? String(a.externalId).includes(q) : false)
         )
       : base;
+    // "最近有变动"筛选下：纯按变更时间降序，让刚变动的账号置顶（这正是该视图的用途）。
+    if (filter === "changed") {
+      return [...searched].sort((a, b) => matrixChangeMs(b) - matrixChangeMs(a));
+    }
     // P6-10 排序：按"用户最关心 + 最近有变动"——正在修复→可恢复掉线→限流→健康→
-    // 配额冷却→已退役死号(沉底)；同档内按真实事件时间(恢复/注册/限流)降序，让刚发生
-    // 变化的浮到前面。不用 updatedAt(每 tick 全量刷新，无区分度)。
+    // 配额冷却→已退役死号(沉底)；同档内按真实变更/事件时间降序，让刚发生变化的浮到前面。
+    // 不用 updatedAt(每 tick 全量刷新，无区分度)。
     return [...searched].sort(
       (a, b) => matrixActivityRank(a) - matrixActivityRank(b) || matrixRecencyMs(b) - matrixRecencyMs(a)
     );
-  }, [props.accounts, activeMatch, q]);
+  }, [props.accounts, activeMatch, filter, q]);
 
   // filter/search 变化时回到第 1 页
   React.useEffect(() => setPage(0), [filter, q]);
@@ -394,6 +411,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                 <th>健康</th>
                 <th className="num">配额 5h/7d</th>
                 <th className="num">存活/重登</th>
+                <th>最近变动</th>
                 <th>出口节点</th>
               </tr>
             </thead>
@@ -465,6 +483,21 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                     ) : null}
                     <InfoTip text={formatQualityTooltip(acc)} />
                   </span>
+                </td>
+                <td className="cell-change">
+                  {(() => {
+                    const head = acc.changeHistory?.[0];
+                    if (!head) return <span className="muted">—</span>;
+                    return (
+                      <span
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "help" }}
+                        title={changeHistoryTooltip(acc)}
+                      >
+                        <span className="mono-strong small">{formatChangeEntry(head)}</span>
+                        <span className="muted small">{shortAgo(head.at)}</span>
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="cell-sub2api" title={egressTitle}>
                   {acc.currentNodeName ? (
@@ -1349,13 +1382,58 @@ function matrixActivityRank(a: AccountRecordView): number {
   return 5;
 }
 
-/** 同档内的"最近有变动"信号：取恢复/注册/限流等真实事件时间最大值（非 updatedAt）。 */
+/** 同档内的"最近有变动"信号：取变更历史头条 + 恢复/注册/限流等真实事件时间最大值（非 updatedAt）。 */
 function matrixRecencyMs(a: AccountRecordView): number {
   const ts = [a.lastRecoveredAt, a.registeredAt, a.rateLimitedAt, a.firstSeenAt]
     .filter((t): t is string => Boolean(t))
     .map((t) => new Date(t).getTime())
     .filter((n) => Number.isFinite(n));
-  return ts.length ? Math.max(...ts) : 0;
+  return Math.max(matrixChangeMs(a), ts.length ? Math.max(...ts) : 0);
+}
+
+/** change_history 头条（最新一次真实变动）的时间戳 ms；无历史 → 0。 */
+function matrixChangeMs(a: AccountRecordView): number {
+  const head = a.changeHistory?.[0];
+  if (!head) return 0;
+  const ms = new Date(head.at).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+const CHANGE_INTENT_LABEL: Record<AccountIntent, string> = {
+  pending: "待落地",
+  active: "活跃",
+  recovering: "修复中",
+  retired: "已退役"
+};
+
+/** 把一条变更记录格式化成紧凑文案，如「额度5h 0→80%」「掉线→健康」「活跃→已退役」。 */
+function formatChangeEntry(e: AccountChangeEntry): string {
+  if (e.kind === "health") return `${HEALTH_LABEL[e.from]}→${HEALTH_LABEL[e.to]}`;
+  if (e.kind === "intent") return `${CHANGE_INTENT_LABEL[e.from]}→${CHANGE_INTENT_LABEL[e.to]}`;
+  const pct = (n: number | null) => (n === null ? "—" : `${n}%`);
+  const parts: string[] = [];
+  if (e.q5From !== e.q5To) parts.push(`5h ${pct(e.q5From)}→${pct(e.q5To)}`);
+  if (e.q7From !== e.q7To) parts.push(`7d ${pct(e.q7From)}→${pct(e.q7To)}`);
+  return `额度 ${parts.join(" · ") || "无变化"}`;
+}
+
+/** 相对时间的极简中文（用于变更列）：刚刚 / N分钟前 / N小时前 / N天前。 */
+function shortAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "刚刚";
+  if (min < 60) return `${min}分钟前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}小时前`;
+  return `${Math.floor(hr / 24)}天前`;
+}
+
+/** 变更历史的多行 tooltip（最近 N 条，每行「相对时间  文案」）。 */
+function changeHistoryTooltip(a: AccountRecordView): string {
+  const hist = a.changeHistory ?? [];
+  if (hist.length === 0) return "暂无记录的变动";
+  return hist.map((e) => `${shortAgo(e.at)}  ${formatChangeEntry(e)}`).join("\n");
 }
 
 function SkippedIcon(props: { skipped: AccountFleetTickSummary["skippedReason"] }) {

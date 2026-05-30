@@ -15,6 +15,7 @@ import {
 } from "@mihomo-hive/schemas";
 import type {
   AccountBudgetRecord,
+  AccountChangeEntry,
   AccountFleetSpec,
   AccountFleetTick,
   AccountFleetTickSummary,
@@ -37,6 +38,7 @@ import type {
   Sub2ApiSafeConnectionConfig,
   SubscriptionSource
 } from "@mihomo-hive/schemas";
+import { appendAccountChanges, type AccountChangeSnapshot } from "./account-change-log.js";
 import type { HiveSqlite } from "./client.js";
 
 interface PasswordHash {
@@ -160,6 +162,7 @@ interface AccountRow {
   first_seen_at: string | null;
   relogin_count: number;
   last_recovered_at: string | null;
+  change_history: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -212,10 +215,19 @@ interface AccountBudgetRow {
 }
 
 export class HiveRepository {
+  /** 每账号变更历史保留条数。由 spec 配置，saveAccountFleetSpec 时同步；默认 10。 */
+  private accountChangeHistoryLimit = 10;
+
   constructor(
     private readonly sqlite: HiveSqlite,
     private readonly options: { subscriptionUserAgent?: string } = {}
-  ) {}
+  ) {
+    try {
+      this.accountChangeHistoryLimit = this.getAccountFleetSpec().changeHistoryLimit;
+    } catch {
+      // 设置表尚未就绪 / 旧数据解析失败 → 用默认值，saveAccountFleetSpec 时会刷新
+    }
+  }
 
   addSubscription(input: {
     id: string;
@@ -840,6 +852,7 @@ export class HiveRepository {
       `
       )
       .run(accountFleetSpecSettingKey, JSON.stringify(parsed));
+    this.accountChangeHistoryLimit = parsed.changeHistoryLimit;
     return parsed;
   }
 
@@ -877,7 +890,16 @@ export class HiveRepository {
   }
 
   upsertAccount(record: AccountRecordInternal): AccountRecordInternal {
-    const parsed = accountRecordInternalSchema.parse(record);
+    // 变更历史：拿旧行 diff（health/intent/额度），自动追加到环形缓冲
+    const existing = this.getAccountById(record.id);
+    const changeHistory = appendAccountChanges(
+      existing?.changeHistory ?? [],
+      existing ? changeSnapshot(existing) : null,
+      changeSnapshot(record),
+      record.updatedAt,
+      this.accountChangeHistoryLimit
+    );
+    const parsed = accountRecordInternalSchema.parse({ ...record, changeHistory });
     this.sqlite
       .prepare(
         `
@@ -892,7 +914,7 @@ export class HiveRepository {
           recovery_attempts, next_recovery_after, last_recovery_error, last_recovery_path,
           last_recovery_failure_category,
           batch_id, registered_at, sms_country, sms_cost_cents, egress_node_hash,
-          first_seen_at, relogin_count, last_recovered_at,
+          first_seen_at, relogin_count, last_recovered_at, change_history,
           created_at, updated_at
         ) VALUES (
           @id, @externalId, @origin, @intent, @health,
@@ -905,7 +927,7 @@ export class HiveRepository {
           @recoveryAttempts, @nextRecoveryAfter, @lastRecoveryError, @lastRecoveryPath,
           @lastRecoveryFailureCategory,
           @batchId, @registeredAt, @smsCountry, @smsCostCents, @egressNodeHash,
-          @firstSeenAt, @reloginCount, @lastRecoveredAt,
+          @firstSeenAt, @reloginCount, @lastRecoveredAt, @changeHistory,
           @createdAt, @updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -946,6 +968,7 @@ export class HiveRepository {
           first_seen_at = excluded.first_seen_at,
           relogin_count = excluded.relogin_count,
           last_recovered_at = excluded.last_recovered_at,
+          change_history = excluded.change_history,
           updated_at = excluded.updated_at
       `
       )
@@ -1070,8 +1093,30 @@ export class HiveRepository {
     if (sets.length === 0) {
       return this.getAccountById(id);
     }
+    const now = new Date().toISOString();
+    // 变更历史：patch 触及 health/intent/额度时，拿旧行 diff 后追加（同 updated_at 时间戳）
+    if ("health" in patch || "intent" in patch || "quota5hPercent" in patch || "quota7dPercent" in patch) {
+      const before = this.getAccountById(id);
+      if (before) {
+        const next: AccountChangeSnapshot = {
+          health: "health" in patch ? patch.health! : before.health,
+          intent: "intent" in patch ? patch.intent! : before.intent,
+          quota5hPercent: "quota5hPercent" in patch ? (patch.quota5hPercent ?? null) : before.quota5hPercent,
+          quota7dPercent: "quota7dPercent" in patch ? (patch.quota7dPercent ?? null) : before.quota7dPercent
+        };
+        const history = appendAccountChanges(
+          before.changeHistory ?? [],
+          changeSnapshot(before),
+          next,
+          now,
+          this.accountChangeHistoryLimit
+        );
+        sets.push(`change_history = @changeHistory`);
+        values.changeHistory = history.length > 0 ? JSON.stringify(history) : null;
+      }
+    }
     sets.push(`updated_at = @updatedAt`);
-    values.updatedAt = new Date().toISOString();
+    values.updatedAt = now;
     values.id = id;
     this.sqlite
       .prepare(`UPDATE accounts SET ${sets.join(", ")} WHERE id = @id`)
@@ -1616,9 +1661,32 @@ function toAccountRow(record: AccountRecordInternal): Record<string, unknown> {
     firstSeenAt: record.firstSeenAt,
     reloginCount: record.reloginCount,
     lastRecoveredAt: record.lastRecoveredAt,
+    changeHistory:
+      record.changeHistory && record.changeHistory.length > 0 ? JSON.stringify(record.changeHistory) : null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
+}
+
+/** 从账号记录抽出参与变更 diff 的字段快照。 */
+function changeSnapshot(a: AccountRecordInternal): AccountChangeSnapshot {
+  return {
+    health: a.health,
+    intent: a.intent,
+    quota5hPercent: a.quota5hPercent,
+    quota7dPercent: a.quota7dPercent
+  };
+}
+
+/** 解析 change_history JSON 列；缺失 / 损坏 → 空数组（不阻断账号读取）。 */
+function parseChangeHistory(raw: string | null): AccountChangeEntry[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? (arr as AccountChangeEntry[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function accountFromRow(row: AccountRow): AccountRecordInternal {
@@ -1661,6 +1729,7 @@ function accountFromRow(row: AccountRow): AccountRecordInternal {
     firstSeenAt: row.first_seen_at,
     reloginCount: row.relogin_count,
     lastRecoveredAt: row.last_recovered_at,
+    changeHistory: parseChangeHistory(row.change_history),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   });
