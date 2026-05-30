@@ -199,7 +199,10 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="容量与再平衡"
-        hint="目标 = 总账号数 / 健康节点数（auto 时）。超过 overload 倍触发外迁；低于 underload 倍视为闲置等填。"
+        hint={
+          "目标 = 总账号数 / 健康节点数（auto 时）。\n" +
+          "超过 overload 倍 → 触发外迁；低于 underload 倍 → 视为闲置、等待填充。"
+        }
       >
         <div className="form-grid">
           <SelectInput
@@ -249,7 +252,11 @@ export function OrchestrationSpecPanel(props: {
 
       <Panel
         title="灰度与稳定性"
-        hint="灰度阀：单次调和最多影响 min(账号总数×百分比, 绝对值) 个。稳定哈希在节点集合变化时触发大规模重排；Rendezvous Hashing (HRW，集合哈希) 只让原节点已下线的账号漂移（≈ 1/N）。切换策略会一次性大漂移，建议低峰期执行。"
+        hint={
+          "灰度阀：单次调和最多影响 min(账号总数 × 百分比, 绝对值) 个。\n\n" +
+          "稳定哈希在节点集合变化时会触发大规模重排；Rendezvous Hashing（HRW，集合哈希）只让「原节点已下线」的账号漂移（约 1/N）。\n\n" +
+          "切换策略会一次性大漂移，建议低峰期执行。"
+        }
       >
         <div className="form-grid">
           <SelectInput
@@ -316,7 +323,11 @@ export function OrchestrationSpecPanel(props: {
       <CollapsiblePanel
         title="故障自愈"
         storageKey="spec-health"
-        hint="依赖 Sub2API 上游错误信号 + 主动 TCP 探测兜底；窗口内错误条数超过预算 → 退避（账号留在原地）→ 连续 N 次失败 → 永久驱逐。上游接口只返回错误条目，所以阈值是绝对错误数而不是百分比。"
+        hint={
+          "依赖 Sub2API 上游错误信号 + 主动 TCP 探测兜底。\n\n" +
+          "窗口内错误条数超过预算 → 退避（账号留在原地）→ 连续 N 次失败 → 永久驱逐。\n\n" +
+          "上游接口只返回错误条目，所以阈值是「绝对错误数」而非百分比。"
+        }
       >
         <div className="form-grid">
           <NumberInput
@@ -344,7 +355,12 @@ export function OrchestrationSpecPanel(props: {
         title="保护代理规则"
         storageKey="spec-protected"
         actions={<Shield size={14} className="muted" />}
-        hint="命中保护规则的代理被双向锁定：① 不会被自动化分配新账号 ② 当前已绑定到保护代理的账号也不会被迁走。用于'由人工维护、不交给系统接管'的代理范围。"
+        hint={
+          "命中保护规则的代理被双向锁定：\n" +
+          "① 不会被自动化分配新账号；\n" +
+          "② 已绑定到保护代理的账号也不会被迁走。\n\n" +
+          "用于「由人工维护、不交给系统接管」的代理范围。"
+        }
       >
         <div className="form-grid">
           <TextInput

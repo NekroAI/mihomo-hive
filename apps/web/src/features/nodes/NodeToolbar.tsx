@@ -209,7 +209,11 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<RotateCcw size={14} />}
               disabled={props.busy || props.resetting || !hasSelection}
-              hint="重置所选节点的编排意图（清掉退避中 / 已驱逐状态 + 退避计数 + 健康分），让调和器重新评估；如果节点已退役会自动恢复为可调度。用于健康信号误归因导致节点被错误驱逐时的人工救援。"
+              hint={
+                "重置所选节点的编排意图：清掉「退避中 / 已驱逐」状态、退避计数和健康分，让调和器重新评估。\n" +
+                "已退役的节点会自动恢复为可调度。\n\n" +
+                "用于健康信号误判导致节点被错误驱逐时的人工救援。"
+              }
               onClick={props.onResetIntent}
             >
               重置编排状态
@@ -219,7 +223,12 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<Star size={14} />}
               disabled={props.busy || props.reserving || !hasSelection}
-              hint="标记为保留节点：专用于账号注册/登录的高质量备用出口。注册优先统一走保留节点；登录恢复时先复用账号上次成功的节点，失败后才启用保留节点，避免在普通节点里瞎轮换触发账号风控。不影响日常 serving 绑定。"
+              hint={
+                "标记为保留节点：作为账号注册 / 登录的兜底出口，确保任何时候都有可用节点。\n\n" +
+                "注册不再强制走保留节点 —— 系统会在所有合格节点间分散、并探索新节点；保留节点只是「池子永不为空」的保证。\n" +
+                "登录恢复时优先复用账号上次成功的节点。\n\n" +
+                "不影响日常 serving 绑定。"
+              }
               onClick={props.onMarkReserved}
             >
               标记为保留节点
@@ -237,7 +246,11 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<PauseCircle size={14} />}
               disabled={props.busy || !hasSelection}
-              hint="生命周期 → 已锁定：节点被冻结。已绑账号留在原地不会被迁走、新账号也不会绑过来、不会自动恢复。需要主动点'启用调度'才能重新接活。保留本地记录与端口。"
+              hint={
+                "生命周期 → 已锁定：节点被冻结。\n" +
+                "已绑账号留在原地不会被迁走、新账号也不会绑过来、不会自动恢复。\n\n" +
+                "需要主动点「启用调度」才能重新接活。保留本地记录与端口。"
+              }
               onClick={props.onDisableSelected}
             >
               锁定调度
@@ -245,7 +258,11 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<Snowflake size={14} />}
               disabled={props.busy || !hasSelection}
-              hint="生命周期 → 冷却中：节点有问题暂时下线。调和器视为已驱逐 → 把账号迁到健康节点。跟退役的区别仅在意图持久性：冷却预期会恢复（用户主动重新启用调度），退役表示永久下线。"
+              hint={
+                "生命周期 → 冷却中：节点有问题，暂时下线。\n" +
+                "调和器视为已驱逐，把账号迁到健康节点。\n\n" +
+                "与退役的区别只在意图：冷却预期会恢复（你主动重新启用调度），退役表示永久下线。"
+              }
               onClick={props.onCoolingDownSelected}
             >
               冷却
@@ -253,7 +270,10 @@ export function NodeToolbar(props: NodeToolbarProps) {
             <DropdownItem
               icon={<Archive size={14} />}
               disabled={props.busy || !hasSelection}
-              hint="生命周期 → 已退役：永久下线。账号被强制迁出到健康节点，端口被收回；本地记录保留用于历史查询。"
+              hint={
+                "生命周期 → 已退役：永久下线。\n" +
+                "账号被强制迁出到健康节点，端口收回；本地记录保留用于历史查询。"
+              }
               onClick={props.onRetireSelected}
             >
               退役

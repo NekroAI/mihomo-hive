@@ -110,7 +110,11 @@ export function AccountFleetSpecPanel(props: {
 
       <Panel
         title="目标产能"
-        hint="目标账号数 = 用户期望维持的健康账号数。新账号的 Sub2API proxy_id 由系统自动推导：codex-tool 走哪个本地节点 → 该节点对应的 Sub2API 代理 → 用作账号 binding；节点池里的代理就是出生地，不需要在这里硬编码。"
+        hint={
+          "目标账号数 = 你希望维持的健康账号数。\n\n" +
+          "新账号的 Sub2API 代理由系统自动推导：codex-tool 走哪个本地节点 → 该节点对应的 Sub2API 代理 → 作为账号绑定。\n" +
+          "节点池里的代理就是账号出生地，无需在此硬编码。"
+        }
       >
         <div className="form-grid">
           <NumberInput
@@ -167,7 +171,10 @@ export function AccountFleetSpecPanel(props: {
       <CollapsiblePanel
         title="健康判定"
         storageKey="account-fleet-health"
-        hint="多源信号融合：credentials_status + 配额 + 上游错误。adopted_active 连续 N tick broken 才降级为 observing，避免单点抖动误判。"
+        hint={
+          "多源信号融合：凭据状态 + 配额 + 上游错误。\n" +
+          "接管的活跃账号需连续 N 个巡检都判定掉线，才降级为「仅观察」—— 避免单次网络抖动误判。"
+        }
       >
         <div className="checkbox-stack">
           <Checkbox
@@ -220,7 +227,11 @@ export function AccountFleetSpecPanel(props: {
         title="修复策略"
         storageKey="account-fleet-recovery"
         defaultOpen
-        hint="PATH_A (codex_login，邮箱 OTP 免费 ~30s) 优先；账号无 phone+password 时降级 PATH_B (codex_register 接码收费)。Sentinel 浏览器资源限制建议 maxConcurrent ≤ 3。"
+        hint={
+          "优先走登录续命（codex_login，邮箱 OTP，免费、约 30 秒）。\n" +
+          "账号没有手机号 + 密码时，降级到重新注册（codex_register，接码、收费）。\n\n" +
+          "Sentinel 浏览器较吃资源，并发数（maxConcurrent）建议 ≤ 3。"
+        }
       >
         <div className="checkbox-stack">
           <Checkbox
@@ -261,7 +272,12 @@ export function AccountFleetSpecPanel(props: {
         title="注册新账号（接码收费）"
         storageKey="account-fleet-registration"
         defaultOpen
-        hint="唯一花钱的路径。三道上限任一达到就停止注册：每次巡检最多注册 N 个、当天累计、当月累计。上限按【成功注册数】计，失败的尝试只算花费不占额度。紧急补给（健康/目标低于最低健康比）时忽略每次巡检上限全力补。"
+        hint={
+          "唯一花钱的路径。\n\n" +
+          "三道上限任一达到即停止注册：单次巡检最多 N 个 / 当天累计 / 当月累计。\n" +
+          "上限按【成功注册数】计，失败的尝试只计花费、不占额度。\n\n" +
+          "紧急补给（健康数或健康比低于下限）时，忽略单次巡检上限，全力补。"
+        }
       >
         <div className="checkbox-stack">
           <Checkbox
@@ -342,7 +358,13 @@ export function AccountFleetSpecPanel(props: {
       <CollapsiblePanel
         title="退役策略"
         storageKey="account-fleet-retirement"
-        hint="只退役【掉线】账号：① 修复连续失败达上限，或 ② 掉线且连续 N 天无流量。两个条件都要求账号已经掉线——健康账号即使长期闲置（池子充足/低负载）也不会被退役。默认仅设 schedulable=false 不删 Sub2API 记录。"
+        hint={
+          "只退役【掉线】账号，满足其一即退役：\n" +
+          "① 修复连续失败达上限；\n" +
+          "② 掉线且连续 N 天无流量。\n\n" +
+          "两个条件都要求账号已经掉线 —— 健康账号即使长期闲置（池子充足 / 低负载）也不会被退役。\n" +
+          "默认仅设为不可调度，不删除 Sub2API 记录。"
+        }
       >
         <div className="checkbox-stack">
           <Checkbox

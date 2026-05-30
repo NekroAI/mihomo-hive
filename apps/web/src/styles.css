@@ -1951,8 +1951,9 @@ input[type="number"] {
   color: var(--text);
   box-shadow: var(--shadow);
   font-size: 12px;
-  line-height: 1.5;
-  white-space: normal;
+  line-height: 1.6;
+  /* pre-line：保留 \n 换行（多行提示分行显示），同时折叠多余空格并自动换行 */
+  white-space: pre-line;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.12s ease;

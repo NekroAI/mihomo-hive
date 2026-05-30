@@ -1190,10 +1190,10 @@ function RecoverStatus(props: { acc: AccountRecordView }) {
     if (Number.isFinite(next) && next > Date.now()) {
       const hh = new Date(acc.nextRecoveryAfter).toLocaleTimeString();
       const lines = [
-        `退避中，下次尝试 ${hh}`,
-        `已尝试 ${acc.recoveryAttempts} 次（多次失败后按退避序列拉长间隔，期间不占用修复槽位）`
+        `修复退避中：下次尝试 ${hh}`,
+        `已尝试 ${acc.recoveryAttempts} 次 —— 多次失败后按退避序列拉长间隔，期间不占用修复槽位`
       ];
-      if (acc.lastRecoveryError) lines.push(`上次失败：${acc.lastRecoveryError}`);
+      if (acc.lastRecoveryError) lines.push(`上次报错：${acc.lastRecoveryError}`);
       return (
         <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
           <Badge tone="warning">等待重试</Badge>
@@ -1244,20 +1244,26 @@ function HealthBadge(props: { health: AccountHealth }) {
  * 出口节点列 tooltip —— 把多源数据拼成一句话解释，让用户知道这个节点名是哪来的、
  * 旁边的灰字"上次出口 xxx"是怎么回事。
  */
+function formatRecoveryPathLabel(path: AccountRecordView["lastRecoveryPath"]): string {
+  if (path === "codex_login") return "登录续命（邮箱 OTP）";
+  if (path === "codex_register") return "重新注册（接码）";
+  return String(path);
+}
+
 function formatEgressTooltip(acc: AccountRecordView): string {
   const lines: string[] = [];
   if (acc.currentNodeName) {
-    lines.push(`Sub2API 当前把此账号绑在「${acc.currentNodeName}」上`);
-    if (acc.currentProxyId) lines.push(`(远端代理 ID #${acc.currentProxyId})`);
+    lines.push(`当前出口：Sub2API 把此账号绑在「${acc.currentNodeName}」`);
+    if (acc.currentProxyId) lines.push(`远端代理 ID：#${acc.currentProxyId}`);
   } else if (acc.currentProxyId) {
-    lines.push(`Sub2API 远端代理 #${acc.currentProxyId}：本地节点表里查不到对应节点`);
+    lines.push(`当前出口：Sub2API 远端代理 #${acc.currentProxyId}（本地节点表里查不到）`);
     lines.push("可能是手动建的外部代理 / 节点已删 / 尚未推送");
   } else {
-    lines.push("Sub2API 远端未给此账号绑代理");
+    lines.push("当前出口：Sub2API 未给此账号绑代理");
   }
   if (acc.egressNodeHash) {
     lines.push("");
-    lines.push(`上次 codex-tool 出口走的节点 hash: ${acc.egressNodeHash}`);
+    lines.push(`上次注册/登录出口节点：${acc.egressNodeHash.slice(0, 8)}…`);
   }
   // P5-AI: 短信注册数据
   if (acc.smsCountry || acc.smsCostCents != null) {
@@ -1267,16 +1273,13 @@ function formatEgressTooltip(acc: AccountRecordView): string {
     if (acc.smsCostCents != null) parts.push(`成本 $${(acc.smsCostCents / 100).toFixed(2)}`);
     lines.push(`注册短信：${parts.join(" · ")}`);
   }
-  if (acc.lastRecoveryPath) {
-    lines.push(`最近修复路径: ${acc.lastRecoveryPath}`);
-  }
+  if (acc.lastRecoveryPath || acc.lastRecoveryFailureCategory || acc.lastRecoveryError) lines.push("");
+  if (acc.lastRecoveryPath) lines.push(`最近修复方式：${formatRecoveryPathLabel(acc.lastRecoveryPath)}`);
   // P5-AI: codex-tool 失败分类（external-integration.md §"OAuth 失败分类"）
   if (acc.lastRecoveryFailureCategory) {
-    lines.push(`失败分类: ${formatFailureCategory(acc.lastRecoveryFailureCategory)}`);
+    lines.push(`失败类型：${formatFailureCategory(acc.lastRecoveryFailureCategory)}`);
   }
-  if (acc.lastRecoveryError) {
-    lines.push(`上次修复错误: ${acc.lastRecoveryError}`);
-  }
+  if (acc.lastRecoveryError) lines.push(`上次修复报错：${acc.lastRecoveryError}`);
   return lines.join("\n");
 }
 
@@ -1301,9 +1304,10 @@ function recoveryRemainingLabel(acc: AccountRecordView): string | null {
 
 function recoveryTooltip(acc: AccountRecordView): string {
   const until = acc.tempUnschedulableUntil ?? acc.rateLimitResetAt ?? null;
-  const lines = [`Sub2API 限流中，预计 ${until ? new Date(until).toLocaleString() : "未知"} 恢复`];
-  if (acc.tempUnschedulableReason) lines.push(`原因: ${acc.tempUnschedulableReason}`);
-  lines.push("（账号会自然恢复，不必在冷却期内手动触发恢复）");
+  const lines = [`配额冷却中：预计 ${until ? new Date(until).toLocaleString() : "未知"} 自然恢复`];
+  if (acc.tempUnschedulableReason) lines.push(`原因：${acc.tempUnschedulableReason}`);
+  lines.push("");
+  lines.push("账号会自动恢复，无需在冷却期内手动触发。");
   return lines.join("\n");
 }
 
@@ -1334,7 +1338,9 @@ function formatDaysAlive(acc: AccountRecordView): string {
   const days = Math.floor(ms / 86_400_000);
   if (days >= 1) return `${days}天`;
   const hours = Math.floor(ms / 3_600_000);
-  return hours >= 1 ? `${hours}时` : "今天";
+  if (hours >= 1) return `${hours}小时`;
+  const mins = Math.floor(ms / 60_000);
+  return mins >= 1 ? `${mins}分钟` : "刚来";
 }
 
 /** 掉线账号的存活冻结时刻（ms）；非掉线 / 无掉线戳 → null（按"到现在"算）。 */
@@ -1346,21 +1352,17 @@ function aliveFrozenAtMs(acc: AccountRecordView): number | null {
 
 function formatQualityTooltip(acc: AccountRecordView): string {
   const lines: string[] = [];
-  lines.push(
-    acc.firstSeenAt
-      ? `首见时间: ${new Date(acc.firstSeenAt).toLocaleString()}`
-      : "首见时间: 未知"
-  );
-  lines.push(`累计重新登录: ${acc.reloginCount} 次`);
+  lines.push(acc.firstSeenAt ? `首见时间：${new Date(acc.firstSeenAt).toLocaleString()}` : "首见时间：未知");
+  lines.push(`累计重新登录：${acc.reloginCount} 次`);
   const frozen = aliveFrozenAtMs(acc);
   if (frozen !== null) {
     lines.push(`存活时间已冻结（掉线于 ${new Date(frozen).toLocaleString()}），不再随时间累加`);
   }
   if (acc.lastRecoveredAt) {
-    lines.push(`最近修复成功: ${new Date(acc.lastRecoveredAt).toLocaleString()}`);
+    lines.push(`最近修复成功：${new Date(acc.lastRecoveredAt).toLocaleString()}`);
   }
   if (acc.recoveryAttempts > 0) {
-    lines.push(`当前连续修复尝试: ${acc.recoveryAttempts} 次（成功即清零）`);
+    lines.push(`当前连续修复尝试：${acc.recoveryAttempts} 次（成功即清零）`);
   }
   return lines.join("\n");
 }
