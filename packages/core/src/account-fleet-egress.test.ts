@@ -256,10 +256,17 @@ describe("selectEgressForLogin", () => {
     expect(r.hash).toBe("fresh");
   });
 
-  // 探索-利用策略（用户要求："不要无脑使用验证过的登录节点，避免登录过于集中"）：
-  // 登录选节点 = laplace 成功率 × 1/sqrt(尝试数+1) 探索项 × 保留加成，加权随机。
-  // 已验证节点持续被复用，但未试节点也持续被探索 —— 不再确定性独占。
-  const seededRand = (seed: number) => () => ((seed * 9301 + 49297) % 233280) / 233280;
+  // 探索-利用分层策略（用户要求："不要无脑使用验证过的登录节点，避免登录过于集中"）：
+  // exploit 池(reserved ∪ proven, 多数) + explore 池(其余, LOGIN_EXPLORE_RATE 比例)。
+  // 用有状态 PRNG（每次调用前进），让"探索抛硬币"与"池内加权随机"各自独立取样
+  // —— 固定值的 seededRand 会让两者完全相关、扭曲分布。
+  const makeRng = (seed: number) => {
+    let s = seed % 233280;
+    return () => {
+      s = (s * 9301 + 49297) % 233280;
+      return s / 233280;
+    };
+  };
 
   it("login marks a proven pick with reason codex_proven", () => {
     const nodes = [makeNode({ hash: "proven", codexLoginSuccess: 5 })];
@@ -280,20 +287,16 @@ describe("selectEgressForLogin", () => {
       makeNode({ hash: "untried-b" })
     ];
     const picks = new Map<string, number>();
+    const rng = makeRng(12345);
     for (let i = 0; i < 600; i++) {
-      const r = selectEgressForLogin({
-        nodes,
-        egressLoadByNodeHash: new Map(),
-        preferredHash: null,
-        rand: seededRand(i + 1)
-      });
+      const r = selectEgressForLogin({ nodes, egressLoadByNodeHash: new Map(), preferredHash: null, rand: rng });
       picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
     }
-    // 已证明能过 Sentinel 的节点持续被复用
-    expect(picks.get("proven") ?? 0).toBeGreaterThan(50);
+    // 已证明能过 Sentinel 的节点是 exploit 主力（多数）
+    expect(picks.get("proven") ?? 0).toBeGreaterThan(300);
     // 未试节点也被持续探索 —— 不集中在单一已验证节点
-    expect(picks.get("untried-a") ?? 0).toBeGreaterThan(50);
-    expect(picks.get("untried-b") ?? 0).toBeGreaterThan(50);
+    expect(picks.get("untried-a") ?? 0).toBeGreaterThan(30);
+    expect(picks.get("untried-b") ?? 0).toBeGreaterThan(30);
   });
 
   it("login gives a reserved node an exploration boost (reserved is not suppressed)", () => {
@@ -302,16 +305,12 @@ describe("selectEgressForLogin", () => {
       makeNode({ hash: "reserved-node", codexReserved: true })
     ];
     const picks = new Map<string, number>();
+    const rng = makeRng(54321);
     for (let i = 0; i < 600; i++) {
-      const r = selectEgressForLogin({
-        nodes,
-        egressLoadByNodeHash: new Map(),
-        preferredHash: null,
-        rand: seededRand(i + 1)
-      });
+      const r = selectEgressForLogin({ nodes, egressLoadByNodeHash: new Map(), preferredHash: null, rand: rng });
       picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
     }
-    // 保留节点（未试 + 保留加成）拿到可观探索量，不被已验证普通节点压制
+    // 保留节点和已验证普通节点同在 exploit 池，按成功率竞争 —— 保留节点不被压制到边缘
     expect(picks.get("reserved-node") ?? 0).toBeGreaterThan(150);
   });
 

@@ -214,34 +214,64 @@ function pickForRegister(relaxed: EgressCandidate[], rand: () => number): Egress
 }
 
 /**
- * 登录选节点 —— 探索-利用加权策略（基于"登录"专属战绩）。深思后的目标：尽量探测节点、
- * 不只用验证过的、避免登录过于集中,同时仍要尽快成功。
+ * 登录选节点 —— 分层 ε-greedy（与注册同构，基于"登录"专属战绩）。深思后的目标：
+ * 既要尽量探测节点、避免登录过于集中（用户明确要求），又要把稀缺的串行吞吐
+ * （Mac agent 一次只跑一个 chromium，~24 次/小时）多数花在"大概率能成"的节点上，
+ * 否则 95% 尝试都撞在过不了 Sentinel 的机房节点上、恢复极慢。
  *
- * 每个候选权重 = 平滑登录成功率 × 探索/反集中因子,加权随机抽(非取最优):
- *   - rate = (loginSuccess+1)/(loginSuccess+loginFailure+2)  拉普拉斯平滑:
- *       没试过=0.5(可被探索);登录老失败→趋 0(淘汰登录不行的);能过→其真实率。
- *   - explore = 1/sqrt(loginSuccess+loginFailure+1)  尝试越多权重越低:
- *       给没试过的节点机会(探索),且强制把登录摊开、不集中在单个节点(反风控/反集中);
- *       某节点被风控后成功率掉 → 权重也掉,自纠正。
- * 加权随机 → 概率性铺开。候选取 relaxed(openai 通过 ∪ 未测 ∪ 保留),不预先排除,
- * 让权重自然淘汰登录不行的、保留对未知节点的探测。
+ * 实测关键经验：住宅 IP（家宽）能过 OAuth consent 的 Sentinel 质询，机房 IP 多被挡。
+ * 用户精选的保留节点正是这批住宅节点。因此：
+ *   - exploit 池（多数，1-LOGIN_EXPLORE_RATE）= 保留(精选) ∪ 已证明能登录(loginSuccess>0)。
+ *     冷启动（战绩重置后）尚无 proven，但有 reserved → 多数登录直接走精选住宅节点，
+ *     快速拿到首批成功；成功后该节点进 proven，持续被复用。
+ *     池内权重 = 平滑成功率² × 保留加成 → 偏向真能过的，失败多的自动掉权（自纠正）。
+ *   - explore 池（LOGIN_EXPLORE_RATE 比例 / exploit 空时全部）= 其余（非精选且未证明能登录）。
+ *     持续发现更多能登录的节点：偏向"还没试过 + openai 通过"，失败多的掉权。
+ * 加权随机 → 概率性铺开，不死磕单个节点（反集中/反风控）。
  */
-const LOGIN_RESERVED_BONUS = 1.5; // 保留节点(用户精选)登录时略加权,但不独占
+const LOGIN_RESERVED_BONUS = 1.5; // 保留节点(用户精选)登录时加权,但同池内仍按成功率竞争
+const LOGIN_EXPLORE_RATE = 0.25; // 有 exploit 候选时仍留这个比例去探索新节点
 
-function loginScore(c: EgressCandidate): number {
+// exploit 池权重：偏向高成功率（平方锐化），保留节点适度加成。
+function loginExploitWeight(c: EgressCandidate): number {
+  const attempts = c.loginSuccess + c.loginFailure;
+  const rate = (c.loginSuccess + 1) / (attempts + 2); // laplace 平滑
+  return rate * rate * (c.reserved ? LOGIN_RESERVED_BONUS : 1);
+}
+
+// explore 池权重：偏向"还没试过 + openai 通过"，登录失败多的节点掉权。
+function loginExploreWeight(c: EgressCandidate): number {
   const attempts = c.loginSuccess + c.loginFailure;
   const rate = (c.loginSuccess + 1) / (attempts + 2);
-  const explore = 1 / Math.sqrt(attempts + 1);
-  return rate * explore * (c.reserved ? LOGIN_RESERVED_BONUS : 1);
+  const fresh = 1 / Math.sqrt(attempts + 1);
+  return rate * fresh * (c.openaiOk ? 1 : 0.4);
 }
 
 function pickForLogin(relaxed: EgressCandidate[], rand: () => number): EgressSelection | undefined {
   if (relaxed.length === 0) return undefined;
-  const picked = pickWeightedBy(relaxed, loginScore, rand);
-  if (!picked) return undefined;
-  const reason: EgressSelection["reason"] =
-    picked.loginSuccess > 0 ? "codex_proven" : picked.openaiOk ? "weighted_quality" : "fallback_relaxed";
-  return { hash: picked.hash, port: picked.port, reason, reserved: picked.reserved };
+  // 精选 ∪ 已证明能登录 = exploit；其余 = explore。两池互斥（reserved 不进 explore）。
+  const exploitPool = relaxed.filter((c) => c.reserved || c.loginSuccess > 0);
+  const explorePool = relaxed.filter((c) => !c.reserved && c.loginSuccess === 0);
+
+  const fromExploit = (): EgressSelection | undefined => {
+    const p = pickWeightedBy(exploitPool, loginExploitWeight, rand);
+    if (!p) return undefined;
+    const reason: EgressSelection["reason"] = p.loginSuccess > 0 ? "codex_proven" : "weighted_quality";
+    return { hash: p.hash, port: p.port, reason, reserved: p.reserved };
+  };
+  const fromExplore = (): EgressSelection | undefined => {
+    const p = pickWeightedBy(explorePool, loginExploreWeight, rand);
+    if (!p) return undefined;
+    const reason: EgressSelection["reason"] = p.openaiOk ? "weighted_quality" : "fallback_relaxed";
+    return { hash: p.hash, port: p.port, reason, reserved: p.reserved };
+  };
+
+  // 有 exploit 候选 且（没东西可探索 或 这次没抽中探索）→ exploit；否则 explore。
+  if (exploitPool.length > 0 && (explorePool.length === 0 || rand() >= LOGIN_EXPLORE_RATE)) {
+    const hit = fromExploit();
+    if (hit) return hit;
+  }
+  return fromExplore() ?? fromExploit();
 }
 
 /**
