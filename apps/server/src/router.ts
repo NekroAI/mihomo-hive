@@ -1837,6 +1837,7 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     quota5hPercent: a.quota5hPercent,
     quota7dPercent: a.quota7dPercent,
     errorsInWindow: a.errorsInWindow,
+    brokenSinceTick: a.brokenSinceTick,
     recoveryAttempts: a.recoveryAttempts,
     nextRecoveryAfter: a.nextRecoveryAfter,
     lastRecoveryError: a.lastRecoveryError,

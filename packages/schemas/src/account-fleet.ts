@@ -204,6 +204,8 @@ export const accountRecordViewSchema = z.object({
   quota5hPercent: z.number().int().min(0).max(100).nullable(),
   quota7dPercent: z.number().int().min(0).max(100).nullable(),
   errorsInWindow: z.number().int().nonnegative().default(0),
+  /** 首次进入当前掉线档的时间戳（掉线时打戳、恢复时清空）。用于把存活时间冻结在掉线那一刻。 */
+  brokenSinceTick: z.string().nullable(),
 
   recoveryAttempts: z.number().int().nonnegative().default(0),
   nextRecoveryAfter: z.string().nullable(),

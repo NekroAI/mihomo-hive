@@ -477,7 +477,10 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                 </td>
                 <td className="num">
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 2, justifyContent: "flex-end" }}>
-                    <span className="mono-strong">{formatDaysAlive(acc.firstSeenAt)}</span>
+                    <span className="mono-strong">{formatDaysAlive(acc)}</span>
+                    {aliveFrozenAtMs(acc) !== null ? (
+                      <span className="muted small" title="存活时间已在掉线时冻结">·停</span>
+                    ) : null}
                     {acc.reloginCount > 0 ? (
                       <span className="muted small">· 重登 {acc.reloginCount}</span>
                     ) : null}
@@ -1320,14 +1323,25 @@ function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFai
  * 配 InfoTip 给出首见时间 / 重登次数 / 最近修复时间的完整解读。
  * 存活越久、重登越少 → 账号越稳，是判断质量的核心直观指标。
  */
-function formatDaysAlive(firstSeenAt: string | null): string {
-  if (!firstSeenAt) return "—";
-  const ms = Date.now() - new Date(firstSeenAt).getTime();
+function formatDaysAlive(acc: AccountRecordView): string {
+  if (!acc.firstSeenAt) return "—";
+  const start = new Date(acc.firstSeenAt).getTime();
+  // 掉线账号：存活时间冻结在首次掉线时刻(brokenSinceTick)，不再随时间虚涨；
+  // healthy/限流/配额冷却等仍按"到现在"算（它们还活着/会自然恢复）。
+  const end = aliveFrozenAtMs(acc) ?? Date.now();
+  const ms = end - start;
   if (!Number.isFinite(ms) || ms < 0) return "—";
   const days = Math.floor(ms / 86_400_000);
   if (days >= 1) return `${days}天`;
   const hours = Math.floor(ms / 3_600_000);
   return hours >= 1 ? `${hours}时` : "今天";
+}
+
+/** 掉线账号的存活冻结时刻（ms）；非掉线 / 无掉线戳 → null（按"到现在"算）。 */
+function aliveFrozenAtMs(acc: AccountRecordView): number | null {
+  if (acc.health !== "broken" || !acc.brokenSinceTick) return null;
+  const ms = new Date(acc.brokenSinceTick).getTime();
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function formatQualityTooltip(acc: AccountRecordView): string {
@@ -1338,6 +1352,10 @@ function formatQualityTooltip(acc: AccountRecordView): string {
       : "首见时间: 未知"
   );
   lines.push(`累计重新登录: ${acc.reloginCount} 次`);
+  const frozen = aliveFrozenAtMs(acc);
+  if (frozen !== null) {
+    lines.push(`存活时间已冻结（掉线于 ${new Date(frozen).toLocaleString()}），不再随时间累加`);
+  }
   if (acc.lastRecoveredAt) {
     lines.push(`最近修复成功: ${new Date(acc.lastRecoveredAt).toLocaleString()}`);
   }
