@@ -57,8 +57,7 @@ export interface EgressSelection {
     | "fallback_relaxed"
     // P5-AS codex 实战反馈分层
     | "codex_proven" // 证明能过 Sentinel 的节点（成功>0）
-    | "codex_least_bad" // 全都失败过，挑失败最少的再给一次机会
-    | "codex_reserved"; // 命中保留节点池
+    | "codex_least_bad"; // 全都失败过，挑失败最少的再给一次机会
   /** 是否来自保留节点（便于 worker 日志/UI 区分）。 */
   reserved?: boolean;
 }
@@ -137,8 +136,9 @@ export function buildEgressCandidates(input: EgressSelectorInput): {
     };
     // 严格池：必须 openai 测过且通过
     if (openaiOk) strict.push(candidate);
-    // 宽松池：openai 通过 ∪ 未测过；排除"测过且失败"
-    if (openaiOk || !tested) relaxed.push(candidate);
+    // 宽松池：openai 通过 ∪ 未测过；排除"测过且失败"。
+    // 保留节点例外：作为"确保永远有节点可注册/登录"的兜底，即使 openai 测过失败也保留在池内。
+    if (openaiOk || !tested || candidate.reserved) relaxed.push(candidate);
   }
   return { strict, relaxed };
 }
@@ -161,83 +161,98 @@ function inspectOpenAITestResult(node: ProxyNode): { openaiOk: boolean; tested: 
 }
 
 /**
- * P5-AS 分层选择 —— codex 实战反馈优先于盲目随机：
- *   1. proven（成功>0）：证明能过 Sentinel。注册偏向分散（加权），登录确定性选最佳。
- *   2. untried（成功=0 且 失败=0）：没跑过 → 加权随机探索（发现哪些节点能过）。
- *   3. failing（成功=0 且 失败>0）：都失败过 → 挑失败最少的再给一次机会（不直接放弃）。
- * relaxedPool 决定 untried 路径的 reason 标签（weighted_quality / fallback_relaxed），
- * 以保持与历史语义一致。
+ * 注册探索率 —— 当已有 proven（证明能注册）节点时，仍有这个比例的注册去试
+ * "还没证明能注册"的节点，用于持续发现更多可注册节点。没有 proven 时则 100% 探索。
+ * 探索失败通常在节点连通阶段就 fail-fast（开销低、不耗短信费），故可放心探索。
  */
-function pickFromPool(
-  pool: EgressCandidate[],
-  rand: () => number,
-  mode: "login" | "register",
-  isRelaxed: boolean
-): EgressSelection | undefined {
-  if (pool.length === 0) return undefined;
-  const proven = pool.filter((c) => c.codexSuccess > 0);
+const REGISTER_EXPLORE_RATE = 0.25;
+
+/** 按 1/(load+1) 加权随机 —— 账号越少的节点越优先，实现新账号出生 IP 分散。 */
+function pickDispersed(pool: EgressCandidate[], rand: () => number): EgressCandidate | undefined {
+  return pickWeightedBy(pool, (c) => 1 / (c.load + 1), rand);
+}
+
+/**
+ * 注册选节点（发现机制 + 分散，取代旧的"保留池优先、命中即返回"）。
+ *
+ * 关键改动：保留 / 非保留节点一视同仁，全部合格候选（relaxed = openai 通过 ∪ 未测，
+ * 外加保留节点兜底）进入同一个池。保留节点不再独占注册名额，只作为"池子永不为空"
+ * 的可用性保证。注册用 ε-greedy：
+ *   - exploit（多数）：在 proven（codexSuccess>0）里按 1/(load+1) 分散 —— 新账号出生
+ *     IP 均匀铺到所有"已证明能注册"的节点，不再全挤一个赢家。
+ *   - explore（REGISTER_EXPLORE_RATE 比例 / 没有 proven 时全部）：试"还没证明能注册"
+ *     的节点，先已验证连通(openaiOk)、再完全没验证(untested)，持续发现更多可注册节点。
+ *   - 都没有可试 → leastBad 挑失败最少的再给一次机会。
+ */
+function pickForRegister(relaxed: EgressCandidate[], rand: () => number): EgressSelection | undefined {
+  if (relaxed.length === 0) return undefined;
+  const proven = relaxed.filter((c) => c.codexSuccess > 0);
+  const untriedOk = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && c.openaiOk);
+  const untriedRaw = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && !c.openaiOk);
+  const hasUntried = untriedOk.length + untriedRaw.length > 0;
+
+  const exploit = (): EgressSelection | undefined => {
+    const p = pickDispersed(proven, rand);
+    return p ? { hash: p.hash, port: p.port, reason: "codex_proven", reserved: p.reserved } : undefined;
+  };
+  const explore = (): EgressSelection | undefined => {
+    const p = pickWeighted(untriedOk, rand);
+    if (p) return { hash: p.hash, port: p.port, reason: "weighted_quality", reserved: p.reserved };
+    const q = pickWeighted(untriedRaw, rand);
+    if (q) return { hash: q.hash, port: q.port, reason: "fallback_relaxed", reserved: q.reserved };
+    return undefined;
+  };
+
+  // 有 proven 且（没东西可探索 或 这次没抽中探索）→ exploit；否则 explore。
+  if (proven.length > 0 && (!hasUntried || rand() >= REGISTER_EXPLORE_RATE)) {
+    const hit = exploit();
+    if (hit) return hit;
+  }
+  return (
+    explore() ??
+    exploit() ?? // 兜底：上面没走 exploit 分支但 explore 落空时，仍用 proven
+    (() => {
+      const least = leastBad(relaxed);
+      return least
+        ? ({ hash: least.hash, port: least.port, reason: "codex_least_bad", reserved: least.reserved } as const)
+        : undefined;
+    })()
+  );
+}
+
+/**
+ * 登录选节点（恢复）—— 要的是"最可能成功"，不是分散，所以确定性选最佳 proven。
+ * 保留节点同样不再独占：proven 非保留节点优先于未试的保留节点（保留只作兜底）。
+ *   1. 最佳 proven（compareProven 确定性排序）；
+ *   2. 没有 proven → 在未试节点里加权探索（先 openaiOk 再 untested）；
+ *   3. 全失败 → leastBad。
+ */
+function pickForLogin(relaxed: EgressCandidate[], rand: () => number): EgressSelection | undefined {
+  if (relaxed.length === 0) return undefined;
+  const proven = relaxed.filter((c) => c.codexSuccess > 0);
   if (proven.length > 0) {
-    if (mode === "login") {
-      // 登录：确定性选最佳 proven —— 恢复要的是"最可能成功"，不是分散
-      const best = [...proven].sort(compareProven)[0];
-      if (best) return { hash: best.hash, port: best.port, reason: "codex_proven" };
-    }
-    // 注册：在 proven 里按 (净胜场+1)/(load+1) 加权，兼顾"能过"与 IP 分散
-    const picked = pickWeightedBy(proven, (c) => (Math.max(0, codexNet(c)) + 1) / (c.load + 1), rand);
-    if (picked) return { hash: picked.hash, port: picked.port, reason: "codex_proven" };
+    const best = [...proven].sort(compareProven)[0]!;
+    return { hash: best.hash, port: best.port, reason: "codex_proven", reserved: best.reserved };
   }
-  const untried = pool.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0);
-  const pickedUntried = pickWeighted(untried, rand);
-  if (pickedUntried) {
-    return {
-      hash: pickedUntried.hash,
-      port: pickedUntried.port,
-      reason: isRelaxed ? "fallback_relaxed" : "weighted_quality"
-    };
-  }
-  const least = leastBad(pool);
-  if (least) return { hash: least.hash, port: least.port, reason: "codex_least_bad" };
+  const untriedOk = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && c.openaiOk);
+  const untriedRaw = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && !c.openaiOk);
+  const ok = pickWeighted(untriedOk, rand);
+  if (ok) return { hash: ok.hash, port: ok.port, reason: "weighted_quality", reserved: ok.reserved };
+  const raw = pickWeighted(untriedRaw, rand);
+  if (raw) return { hash: raw.hash, port: raw.port, reason: "fallback_relaxed", reserved: raw.reserved };
+  const least = leastBad(relaxed);
+  if (least) return { hash: least.hash, port: least.port, reason: "codex_least_bad", reserved: least.reserved };
   return undefined;
 }
 
 /**
- * 保留节点优先的池遍历（P5-AS）。顺序：
- *   保留-strict → 保留-relaxed → 普通-strict → 普通-relaxed
- * 保留节点是用户手动标记的高质量备用出口，注册/登录都优先走它们；命中保留池时
- * reason 统一标 codex_reserved + reserved=true，便于日志/UI 区分。普通池保持原
- * 分层 reason（codex_proven / weighted_quality / fallback_relaxed / codex_least_bad）。
- */
-function selectFromPools(
-  strict: EgressCandidate[],
-  relaxed: EgressCandidate[],
-  rand: () => number,
-  mode: "login" | "register"
-): EgressSelection | undefined {
-  const tiers: Array<{ pool: EgressCandidate[]; isRelaxed: boolean; reserved: boolean }> = [
-    { pool: strict.filter((c) => c.reserved), isRelaxed: false, reserved: true },
-    { pool: relaxed.filter((c) => c.reserved), isRelaxed: true, reserved: true },
-    { pool: strict.filter((c) => !c.reserved), isRelaxed: false, reserved: false },
-    { pool: relaxed.filter((c) => !c.reserved), isRelaxed: true, reserved: false }
-  ];
-  for (const tier of tiers) {
-    const pick = pickFromPool(tier.pool, rand, mode, tier.isRelaxed);
-    if (pick) {
-      return tier.reserved
-        ? { hash: pick.hash, port: pick.port, reason: "codex_reserved", reserved: true }
-        : { ...pick, reserved: false };
-    }
-  }
-  return undefined;
-}
-
-/**
- * 注册场景 —— 统一优先走保留节点（出生 IP 干净）；无保留节点才回退普通节点，
- * 普通池内按 codex 分层（proven 优先）。都空 → 抛 NoEgressAvailableError。
+ * 注册场景 —— 在全体合格节点（保留 + 非保留一视同仁）里 exploit 分散 + explore 发现。
+ * 都空 → 抛 NoEgressAvailableError。
  */
 export function selectEgressForRegister(input: EgressSelectorInput): EgressSelection {
-  const { strict, relaxed } = buildEgressCandidates(input);
+  const { relaxed } = buildEgressCandidates(input);
   const rand = input.rand ?? Math.random;
-  const pick = selectFromPools(strict, relaxed, rand, "register");
+  const pick = pickForRegister(relaxed, rand);
   if (pick) return pick;
   throw new NoEgressAvailableError(
     "no eligible egress node: need schedulable + active + assigned port (preferably with passing openai test)"
@@ -245,10 +260,9 @@ export function selectEgressForRegister(input: EgressSelectorInput): EgressSelec
 }
 
 /**
- * 登录场景（恢复）—— 顺序严格对应用户要求：
+ * 登录场景（恢复）—— 顺序：
  *   1. 账号"上次成功的节点"（preferredHash 软粘性），仍 strict 且最近非失败 → 直接复用；
- *   2. 否则启用保留节点池（备用出口），避免在普通节点里瞎轮换触发账号风控；
- *   3. 无保留节点才回退普通节点（proven 优先 > 探索 > 失败最少）。
+ *   2. 否则在全体合格节点里确定性选最佳 proven（保留节点不独占，只兜底）。
  */
 export function selectEgressForLogin(
   input: EgressSelectorInput & { preferredHash: string | null }
@@ -261,7 +275,7 @@ export function selectEgressForLogin(
       return { hash: sticky.hash, port: sticky.port, reason: "preferred", reserved: sticky.reserved };
     }
   }
-  const pick = selectFromPools(strict, relaxed, rand, "login");
+  const pick = pickForLogin(relaxed, rand);
   if (pick) return pick;
   throw new NoEgressAvailableError(
     "no eligible egress node for login: need schedulable + active + assigned port"

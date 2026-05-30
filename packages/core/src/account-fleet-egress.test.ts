@@ -272,7 +272,7 @@ describe("selectEgressForLogin", () => {
     expect(r.reason).toBe("codex_proven");
   });
 
-  it("login uses reserved node as backup over a proven non-reserved one", () => {
+  it("login prefers a proven node over an untried reserved one (reserved is backup, not forced)", () => {
     const nodes = [
       makeNode({ hash: "proven-normal", codexLoginSuccess: 9 }),
       makeNode({ hash: "reserved-node", codexReserved: true })
@@ -283,8 +283,23 @@ describe("selectEgressForLogin", () => {
       preferredHash: null,
       rand: () => 0.5
     });
+    expect(r.hash).toBe("proven-normal");
+    expect(r.reason).toBe("codex_proven");
+  });
+
+  it("login uses reserved node as guaranteed backup when nothing else is eligible", () => {
+    // 唯一合格的是保留节点（其它不可调度）→ 必须回退到它，确保始终有节点可登录
+    const nodes = [
+      makeNode({ hash: "dead", schedulable: false }),
+      makeNode({ hash: "reserved-node", codexReserved: true })
+    ];
+    const r = selectEgressForLogin({
+      nodes,
+      egressLoadByNodeHash: new Map(),
+      preferredHash: null,
+      rand: () => 0.5
+    });
     expect(r.hash).toBe("reserved-node");
-    expect(r.reason).toBe("codex_reserved");
     expect(r.reserved).toBe(true);
   });
 
@@ -304,23 +319,79 @@ describe("selectEgressForLogin", () => {
   });
 });
 
-describe("selectEgressForRegister reserved-first (P5-AS)", () => {
-  it("register prefers reserved nodes when any exist", () => {
+describe("selectEgressForRegister discovery + dispersion (P5-AS v2)", () => {
+  const seededRand = (seed: number) => () => ((seed * 9301 + 49297) % 233280) / 233280;
+
+  it("does NOT force reserved nodes — spreads registrations across reserved + normal", () => {
     const nodes = [
       makeNode({ hash: "normal-1" }),
       makeNode({ hash: "reserved-1", codexReserved: true }),
       makeNode({ hash: "normal-2" })
     ];
-    const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: () => 0.5 });
-    expect(r.hash).toBe("reserved-1");
-    expect(r.reason).toBe("codex_reserved");
+    const picks = new Map<string, number>();
+    for (let i = 0; i < 600; i++) {
+      const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: seededRand(i + 1) });
+      picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
+    }
+    // 三个等权未试节点都应拿到可观注册量 —— 保留节点不再独占
+    expect(picks.get("normal-1") ?? 0).toBeGreaterThan(100);
+    expect(picks.get("normal-2") ?? 0).toBeGreaterThan(100);
+    expect(picks.get("reserved-1") ?? 0).toBeGreaterThan(100);
   });
 
-  it("register falls back to normal pool when no reserved nodes", () => {
+  it("falls back to normal pool when no reserved nodes", () => {
     const nodes = [makeNode({ hash: "normal-only" })];
     const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: () => 0.5 });
     expect(r.hash).toBe("normal-only");
     expect(r.reason).toBe("weighted_quality");
+  });
+
+  it("disperses across proven nodes by load instead of winner-take-all", () => {
+    // winner 已注册 80 个(load 80)，另一 proven 节点 load 2 → 应大幅偏向低负载者
+    const nodes = [
+      makeNode({ hash: "winner", codexLoginSuccess: 80 }),
+      makeNode({ hash: "fresh-proven", codexLoginSuccess: 3 })
+    ];
+    const loads = new Map([
+      ["winner", 80],
+      ["fresh-proven", 2]
+    ]);
+    const picks = new Map<string, number>();
+    for (let i = 0; i < 600; i++) {
+      const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: loads, rand: seededRand(i + 1) });
+      picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
+    }
+    // 低负载 proven 节点拿到绝大多数 —— 分散生效，不再赢家通吃
+    expect(picks.get("fresh-proven") ?? 0).toBeGreaterThan(picks.get("winner") ?? 0);
+  });
+
+  it("explores untried nodes even when a proven node exists (discovery mechanism)", () => {
+    const nodes = [
+      makeNode({ hash: "proven", codexLoginSuccess: 10 }),
+      makeNode({ hash: "undiscovered" }) // 未试 —— 应被探索到
+    ];
+    const picks = new Map<string, number>();
+    for (let i = 0; i < 600; i++) {
+      const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: seededRand(i + 1) });
+      picks.set(r.hash, (picks.get(r.hash) ?? 0) + 1);
+    }
+    // ~25% 探索率 → undiscovered 拿到可观但非多数的注册量
+    expect(picks.get("undiscovered") ?? 0).toBeGreaterThan(50);
+    expect(picks.get("proven") ?? 0).toBeGreaterThan(picks.get("undiscovered") ?? 0);
+  });
+
+  it("uses a reserved node as guaranteed backup even if its openai test failed", () => {
+    const nodes = [
+      makeNode({ hash: "dead", schedulable: false }),
+      makeNode({
+        hash: "reserved-only",
+        codexReserved: true,
+        lastTestTargets: JSON.stringify([{ targetId: "openai", ok: false }])
+      })
+    ];
+    const r = selectEgressForRegister({ nodes, egressLoadByNodeHash: new Map(), rand: () => 0.5 });
+    expect(r.hash).toBe("reserved-only");
+    expect(r.reserved).toBe(true);
   });
 });
 
