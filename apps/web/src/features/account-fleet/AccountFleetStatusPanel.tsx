@@ -475,14 +475,16 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                     {acc.quota7dPercent !== null ? `${acc.quota7dPercent}%` : "—"}
                   </span>
                 </td>
-                <td className="num">
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 2, justifyContent: "flex-end" }}>
-                    <span className="mono-strong">{formatDaysAlive(acc)}</span>
-                    {aliveFrozenAtMs(acc) !== null ? (
-                      <span className="muted small" title="存活时间已在掉线时冻结">·停</span>
-                    ) : null}
+                <td className="num cell-alive">
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                    {/* 掉线账号存活已冻结 → 灰显（不再用"·停"文字占地方），具体掉线时间在 ℹ️ 里 */}
+                    <span className={aliveFrozenAtMs(acc) !== null ? "muted" : "mono-strong"}>
+                      {formatDaysAlive(acc)}
+                    </span>
                     {acc.reloginCount > 0 ? (
-                      <span className="muted small">· 重登 {acc.reloginCount}</span>
+                      <span className="muted small" title={`累计重新登录 ${acc.reloginCount} 次`}>
+                        ↻{acc.reloginCount}
+                      </span>
                     ) : null}
                     <InfoTip text={formatQualityTooltip(acc)} />
                   </span>
@@ -1337,11 +1339,11 @@ function formatDaysAlive(acc: AccountRecordView): string {
   const ms = end - start;
   if (!Number.isFinite(ms) || ms < 0) return "—";
   const days = Math.floor(ms / 86_400_000);
-  if (days >= 1) return `${days}天`;
+  if (days >= 1) return `${days}d`;
   const hours = Math.floor(ms / 3_600_000);
-  if (hours >= 1) return `${hours}小时`;
+  if (hours >= 1) return `${hours}h`;
   const mins = Math.floor(ms / 60_000);
-  return mins >= 1 ? `${mins}分钟` : "刚来";
+  return mins >= 1 ? `${mins}m` : "<1m";
 }
 
 /** 掉线账号的存活冻结时刻（ms）；非掉线 / 无掉线戳 → null（按"到现在"算）。 */

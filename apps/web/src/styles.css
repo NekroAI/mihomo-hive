@@ -1716,6 +1716,10 @@ input[type="number"] {
   white-space: nowrap;
 }
 
+.account-matrix-table .cell-alive {
+  white-space: nowrap;
+}
+
 .reconcile-feed {
   display: flex;
   flex-direction: column;
