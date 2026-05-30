@@ -73,8 +73,8 @@ export function renderMihomoConfig(
       listen: codexEgress.bindHost,
       port: codexEgress.port,
       udp: true,
-      // 仅此口带鉴权(user:pass 字符串形式,与节点口的 users:[] 同字段);其余口无鉴权但只绑回环
-      users: [`${codexEgress.user}:${codexEgress.pass}`],
+      // 仅此口带鉴权。Mihomo listener 的 users 是 {username,password} 映射(非 "u:p" 字符串)。
+      users: [{ username: codexEgress.user, password: codexEgress.pass }],
       proxy: CODEX_EGRESS_GROUP
     } as unknown as (typeof listeners)[number]);
     proxyGroups.push({

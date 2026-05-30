@@ -81,7 +81,8 @@ describe("renderMihomoConfig codex-egress (外置 agent)", () => {
     });
     expect(r.yaml).toContain("hive-codex");
     expect(r.yaml).toContain("19000");
-    expect(r.yaml).toContain("u1:p1");
+    expect(r.yaml).toContain("username: u1");
+    expect(r.yaml).toContain("password: p1");
     expect(r.yaml).toContain("proxy-groups");
     expect(r.yaml).toContain("codex-egress");
     expect(r.yaml).toContain("type: select");
