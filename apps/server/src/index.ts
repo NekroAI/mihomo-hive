@@ -175,6 +175,16 @@ async function autoBootMihomo(): Promise<void> {
     console.log("Mihomo auto-boot skipped (HIVE_DISABLE_MIHOMO_AUTOBOOT=true).");
     return;
   }
+  // 启动时按当前节点 + spec 重渲染 mihomo.yaml,确保运行配置反映最新状态 ——
+  // 尤其是外置 agent 的 codex-egress 唯一出口口(否则沿用旧配置,改了 spec 也不生效)。
+  try {
+    const rendered = renderMihomoConfig(repo.listNodes(), config, codexEgressRenderOpts(repo));
+    await writeGenerated(config.mihomoConfigPath, rendered.yaml);
+    await writeGenerated(`${config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
+    console.log(`Mihomo config rendered on boot (${rendered.egressMap.length} listeners).`);
+  } catch (error) {
+    console.warn("Mihomo boot render skipped:", error instanceof Error ? error.message : error);
+  }
   if (!existsSync(config.mihomoConfigPath)) {
     console.log(`Mihomo auto-boot skipped: no config at ${config.mihomoConfigPath}.`);
     return;
