@@ -1642,6 +1642,14 @@ input[type="number"] {
   color: var(--danger, #dc2626);
 }
 
+.text-success {
+  color: var(--success, #16a34a);
+}
+
+.text-info {
+  color: var(--info, #2563eb);
+}
+
 .node-matrix-table {
   width: 100%;
   border-collapse: collapse;
@@ -1704,7 +1712,7 @@ input[type="number"] {
 }
 
 .account-matrix-table .cell-change {
-  max-width: 240px;
+  max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

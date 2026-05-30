@@ -491,12 +491,15 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                   {(() => {
                     const head = acc.changeHistory?.[0];
                     if (!head) return <span className="muted">—</span>;
+                    const b = changeBrief(head);
                     return (
                       <span
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "help" }}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "help" }}
                         title={changeHistoryTooltip(acc)}
                       >
-                        <span className="mono-strong small">{formatChangeEntry(head)}</span>
+                        <span className={`small ${b.cls}`} style={{ fontWeight: 600 }}>
+                          {b.text}
+                        </span>
                         <span className="muted small">{shortAgo(head.at)}</span>
                       </span>
                     );
@@ -1435,6 +1438,40 @@ function formatChangeEntry(e: AccountChangeEntry): string {
   if (e.q5From !== e.q5To) parts.push(`5h ${pct(e.q5From)}→${pct(e.q5To)}`);
   if (e.q7From !== e.q7To) parts.push(`7d ${pct(e.q7From)}→${pct(e.q7To)}`);
   return `额度 ${parts.join(" · ") || "无变化"}`;
+}
+
+/**
+ * 变更列的紧凑标记：只显示"变成了什么"（结果状态）+ 颜色，完整 from→to 留在悬浮里。
+ *   - health：目标健康档（掉线红 / 健康绿 / 限流·配额黄 / 未知灰）
+ *   - intent：目标意图（退役灰 / 活跃绿 / 修复中蓝 / 待落地黄）
+ *   - quota：方向箭头（↑消耗 / ↓释放），消耗到高位才标黄，否则灰（额度变动只是信息）
+ */
+function changeBrief(e: AccountChangeEntry): { text: string; cls: string } {
+  if (e.kind === "health") {
+    const cls =
+      e.to === "broken"
+        ? "text-danger"
+        : e.to === "healthy"
+          ? "text-success"
+          : e.to === "unknown"
+            ? "muted"
+            : "text-warning";
+    return { text: HEALTH_LABEL[e.to], cls };
+  }
+  if (e.kind === "intent") {
+    const cls =
+      e.to === "retired"
+        ? "muted"
+        : e.to === "active"
+          ? "text-success"
+          : e.to === "recovering"
+            ? "text-info"
+            : "text-warning";
+    return { text: CHANGE_INTENT_LABEL[e.to], cls };
+  }
+  const up = (e.q5To ?? 0) + (e.q7To ?? 0) >= (e.q5From ?? 0) + (e.q7From ?? 0);
+  const high = (e.q5To ?? 0) >= 80 || (e.q7To ?? 0) >= 80;
+  return { text: `配额${up ? "↑" : "↓"}`, cls: up && high ? "text-warning" : "muted" };
 }
 
 /** 相对时间的极简中文（用于变更列）：刚刚 / N分钟前 / N小时前 / N天前。 */
