@@ -29,6 +29,7 @@ import {
   startAccountJobsWorker,
   type AccountJobsWorkerHandle
 } from "./account-fleet-worker.js";
+import { codexEgressRenderOpts } from "./codex-egress.js";
 import { startReconcileScheduler, type ReconcileSchedulerHandle } from "./orchestrator.js";
 import { appRouter } from "./router.js";
 
@@ -118,7 +119,7 @@ app.post("/api/mihomo/render", async (c) => {
   if (!(await isAuthenticated(c.req.raw))) {
     return c.json({ error: "Unauthorized" }, 401);
   }
-  const rendered = renderMihomoConfig(repo.listNodes(), config);
+  const rendered = renderMihomoConfig(repo.listNodes(), config, codexEgressRenderOpts(repo));
   await writeGenerated(config.mihomoConfigPath, rendered.yaml);
   await writeGenerated(`${config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
   return c.json({ listeners: rendered.egressMap.length });
@@ -140,7 +141,7 @@ const accountFleetScheduler: AccountFleetSchedulerHandle | undefined =
 const accountJobsWorker: AccountJobsWorkerHandle | undefined =
   process.env.HIVE_DISABLE_ACCOUNT_FLEET === "true" || process.env.HIVE_DISABLE_RECONCILE === "true"
     ? undefined
-    : startAccountJobsWorker({ repo });
+    : startAccountJobsWorker({ repo, config });
 
 app.use("/trpc/*", async (c) =>
   fetchRequestHandler({

@@ -12,7 +12,30 @@ export interface RenderedMihomo {
   }>;
 }
 
-export function renderMihomoConfig(nodes: ProxyNode[], config: RuntimeConfig): RenderedMihomo {
+/**
+ * 外置 codex-tool agent 的出口配置。给定时,额外渲染一个**唯一对外**的鉴权 listener
+ * (hive-codex),其上游绑到一个 `codex-egress` select 组(组里是全部节点 + DIRECT)。
+ * 运行时 Hive 用 external-controller PUT /proxies/codex-egress 切换该组指向的节点,
+ * 从而"单口 + 动态上游":对外只暴露一个鉴权端口,真实出口由 Hive 的选节点逻辑分发。
+ */
+export interface CodexEgressOptions {
+  /** 对外监听端口(避开节点端口段)。 */
+  port: number;
+  /** 该口的绑定地址(只有这一个口对 LAN 暴露;其余节点口仍绑 listenHost)。 */
+  bindHost: string;
+  /** 运行时随机生成的鉴权用户/密码(不落库),拼进 users 与下发给 agent 的代理 URL。 */
+  user: string;
+  pass: string;
+}
+
+const CODEX_EGRESS_GROUP = "codex-egress";
+const CODEX_LISTENER_NAME = "hive-codex";
+
+export function renderMihomoConfig(
+  nodes: ProxyNode[],
+  config: RuntimeConfig,
+  codexEgress?: CodexEgressOptions
+): RenderedMihomo {
   // 渲染所有"有端口、非 retired/deleted"的节点为 listener。
   // 这样 candidate 节点也能被测试 / 用户验证可用性，而是否参与 Sub2API 账号调度
   // 是另外一回事（schedulable + active 才会被推送 / 接收账号）。
@@ -26,22 +49,43 @@ export function renderMihomoConfig(nodes: ProxyNode[], config: RuntimeConfig): R
     })
     .sort((a, b) => Number(a.assignedPort) - Number(b.assignedPort));
 
-  const proxies = activeNodes.map((node, index) => ({
+  const proxies = activeNodes.map((node) => ({
     ...node.raw,
-    name: proxyNameForNode(node, index)
+    name: proxyNameForNode(node)
   }));
 
-  const listeners = activeNodes.map((node, index) => ({
+  const listeners = activeNodes.map((node) => ({
     name: `hive-${node.assignedPort}`,
     type: "mixed",
     listen: config.listenHost,
     port: node.assignedPort,
     udp: true,
     users: [],
-    proxy: proxyNameForNode(node, index)
+    proxy: proxyNameForNode(node)
   }));
 
-  const document = {
+  // 外置 agent 出口:唯一对外鉴权口 + 可被 Hive 动态切上游的 select 组。
+  const proxyGroups: Array<Record<string, unknown>> = [];
+  if (codexEgress && codexEgress.port > 0) {
+    listeners.push({
+      name: CODEX_LISTENER_NAME,
+      type: "mixed",
+      listen: codexEgress.bindHost,
+      port: codexEgress.port,
+      udp: true,
+      // 仅此口带鉴权(user:pass 字符串形式,与节点口的 users:[] 同字段);其余口无鉴权但只绑回环
+      users: [`${codexEgress.user}:${codexEgress.pass}`],
+      proxy: CODEX_EGRESS_GROUP
+    } as unknown as (typeof listeners)[number]);
+    proxyGroups.push({
+      name: CODEX_EGRESS_GROUP,
+      type: "select",
+      // 组成员 = 全部节点 + DIRECT 兜底(空池时仍合法,且 Hive 可临时切 DIRECT)
+      proxies: [...proxies.map((p) => p.name as string), "DIRECT"]
+    });
+  }
+
+  const document: Record<string, unknown> = {
     "allow-lan": false,
     "bind-address": config.listenHost,
     mode: "rule",
@@ -53,19 +97,27 @@ export function renderMihomoConfig(nodes: ProxyNode[], config: RuntimeConfig): R
     proxies,
     rules: ["MATCH,DIRECT"]
   };
+  if (proxyGroups.length > 0) {
+    document["proxy-groups"] = proxyGroups;
+  }
 
   return {
     yaml: stringify(document, { lineWidth: 0 }),
-    egressMap: activeNodes.map((node, index) => ({
+    egressMap: activeNodes.map((node) => ({
       nodeHash: node.hash,
       nodeName: node.name,
-      proxyName: proxyNameForNode(node, index),
+      proxyName: proxyNameForNode(node),
       listenHost: config.listenHost,
       port: Number(node.assignedPort)
     }))
   };
 }
 
-function proxyNameForNode(node: ProxyNode, index: number): string {
-  return `hive-${String(index + 1).padStart(3, "0")}-${node.hash.slice(0, 8)}`;
+/**
+ * 节点对应的 mihomo proxy 名。**与位置无关**(用 assignedPort + hash 前 8 位),
+ * 这样 Hive worker 能在不重渲染的情况下,凭节点 hash/port 算出同样的名字去切 codex-egress 组;
+ * 也避免"加一个节点导致全体 proxy 名漂移"。
+ */
+export function proxyNameForNode(node: Pick<ProxyNode, "hash" | "assignedPort">): string {
+  return `hive-${node.assignedPort}-${node.hash.slice(0, 8)}`;
 }

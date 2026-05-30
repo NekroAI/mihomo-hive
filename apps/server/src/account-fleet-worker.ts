@@ -18,19 +18,24 @@
 import { randomUUID } from "node:crypto";
 import {
   buildEgressLoadMap,
+  createAgentSpawner,
   createCodexToolAdapter,
   createSub2ApiClient,
   loadAccountCrypto,
   NoEgressAvailableError,
+  proxyNameForNode,
   selectEgressForLogin,
   selectEgressForRegister,
   type AccountCrypto,
   type CodexToolAdapter,
   type CodexToolConfig,
+  type CodexToolSpawner,
   type EgressSelection,
   type Sub2ApiClient
 } from "@mihomo-hive/core";
+import { setProxyGroupSelection } from "@mihomo-hive/mihomo";
 import { HiveRepository } from "@mihomo-hive/db";
+import { defaultRuntimeConfig, type RuntimeConfig } from "@mihomo-hive/schemas";
 import type {
   AccountFleetSpec,
   AccountJob,
@@ -39,6 +44,7 @@ import type {
   Sub2ApiCreateAccountPayload
 } from "@mihomo-hive/schemas";
 import { budgetWindowKey } from "./account-fleet-orchestrator.js";
+import { codexEgressRuntime, isAgentHealthy } from "./codex-egress.js";
 import { appendJobLog, finalizeJobLog } from "./job-log-buffer.js";
 
 export interface AccountJobsWorkerHandle {
@@ -78,11 +84,14 @@ export interface AccountJobsWorkerOptions {
   idlePollMs?: number;
   /** 测试用：禁用自动循环，只通过 pump() 触发。 */
   manualOnly?: boolean;
+  /** 运行时配置（external-controller 地址/secret，用于外置 agent 动态切出口组）。 */
+  config?: RuntimeConfig;
 }
 
 export function startAccountJobsWorker(options: AccountJobsWorkerOptions): AccountJobsWorkerHandle {
   const { repo } = options;
   const crypto = options.crypto ?? safeLoadCrypto();
+  const runtimeConfig = options.config ?? defaultRuntimeConfig;
   const idlePollMs = options.idlePollMs ?? 5_000;
   let stopped = false;
   let pollTimer: NodeJS.Timeout | undefined;
@@ -157,9 +166,9 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
   async function executeJob(job: AccountJob, spec: AccountFleetSpec): Promise<void> {
     switch (job.kind) {
       case "codex_login":
-        return runCodexLogin(repo, crypto, spec, job);
+        return runCodexLogin(repo, crypto, spec, job, runtimeConfig);
       case "codex_register":
-        return runCodexRegister(repo, crypto, spec, job);
+        return runCodexRegister(repo, crypto, spec, job, runtimeConfig);
       case "import_to_sub2api":
         return runImportToSub2api(repo, crypto, spec, job);
       case "delete_sub2api":
@@ -250,32 +259,35 @@ async function runCodexLogin(
   repo: HiveRepository,
   crypto: AccountCrypto,
   spec: AccountFleetSpec,
-  job: AccountJob
+  job: AccountJob,
+  config: RuntimeConfig
 ): Promise<void> {
   const account = job.accountId ? repo.getAccountById(job.accountId) : undefined;
   if (!account) throw new Error("account not found for codex_login");
   const phone = crypto.decryptOptional(account.encPhone);
   const password = crypto.decryptOptional(account.encPassword);
   if (!phone || !password) throw new Error("codex_login requires encPhone + encPassword");
+  await assertAgentHealthy(crypto, spec); // 外置 agent 不可达 → 抛 NoEgressAvailableError（不烧账号）
   // 标 recovering
   repo.patchAccount(account.id, { intent: "recovering" });
 
   const egress = resolveEgressForLogin(repo, spec, account);
   appendJobLog(job.id, egress ? `选定出口节点 ${egressLabel(repo, egress)}` : "未走本地出口（egress=none）");
-  const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
+  const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress, { idempotencyKey: job.id });
   appendJobLog(job.id, "调用 codex-tool login（chromium/Sentinel，串行排队中）…");
   // 串行化：codex-tool 的 chromium/Sentinel 调用不能并发（见 withCodexToolLock）。
   // P5-AS：抛出型失败（超时/非零退出）也要给节点记一笔（多为网络/代理类）。
   let outcome: Awaited<ReturnType<typeof adapter.login>>;
   try {
-    outcome = await withCodexToolLock(() =>
-      adapter.login({
+    outcome = await withCodexToolLock(async () => {
+      await applyCodexEgress(config, spec, egress, job.id); // 动态出口：切 codex-egress 组到该节点
+      return adapter.login({
         phone,
         password,
         timeoutMs: spec.codexTool.timeouts.loginMs,
         onLog: (line) => appendJobLog(job.id, `codex: ${redactErrorMessage(line)}`)
-      })
-    );
+      });
+    });
   } catch (err) {
     recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
     throw err;
@@ -315,22 +327,25 @@ async function runCodexRegister(
   repo: HiveRepository,
   crypto: AccountCrypto,
   spec: AccountFleetSpec,
-  job: AccountJob
+  job: AccountJob,
+  config: RuntimeConfig
 ): Promise<void> {
+  await assertAgentHealthy(crypto, spec); // 外置 agent 不可达 → NoEgressAvailableError（不烧额度）
   // 注册：按质量+负载加权随机选 egress，让新账号 IP 出生地自然分散
   const egress = resolveEgressForRegister(repo, spec);
   appendJobLog(job.id, egress ? `选定出口节点 ${egressLabel(repo, egress)}` : "未走本地出口（egress=none）");
-  const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress);
+  const adapter = await buildCodexToolAdapter(repo, crypto, spec, egress, { idempotencyKey: job.id });
   appendJobLog(job.id, "调用 codex-tool all（注册 + OAuth，串行排队中）…");
   // 串行化：与 login 共用同一闸门，避免两个 chromium 同时跑
   let outcome: Awaited<ReturnType<typeof adapter.registerOne>>;
   try {
-    outcome = await withCodexToolLock(() =>
-      adapter.registerOne({
+    outcome = await withCodexToolLock(async () => {
+      await applyCodexEgress(config, spec, egress, job.id); // 动态出口：切 codex-egress 组到该节点
+      return adapter.registerOne({
         timeoutMs: spec.codexTool.timeouts.registerMs,
         onLog: (line) => appendJobLog(job.id, `codex: ${redactErrorMessage(line)}`)
-      })
-    );
+      });
+    });
   } catch (err) {
     recordNodeOutcome(repo, egress, { failedMessage: err instanceof Error ? err.message : String(err) });
     throw err;
@@ -1167,7 +1182,8 @@ export async function buildCodexToolAdapter(
    * 由调用方（register / login / import handler）按场景选好的 egress；null 表示
    * 调用方不需要走出口（如 codex sms countries 之类纯查询，但当前实现总传 egress）。
    */
-  egress: EgressSelection | null
+  egress: EgressSelection | null,
+  opts?: { idempotencyKey?: string }
 ): Promise<CodexToolAdapter> {
   // P5-AM: codexTool.skymail.adminPasswordRef / phoneSms.apiKeyRef 按设计是「明文存储」
   // （docs：私有部署 UI 不脱敏，加密留作未来增强）。早期代码无脑 crypto.decrypt() 会把
@@ -1176,13 +1192,31 @@ export async function buildCodexToolAdapter(
   // 兼容"明文存储"与"未来加密存储"两种形态。
   const skymailPassword = readMaybeEncrypted(crypto, spec.codexTool.skymail.adminPasswordRef);
   const smsApiKey = readMaybeEncrypted(crypto, spec.codexTool.phoneSms.apiKeyRef);
-  // P5-AP: 必须用 http:// 而非 socks5:// —— mihomo listener 是 mixed(http+socks)。
-  // 实测 socks5:// 走"本地 DNS"(容器本地把域名解析成 IP 再发给代理)，代理出口连不上
-  // 那个 IP → 全部超时(codex_login 0 成功)。http:// 代理走"远程 DNS"(代理自己解析)，
-  // curl + chromium 都正常通(实测 gstatic 204 / auth.openai.com 403 reached)。
-  const proxyDefault = egress
-    ? `http://127.0.0.1:${egress.port}`
-    : resolveLegacyEgressProxyUrl(repo, spec);
+
+  // 外置 agent 模式：spawner 改走 HTTP（桌面真实 OS 跑浏览器）；出口走 Mihomo 单口动态组。
+  const agentCfg = spec.codexTool.remoteAgent;
+  const agentMode = Boolean(agentCfg?.enabled && agentCfg.url);
+  const ce = codexEgressRuntime(spec);
+  let spawner: CodexToolSpawner | undefined;
+  let proxyDefault: string;
+  if (agentMode) {
+    const agentToken = readMaybeEncrypted(crypto, agentCfg.tokenRef);
+    spawner = createAgentSpawner({
+      url: agentCfg.url,
+      token: agentToken,
+      ...(opts?.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+      timeoutPaddingMs: agentCfg.requestTimeoutPaddingMs
+    });
+    // dynamic：固定指向 Mihomo 唯一鉴权口，真实出口由 applyCodexEgress 切组决定；
+    // 否则空代理 → agent 用其所在桌面自身网络（如透明 OpenClash）出去。
+    proxyDefault = ce.enabled ? `http://${ce.user}:${ce.pass}@${ce.host}:${ce.port}` : "";
+  } else {
+    // P5-AP: 必须用 http:// 而非 socks5:// —— mihomo listener 是 mixed(http+socks)。
+    // 实测 socks5:// 走"本地 DNS"(容器本地把域名解析成 IP 再发给代理)，代理出口连不上
+    // 那个 IP → 全部超时(codex_login 0 成功)。http:// 代理走"远程 DNS"(代理自己解析)，
+    // curl + chromium 都正常通(实测 gstatic 204 / auth.openai.com 403 reached)。
+    proxyDefault = egress ? `http://127.0.0.1:${egress.port}` : resolveLegacyEgressProxyUrl(repo, spec);
+  }
   // P5-AI: 透明回灌 region_hint —— 上次注册成功的 sms_region_result blob 原样塞给
   // codex-tool 让它优先尝试该地区，Hive 不解析 blob 字段。第一次跑时没有，为 null。
   const hintMemory = repo.getSmsRegionHint();
@@ -1214,8 +1248,41 @@ export async function buildCodexToolAdapter(
       smsCountriesMs: spec.codexTool.timeouts.smsCountriesMs,
       loginMs: spec.codexTool.timeouts.loginMs,
       registerMs: spec.codexTool.timeouts.registerMs
-    }
+    },
+    ...(spawner ? { spawner } : {})
   });
+}
+
+/**
+ * 动态出口：external agent + codexEgress.dynamic 开启时,把 Mihomo 的 codex-egress select 组
+ * 切到本次选定的节点。远程 codex-tool 经 Mihomo 唯一鉴权口出去时即走该节点。串行段内调用。
+ * 切组失败抛错（中止本次,别拿错出口跑）。非 dynamic / 无 egress → no-op。
+ */
+async function applyCodexEgress(
+  config: RuntimeConfig,
+  spec: AccountFleetSpec,
+  egress: EgressSelection | null,
+  jobId: string
+): Promise<void> {
+  const ce = codexEgressRuntime(spec);
+  if (!ce.enabled || !egress) return;
+  const proxyName = proxyNameForNode({ hash: egress.hash, assignedPort: egress.port });
+  await setProxyGroupSelection(config, "codex-egress", proxyName);
+  appendJobLog(jobId, `出口切到 ${proxyName}（codex-egress）`);
+}
+
+/**
+ * 外置 agent 调用前探活。不健康 → 抛 NoEgressAvailableError（被 executor 当"基础设施暂时
+ * 不可用",不计 recoveryAttempts、不烧账号/注册额度,下个 tick 再试）。未启用 agent → no-op。
+ */
+async function assertAgentHealthy(crypto: AccountCrypto, spec: AccountFleetSpec): Promise<void> {
+  const agentCfg = spec.codexTool.remoteAgent;
+  if (!agentCfg?.enabled || !agentCfg.url || !agentCfg.healthCheck) return;
+  const token = readMaybeEncrypted(crypto, agentCfg.tokenRef);
+  const ok = await isAgentHealthy(agentCfg.url, token);
+  if (!ok) {
+    throw new NoEgressAvailableError(`codex-tool agent 不可达：${agentCfg.url}（本轮跳过，等 agent 恢复）`);
+  }
 }
 
 /**

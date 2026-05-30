@@ -48,6 +48,7 @@ import {
 } from "@mihomo-hive/schemas";
 import type { HiveRepository } from "@mihomo-hive/db";
 import { buildCodexToolAdapter, safeLoadCrypto } from "./account-fleet-worker.js";
+import { codexEgressRenderOpts } from "./codex-egress.js";
 import { getJobLog } from "./job-log-buffer.js";
 import type {
   AccountFleetSpec,
@@ -105,7 +106,7 @@ export const appRouter = t.router({
       try {
         updateJobStep(job.id, 0, "running", "正在渲染 Mihomo 配置。");
         const nodes = ctx.repo.listNodes();
-        const rendered = renderMihomoConfig(nodes, ctx.config);
+        const rendered = renderMihomoConfig(nodes, ctx.config, codexEgressRenderOpts(ctx.repo));
         await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
         await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
         updateJobStep(job.id, 0, "success", `生成 ${rendered.egressMap.length} 个 listener。`);
@@ -505,7 +506,7 @@ export const appRouter = t.router({
           updateJobStep(job.id, 0, "success", `已分配 ${newlyAssigned} / ${input.hashes.length} 个端口。`);
 
           updateJobStep(job.id, 1, "running", "正在渲染并 reload Mihomo。");
-          const rendered = renderMihomoConfig(assigned, ctx.config);
+          const rendered = renderMihomoConfig(assigned, ctx.config, codexEgressRenderOpts(ctx.repo));
           await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
           await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
           const newStatus = status.running ? await reloadMihomo(ctx.config) : await startMihomo(ctx.config);
@@ -570,7 +571,7 @@ export const appRouter = t.router({
               targetHashes: needPort.map((n) => n.hash)
             });
             ctx.repo.saveNodes(assigned);
-            const rendered = renderMihomoConfig(assigned, ctx.config);
+            const rendered = renderMihomoConfig(assigned, ctx.config, codexEgressRenderOpts(ctx.repo));
             await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
             await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
             await (status.running ? reloadMihomo(ctx.config) : startMihomo(ctx.config));
@@ -652,7 +653,7 @@ export const appRouter = t.router({
 
   mihomo: t.router({
     render: protectedProcedure.mutation(async ({ ctx }) => {
-      const rendered = renderMihomoConfig(ctx.repo.listNodes(), ctx.config);
+      const rendered = renderMihomoConfig(ctx.repo.listNodes(), ctx.config, codexEgressRenderOpts(ctx.repo));
       await writeGenerated(ctx.config.mihomoConfigPath, rendered.yaml);
       await writeGenerated(`${ctx.config.generatedDir}/egress-map.json`, JSON.stringify(rendered.egressMap, null, 2));
       return { listeners: rendered.egressMap.length };

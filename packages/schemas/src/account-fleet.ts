@@ -405,6 +405,33 @@ export const accountFleetCodexToolPolicySchema = z.object({
       loginMs: z.number().int().min(1000).default(90_000),
       registerMs: z.number().int().min(1000).default(300_000)
     })
+    .default({}),
+  /**
+   * 外置 Agent（推荐）：让 codex-tool 跑在桌面真实 OS（macOS/Win）上,Hive 经 HTTP 调用,
+   * 而非在 Linux 容器里起浏览器（Linux headless 指纹会被 OpenAI 风控质询）。
+   * enabled=false → 沿用本地 subprocess（向后兼容）。url 即"连接 host",云端部署改这里。
+   */
+  remoteAgent: z
+    .object({
+      enabled: z.boolean().default(false),
+      url: z.string().default(""), // e.g. http://192.168.5.20:8765 ; 空=本地 subprocess
+      tokenRef: z.string().default(""), // 共享 bearer token(密钥 ref,同 adminPasswordRef)
+      healthCheck: z.boolean().default(true), // 调用前先 GET /health,不健康跳过本轮
+      requestTimeoutPaddingMs: z.number().int().min(0).default(30_000) // HTTP 超时 = codex 超时 + 余量
+    })
+    .default({}),
+  /**
+   * 动态出口：开启后 Mihomo 额外渲染一个唯一鉴权口(hive-codex)+ codex-egress select 组,
+   * Hive 选好节点后切该组 → 远程 codex-tool 经此口出去即走选定节点。对外只暴露一个鉴权端口,
+   * 真实出口由 Hive 现有选节点逻辑分发到池中多个节点。host 是 agent 回连 Mihomo 的地址(预留可配)。
+   */
+  codexEgress: z
+    .object({
+      dynamic: z.boolean().default(false),
+      host: z.string().default(""), // agent 看到的 Mihomo 地址(默认部署填 Hive LAN IP)
+      port: z.number().int().min(1).max(65535).default(19000),
+      bindHost: z.string().default("0.0.0.0") // 该唯一口的绑定(配具体 LAN IP + 防火墙更稳)
+    })
     .default({})
 });
 

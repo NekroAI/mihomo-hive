@@ -9,6 +9,40 @@ export interface MihomoStatus {
   pid?: number;
 }
 
+/** external-controller 地址规范成 http base（配置可能是 "127.0.0.1:9090" 或带 scheme）。 */
+function controllerBase(externalController: string): string {
+  const v = externalController.trim();
+  return v.startsWith("http://") || v.startsWith("https://") ? v : `http://${v}`;
+}
+
+/**
+ * 运行时切换某个 select 代理组的当前选择(Mihomo external-controller `PUT /proxies/{group}`)。
+ * 用于"单口 + 动态上游":Hive 选好出口节点后,把 codex-egress 组切到该节点,远程 codex-tool
+ * 经那个唯一鉴权口出去时即走该节点。瞬时生效、无需 reload。
+ */
+export async function setProxyGroupSelection(
+  config: RuntimeConfig,
+  group: string,
+  proxyName: string
+): Promise<void> {
+  const url = `${controllerBase(config.externalController)}/proxies/${encodeURIComponent(group)}`;
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      ...(config.externalControllerSecret
+        ? { authorization: `Bearer ${config.externalControllerSecret}` }
+        : {})
+    },
+    body: JSON.stringify({ name: proxyName })
+  });
+  // Mihomo 成功返回 204；其余视为失败
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`mihomo 切换出口组失败 ${group}→${proxyName}: HTTP ${res.status} ${text}`.trim());
+  }
+}
+
 export async function readMihomoStatus(config: RuntimeConfig): Promise<MihomoStatus> {
   try {
     const pid = Number((await readFile(config.mihomoPidPath, "utf8")).trim());

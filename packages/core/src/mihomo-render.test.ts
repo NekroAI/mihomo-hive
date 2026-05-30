@@ -44,3 +44,50 @@ describe("renderMihomoConfig", () => {
     expect(rendered.yaml).not.toContain("fallback");
   });
 });
+
+describe("renderMihomoConfig codex-egress (外置 agent)", () => {
+  const node = (i: number): ProxyNode => ({
+    hash: `${String(i).padStart(8, "0")}aa`,
+    sourceId: "s",
+    name: `n${i}`,
+    originalName: `n${i}`,
+    type: "ss",
+    region: "x",
+    raw: { name: `n${i}`, type: "ss", server: "h", port: 1, cipher: "aes-128-gcm", password: "p" },
+    status: "active",
+    lifecycleStatus: "schedulable",
+    schedulable: true,
+    protected: false,
+    assignedPort: 10001 + i,
+    codexLoginSuccess: 0,
+    codexLoginFailure: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }) as unknown as ProxyNode;
+
+  it("不传 codexEgress 时不渲染 codex 口与 proxy-groups（向后兼容）", () => {
+    const r = renderMihomoConfig([node(1)], defaultRuntimeConfig);
+    expect(r.yaml).not.toContain("hive-codex");
+    expect(r.yaml).not.toContain("codex-egress");
+    expect(r.yaml).not.toContain("proxy-groups");
+  });
+
+  it("传 codexEgress 时渲染唯一鉴权口 + codex-egress select 组(含全部节点+DIRECT)", () => {
+    const r = renderMihomoConfig([node(1), node(2)], defaultRuntimeConfig, {
+      port: 19000,
+      bindHost: "0.0.0.0",
+      user: "u1",
+      pass: "p1"
+    });
+    expect(r.yaml).toContain("hive-codex");
+    expect(r.yaml).toContain("19000");
+    expect(r.yaml).toContain("u1:p1");
+    expect(r.yaml).toContain("proxy-groups");
+    expect(r.yaml).toContain("codex-egress");
+    expect(r.yaml).toContain("type: select");
+    expect(r.yaml).toContain("DIRECT");
+    // 组成员应包含两个节点的 proxyName
+    expect(r.yaml).toMatch(/hive-10002-/);
+    expect(r.yaml).toMatch(/hive-10003-/);
+  });
+});
