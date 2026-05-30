@@ -1004,6 +1004,8 @@ input[type="number"] {
   padding: 8px;
   text-align: left;
   vertical-align: top;
+  /* 不换行：宽度不够时由 .preview-table-wrap 横向滚动 */
+  white-space: nowrap;
 }
 
 .warning-box,
@@ -1630,10 +1632,6 @@ input[type="number"] {
   margin-left: auto;
 }
 
-.account-matrix-table .cell-name {
-  max-width: 260px;
-}
-
 .text-warning {
   color: #d97706;
 }
@@ -1678,6 +1676,8 @@ input[type="number"] {
   border-bottom: 1px solid var(--border);
   padding: 8px 10px;
   vertical-align: middle;
+  /* 不换行：列宽不够时由外层 .node-matrix-scroll 横向滚动，不再把内容挤成多行 */
+  white-space: nowrap;
 }
 
 .node-matrix-table tbody td.num {
@@ -1697,28 +1697,7 @@ input[type="number"] {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
-.node-matrix-table .cell-name {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.node-matrix-table .cell-sub2api {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.account-matrix-table .cell-change {
-  max-width: 150px;
-  white-space: nowrap;
-}
-
-.account-matrix-table .cell-alive {
-  white-space: nowrap;
-}
+/* 不再硬截断名称 / Sub2API 列：内容完整显示，超宽由外层横向滚动（cell-* 仅保留 nowrap） */
 
 .reconcile-feed {
   display: flex;
@@ -1837,14 +1816,6 @@ input[type="number"] {
 .tick-action-item > .small {
   grid-column: 1 / -1;
   overflow-wrap: anywhere;
-}
-
-/* 节点矩阵 deprecated row 样式 — 兼容旧 className 但实际表格已经接管 */
-@media (max-width: 1080px) {
-  .node-matrix-table .cell-name,
-  .node-matrix-table .cell-sub2api {
-    max-width: 140px;
-  }
 }
 
 .strategy-switch-tool {
@@ -2613,6 +2584,8 @@ input[type="number"] {
   border-bottom: 1px solid var(--border);
   padding: 0 10px;
   vertical-align: middle;
+  /* 不换行：宽度不够时由 .table-frame 横向滚动 */
+  white-space: nowrap;
 }
 
 .node-table tbody tr:hover {
