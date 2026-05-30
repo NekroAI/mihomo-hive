@@ -493,14 +493,12 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                     if (!head) return <span className="muted">—</span>;
                     const b = changeBrief(head);
                     return (
-                      <span
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "help" }}
-                        title={changeHistoryTooltip(acc)}
-                      >
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <span className={`small ${b.cls}`} style={{ fontWeight: 600 }}>
                           {b.text}
                         </span>
                         <span className="muted small">{shortAgo(head.at)}</span>
+                        <InfoTip text={changeHistoryTooltip(acc)} />
                       </span>
                     );
                   })()}

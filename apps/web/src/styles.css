@@ -1712,9 +1712,7 @@ input[type="number"] {
 }
 
 .account-matrix-table .cell-change {
-  max-width: 130px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 150px;
   white-space: nowrap;
 }
 
