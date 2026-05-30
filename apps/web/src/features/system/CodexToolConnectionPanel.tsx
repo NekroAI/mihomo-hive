@@ -4,7 +4,9 @@ import type { AccountFleetSpec } from "@mihomo-hive/schemas";
 import {
   Badge,
   Button,
+  Checkbox,
   CollapsiblePanel,
+  InfoTip,
   Panel,
   SelectInput,
   TextInput
@@ -183,6 +185,94 @@ export function CodexToolConnectionPanel(props: {
             placeholder="本地节点 hash 前缀（节点池里看）"
             mono
           />
+        ) : null}
+      </div>
+      <div className="config-subgroup-label">
+        外置 Agent（推荐）
+        <InfoTip text="让 codex-tool 跑在桌面真实 macOS/Windows 上（codex-tool serve），Hive 经 HTTP 调它，绕开 Linux 容器 headless 浏览器被 OpenAI 风控质询的问题。关闭=沿用容器内本地 subprocess。" />
+      </div>
+      <div className="form-grid">
+        <label className="field">
+          <span>启用外置 agent</span>
+          <Checkbox
+            checked={draft.remoteAgent.enabled}
+            onChange={(v) => patch((c) => ({ ...c, remoteAgent: { ...c.remoteAgent, enabled: v } }))}
+            label={draft.remoteAgent.enabled ? "走 HTTP agent" : "走本地 subprocess"}
+          />
+        </label>
+        {draft.remoteAgent.enabled ? (
+          <>
+            <TextInput
+              label="agent URL（连接 host）"
+              value={draft.remoteAgent.url}
+              onChange={(v) => patch((c) => ({ ...c, remoteAgent: { ...c.remoteAgent, url: v.trim() } }))}
+              placeholder="http://192.168.5.20:8765"
+              mono
+            />
+            <TextInput
+              label="bearer token"
+              value={draft.remoteAgent.tokenRef}
+              onChange={(v) => patch((c) => ({ ...c, remoteAgent: { ...c.remoteAgent, tokenRef: v } }))}
+              type="password"
+              mono
+            />
+            <NumberInput
+              label="HTTP 超时余量（秒）"
+              value={Math.round(draft.remoteAgent.requestTimeoutPaddingMs / 1000)}
+              min={0}
+              onChange={(v) =>
+                patch((c) => ({ ...c, remoteAgent: { ...c.remoteAgent, requestTimeoutPaddingMs: v * 1000 } }))
+              }
+            />
+            <label className="field">
+              <span>调用前健康检查</span>
+              <Checkbox
+                checked={draft.remoteAgent.healthCheck}
+                onChange={(v) => patch((c) => ({ ...c, remoteAgent: { ...c.remoteAgent, healthCheck: v } }))}
+                label="先 GET /health，不健康跳过本轮"
+              />
+            </label>
+          </>
+        ) : null}
+      </div>
+      <div className="config-subgroup-label">
+        动态出口（codex-egress 单口）
+        <InfoTip text="开启后 Mihomo 额外渲染一个唯一鉴权口（hive-codex）+ codex-egress select 组。Hive 选好节点后切该组 → 外置 agent 经此口出去即走选定节点。对外只暴露一个鉴权端口，真实出口仍由 Hive 选节点逻辑分发。需配合外置 agent 使用。" />
+      </div>
+      <div className="form-grid">
+        <label className="field">
+          <span>启用动态出口</span>
+          <Checkbox
+            checked={draft.codexEgress.dynamic}
+            onChange={(v) => patch((c) => ({ ...c, codexEgress: { ...c.codexEgress, dynamic: v } }))}
+            label={draft.codexEgress.dynamic ? "Hive 动态切节点" : "关闭（agent 自带出口）"}
+            disabled={!draft.remoteAgent.enabled}
+          />
+        </label>
+        {draft.codexEgress.dynamic ? (
+          <>
+            <TextInput
+              label="Mihomo 地址（agent 回连）"
+              value={draft.codexEgress.host}
+              onChange={(v) => patch((c) => ({ ...c, codexEgress: { ...c.codexEgress, host: v.trim() } }))}
+              placeholder="192.168.5.8（Hive LAN IP）"
+              mono
+            />
+            <NumberInput
+              label="监听端口"
+              value={draft.codexEgress.port}
+              min={1}
+              max={65535}
+              onChange={(v) => patch((c) => ({ ...c, codexEgress: { ...c.codexEgress, port: v } }))}
+            />
+            <TextInput
+              label="绑定地址"
+              value={draft.codexEgress.bindHost}
+              onChange={(v) => patch((c) => ({ ...c, codexEgress: { ...c.codexEgress, bindHost: v.trim() } }))}
+              placeholder="0.0.0.0"
+              mono
+            />
+          </>
         ) : null}
       </div>
       <div className="spec-save-bar" style={{ marginTop: 12 }}>
