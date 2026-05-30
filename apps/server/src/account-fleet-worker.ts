@@ -965,9 +965,9 @@ function synthesizeName(spec: AccountFleetSpec, email: string): string {
  * 所以 Hive 拿不到 failure_category（实测 323 账号 category 全 null）。改为 Hive 侧
  * 按消息 marker 自己判（marker 取自 codex-tool 的 _oauth_failure_details + 补 Sentinel）。
  *
- *   account_unusable —— OAuth 授权链终态缺失（缺少目标 URL）：账号废了，退役不重试。
- *   network_or_proxy —— 超时/代理/连接/TLS/Sentinel 提取失败：代理或网络问题，
- *                       换个出口重试就可能成功，不该算账号的错、不轻易退役。
+ *   account_unusable —— 仅明确的账号级吊销（revoked / invalidated oauth）：账号废了，退役不重试。
+ *   network_or_proxy —— 超时/代理/连接/TLS/Sentinel 提取失败 + OAuth 跳转链缺少目标 URL/code
+ *                       （多为出口 IP 被质询）：换个出口重试就可能成功，不该算账号的错、不轻易退役。
  *   oauth_failed     —— 其它 OAuth 失败：按常规退避，达上限退役。
  */
 /**
@@ -1006,18 +1006,17 @@ export function describeRegistrationFailure(error: string, attemptCount: number)
 
 export function classifyCodexFailure(message: string): "account_unusable" | "network_or_proxy" | "oauth_failed" {
   const m = message.toLowerCase();
-  // 终态废账号标记。P6-13 补充：Sub2API 报 token revoked / invalidated oauth token —— 账号
-  // 授权已被吊销，反复重登/刷新都救不回，应直接退役而非在退避里空转(实测有账号 codex_login
-  // 成功后 refresh 一直 401 revoked，被当 network 类 ×3 反复重试浪费槽位)。
-  if (
-    m.includes("缺少目标") ||
-    m.includes("missing target url") ||
-    m.includes("account_unusable") ||
-    m.includes("没有 code") ||
-    m.includes("revoked") ||
-    m.includes("invalidated oauth")
-  ) {
+  // 终态废账号标记 —— 只认"明确的账号级吊销/失效"信号（Sub2API 报 token revoked /
+  // invalidated oauth token：授权已被吊销，反复重登/刷新都救不回，直接退役不空转）。
+  if (m.includes("account_unusable") || m.includes("revoked") || m.includes("invalidated oauth")) {
     return "account_unusable";
+  }
+  // P5-BA 根因修复：OAuth 跳转链"缺少目标 URL / 缺少 continue_url / 没有 code"过去被当
+  // account_unusable 直接退役 —— 但实测这绝大多数是"出口 IP 被 OpenAI 质询"（authorize
+  // 返回质询页而非 302 跳转），不是账号死了。手动经干净代理(Clash)重登就成功。归
+  // network_or_proxy：清出口软粘性 → 换节点重试（cap = maxAttempts×3），而不是一次质询就杀号。
+  if (m.includes("缺少目标") || m.includes("missing target url") || m.includes("没有 code")) {
+    return "network_or_proxy";
   }
   // P5-AX：地区不可用（取不到号/收不到验证码）也算可重试的瞬时类，不退役账号
   const regionMarkers = ["地区不可用", "取不到号", "收不到验证码", "no_numbers", "没有可用号码"];

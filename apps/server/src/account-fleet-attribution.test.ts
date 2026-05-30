@@ -27,11 +27,13 @@ describe("classifyCodexFailure region markers (P5-AX)", () => {
     expect(classifyCodexFailure("NO_NUMBERS 没有可用号码")).toBe("network_or_proxy");
   });
 
-  it("缺少目标 URL → account_unusable", () => {
-    expect(classifyCodexFailure("跟随 OAuth 跳转失败：缺少目标 URL")).toBe("account_unusable");
+  it("缺少目标 URL / 没有 code → network_or_proxy（P5-BA：多为出口被质询，换出口重试不杀号）", () => {
+    expect(classifyCodexFailure("跟随 OAuth 跳转失败：缺少目标 URL")).toBe("network_or_proxy");
+    expect(classifyCodexFailure("继续 OAuth 授权 请求失败：缺少目标 URL")).toBe("network_or_proxy");
+    expect(classifyCodexFailure("回调没有 code")).toBe("network_or_proxy");
   });
 
-  it("token revoked / invalidated oauth → account_unusable（不再空转重试）", () => {
+  it("token revoked / invalidated oauth → account_unusable（账号级吊销，不再空转重试）", () => {
     expect(classifyCodexFailure("Sub2API: Token revoked (401): Encountered invalidated oauth token")).toBe(
       "account_unusable"
     );

@@ -67,17 +67,6 @@ function codexNet(c: EgressCandidate): number {
   return c.codexSuccess - c.codexFailure;
 }
 
-/** proven 排序：净胜场↓ → 成功数↓ → 负载↑ → 质量↓ → hash 稳定。确定性。 */
-function compareProven(a: EgressCandidate, b: EgressCandidate): number {
-  return (
-    codexNet(b) - codexNet(a) ||
-    b.codexSuccess - a.codexSuccess ||
-    a.load - b.load ||
-    b.qualityScore - a.qualityScore ||
-    (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0)
-  );
-}
-
 /** failing 池里挑失败最少的（确定性兜底，避免节点池被打成"全失败就抛错"）。 */
 function leastBad(pool: EgressCandidate[]): EgressCandidate | undefined {
   const failing = pool.filter((c) => c.codexSuccess === 0 && c.codexFailure > 0);
@@ -221,9 +210,10 @@ function pickForRegister(relaxed: EgressCandidate[], rand: () => number): Egress
 }
 
 /**
- * 登录选节点（恢复）—— 要的是"最可能成功"，不是分散，所以确定性选最佳 proven。
+ * 登录选节点（恢复）—— 偏向"能过"的 proven 节点，但在它们之间加权轮换而非死锁单个，
+ * 这样登录失败清掉软粘性后每次重试能换不同的干净出口（修复"重登反复撞同一堵墙"）。
  * 保留节点同样不再独占：proven 非保留节点优先于未试的保留节点（保留只作兜底）。
- *   1. 最佳 proven（compareProven 确定性排序）；
+ *   1. proven 节点按净胜场加权随机（轮换，便于重登换出口重试）；
  *   2. 没有 proven → 在未试节点里加权探索（先 openaiOk 再 untested）；
  *   3. 全失败 → leastBad。
  */
@@ -231,8 +221,12 @@ function pickForLogin(relaxed: EgressCandidate[], rand: () => number): EgressSel
   if (relaxed.length === 0) return undefined;
   const proven = relaxed.filter((c) => c.codexSuccess > 0);
   if (proven.length > 0) {
-    const best = [...proven].sort(compareProven)[0]!;
-    return { hash: best.hash, port: best.port, reason: "codex_proven", reserved: best.reserved };
+    // 在 proven 节点里按净胜场加权随机（越证明能过越优先），而不是死锁单个"最佳"。
+    // 关键：login 失败会清掉账号的出口软粘性 → 每次重试重新走这里；若总返回同一个
+    // "对注册友好但对登录会被质询"的节点，就会反复撞同一堵墙。加权随机让连续重登在
+    // 多个干净节点间轮换，从而真正"换出口重试"，提高重登成功率。
+    const picked = pickWeightedBy(proven, (c) => Math.max(0, codexNet(c)) + 1, rand) ?? proven[0]!;
+    return { hash: picked.hash, port: picked.port, reason: "codex_proven", reserved: picked.reserved };
   }
   const untriedOk = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && c.openaiOk);
   const untriedRaw = relaxed.filter((c) => c.codexSuccess === 0 && c.codexFailure === 0 && !c.openaiOk);
