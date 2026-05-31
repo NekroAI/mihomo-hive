@@ -38,7 +38,7 @@ export function RuntimeHeader(props: {
         <div className="brand-mark">MH</div>
         <div>
           <h1>Mihomo Hive</h1>
-          <p>固定出口代理池工作台</p>
+          <p>固定出口节点池 · 账号自动注册与续登</p>
         </div>
       </div>
       <nav
