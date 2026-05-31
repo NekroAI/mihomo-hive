@@ -44,7 +44,7 @@ export function getJobLog(jobId: string): JobLogLine[] {
  * job 结束时调用：返回末尾 tail 行拼成的字符串（供持久化到 log_tail），并清掉缓冲。
  * 限制 tailLines 行，避免 log_tail 列过大。
  */
-export function finalizeJobLog(jobId: string, tailLines = 60): string {
+export function finalizeJobLog(jobId: string, tailLines = 150): string {
   const arr = buffers.get(jobId);
   buffers.delete(jobId);
   if (!arr || arr.length === 0) return "";
