@@ -435,24 +435,77 @@ async function runCodexRegister(
   // P5-AS：注册成功 = 节点能过 Sentinel，记一笔成功
   recordNodeOutcome(repo, egress, "success", "register");
   const { costCents, country } = persistSms(outcome.account.sms, outcome.account.sms.country, true);
-  await landOnSub2api({
-    repo,
-    crypto,
-    spec,
-    account: oldAccount,
-    tokens: outcome.account.tokens,
-    email: outcome.account.email,
-    accountIdHint: outcome.account.tokens.accountId,
-    phone: outcome.account.phone,
-    password: outcome.account.password,
-    batchId: outcome.account.batchId,
-    isRecovery: Boolean(oldAccount),
-    isFreshRegistration: !oldAccount,
-    egressNodeHash: egress?.hash ?? null,
-    smsCountry: country,
-    smsCostCents: costCents,
-    herosmsActivationId: outcome.account.activationId
-  });
+  try {
+    await landOnSub2api({
+      repo,
+      crypto,
+      spec,
+      account: oldAccount,
+      tokens: outcome.account.tokens,
+      email: outcome.account.email,
+      accountIdHint: outcome.account.tokens.accountId,
+      phone: outcome.account.phone,
+      password: outcome.account.password,
+      batchId: outcome.account.batchId,
+      isRecovery: Boolean(oldAccount),
+      isFreshRegistration: !oldAccount,
+      egressNodeHash: egress?.hash ?? null,
+      smsCountry: country,
+      smsCostCents: costCents,
+      herosmsActivationId: outcome.account.activationId
+    });
+  } catch (landErr) {
+    // 安全网:落地(已含瞬时重试)最终仍失败 → **绝不浪费已注册的号**。把账号 + 有效
+    // refresh token 存成本地 pending 记录,并入队 import_to_sub2api 后续重新落地
+    // (import 路径也有 withSub2apiRetry)。这样花了钱的号永远有机会被救回,而不是直接丢。
+    // 仅对"纯新注册"(无 oldAccount)做;恢复路径有 oldAccount,其状态由 applyRecoveryFailure 管。
+    if (!oldAccount) {
+      const salvageId = randomUUID();
+      const nowIso = new Date().toISOString();
+      repo.upsertAccount(
+        makeFreshAccount({
+          id: salvageId,
+          email: outcome.account.email,
+          origin: "hive_registered",
+          intent: "pending", // 已注册、有 token,但尚未落 Sub2API
+          health: "broken",
+          encPhone: crypto.encryptOptional(outcome.account.phone),
+          encPassword: crypto.encryptOptional(outcome.account.password),
+          encRefreshToken: crypto.encryptOptional(outcome.account.tokens.refreshToken),
+          batchId: outcome.account.batchId,
+          herosmsActivationId: outcome.account.activationId,
+          registeredAt: nowIso,
+          smsCountry: country,
+          smsCostCents: costCents,
+          lastRecoveryError: redactErrorMessage(landErr instanceof Error ? landErr.message : String(landErr)),
+          lastRecoveryFailureCategory: "network_or_proxy"
+        })
+      );
+      repo.enqueueAccountJob({
+        id: randomUUID(),
+        kind: "import_to_sub2api",
+        accountId: salvageId,
+        status: "queued",
+        attempt: 0,
+        maxAttempts: 3, // 多给几次,跨过较长的 Sub2API 抖动窗口
+        priority: 40,
+        scheduledAt: new Date(Date.now() + 60_000).toISOString(), // 1 分钟后再试,等抖动过去
+        startedAt: null,
+        finishedAt: null,
+        durationMs: null,
+        payloadJson: JSON.stringify({ refreshToken: outcome.account.tokens.refreshToken, existingAccountId: salvageId }),
+        resultJson: null,
+        errorMessage: null,
+        triggeredBy: "scheduler",
+        triggeredTickId: null,
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+    }
+    throw new Error(
+      `已注册但 Sub2API 落地失败,已存本地待重新落地(import 已入队):${landErr instanceof Error ? landErr.message : String(landErr)}`
+    );
+  }
 }
 
 /**
@@ -477,25 +530,26 @@ async function runImportToSub2api(
   // proxy_id 用代理编排 intake 作为 fallback（没 egress 节点信息）。
   const proxyId = resolveCreationProxyId(repo, null);
   const sub2api = requireSub2apiClient(repo);
-  const refreshed = await sub2api.refreshOpenaiToken({
-    refreshToken: payload.refreshToken,
-    proxyId
-  });
-  const created = await sub2api.createAccount(
-    makeCreatePayload({
-      spec: _spec,
-      proxyId,
-      tokens: {
-        accessToken: refreshed.access_token,
-        refreshToken: refreshed.refresh_token,
-        idToken: refreshed.id_token
-      },
-      email: refreshed.email,
-      organizationId: refreshed.organization_id,
-      clientId: refreshed.client_id,
-      expiresAt: refreshed.expires_at,
-      name: synthesizeName(_spec, refreshed.email)
-    })
+  const refreshed = await withSub2apiRetry(() =>
+    sub2api.refreshOpenaiToken({ refreshToken: payload.refreshToken, proxyId })
+  );
+  const created = await withSub2apiRetry(() =>
+    sub2api.createAccount(
+      makeCreatePayload({
+        spec: _spec,
+        proxyId,
+        tokens: {
+          accessToken: refreshed.access_token,
+          refreshToken: refreshed.refresh_token,
+          idToken: refreshed.id_token
+        },
+        email: refreshed.email,
+        organizationId: refreshed.organization_id,
+        clientId: refreshed.client_id,
+        expiresAt: refreshed.expires_at,
+        name: synthesizeName(_spec, refreshed.email)
+      })
+    )
   );
 
   const existing = payload.existingAccountId ? repo.getAccountById(payload.existingAccountId) : undefined;
