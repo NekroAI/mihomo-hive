@@ -417,11 +417,6 @@ sub2api
     console.log(JSON.stringify({ changed: preview.changes.length, success, failed, successIds, failedIds }, null, 2));
   });
 
-program.parseAsync().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
-
 // ─────────── 账号编排(fleet)CLI —— 供 AI/自动化直接驱动,无需网页登录态 ───────────
 // 直接写 repo/DB;运行中的 server worker 通过 poll 循环消费入队的 job,无需 pump。
 const fleet = program.command("fleet").description("账号编排:状态/停起运维/注册/登录/导入(供自动维护)");
@@ -699,3 +694,9 @@ async function readPasswordOption(options: { password?: string; passwordStdin?: 
   }
   throw new Error("Provide --password, --password-stdin, or HIVE_RESET_PASSWORD");
 }
+
+// 所有命令(含 fleet)注册完毕后再解析,避免漏注册。
+program.parseAsync().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});
