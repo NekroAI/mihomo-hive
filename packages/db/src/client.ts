@@ -244,6 +244,29 @@ function ensureSchema(sqlite: HiveSqlite): void {
       .prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO NOTHING")
       .run("migrations.codex_login_stats_reset_v1", JSON.stringify({ at: "migration" }));
   }
+  // 一次性数据修复：把"按 network_or_proxy(出口/consent/Sentinel 类，非账号死)退役"的
+  // 账号捞回 recovering。背景：consent 失败过去归 network_or_proxy 并在重试上限后退役，
+  // 把大量**活账号**(过了 OpenAI OTP、只是我方出口过不了 consent)误判成死号。退役从此
+  // 只留给 OpenAI 确认的 account_unusable。捞回时设 6h 后再试，避免一次性涌入猛打 Sentinel。
+  // settings flag 守卫，只跑一次。
+  const reviveFlag = sqlite
+    .prepare("SELECT 1 FROM settings WHERE key = ?")
+    .get("migrations.revive_network_retired_v1");
+  if (!reviveFlag) {
+    const sixHoursLater = new Date(Date.now() + 6 * 3_600_000).toISOString();
+    const res = sqlite
+      .prepare(
+        "UPDATE accounts SET intent = 'recovering', recovery_attempts = 4, next_recovery_after = ? " +
+          "WHERE intent = 'retired' AND last_recovery_failure_category = 'network_or_proxy'"
+      )
+      .run(sixHoursLater);
+    sqlite
+      .prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO NOTHING")
+      .run("migrations.revive_network_retired_v1", JSON.stringify({ at: "migration", revived: res.changes }));
+    if (res.changes > 0) {
+      console.log(`[migration] 捞回 ${res.changes} 个按 network_or_proxy 误退役的账号 → recovering(6h 后再试)。`);
+    }
+  }
   // P5-AT: job 结束时持久化的日志末尾（redact 过），供"最近完成"回看
   addColumnIfMissing(sqlite, "account_jobs", "log_tail", "TEXT");
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：

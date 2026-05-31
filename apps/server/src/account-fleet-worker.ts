@@ -1118,11 +1118,12 @@ function applyRecoveryFailure(
   const backoffIdx = Math.min(attempts - 1, spec.recovery.backoffSequenceMs.length - 1);
   const backoffMs = spec.recovery.backoffSequenceMs[backoffIdx] ?? 60_000;
 
-  // network_or_proxy：代理/网络问题不是账号的错。清出口软粘性 → 下个 tick 重新加权
-  // 随机选别的出口（"换代理重试"）；用更宽松上限（maxAttempts × 3）避免因一串代理
-  // 抖动把本可恢复的账号过早退役。
+  // network_or_proxy：代理/网络/出口/Sentinel/consent 类失败**不是账号的错** ——
+  // 永不退役。退役(retired)从此只表示"OpenAI 确认死号(account_unusable)"这一终态,
+  // 不再把"我方出口过不了 consent"的活账号当死号丢掉(实测大量被误退役的活账号)。
+  // 保持 recovering，退避按 backoffSequenceMs 升到封顶(默认 6h)：账号留着、极少重试，
+  // 等出口/consent 修好后能自动救回。清出口软粘性 → 下次重新加权选别的出口。
   if (category === "network_or_proxy") {
-    const cap = spec.recovery.maxAttemptsPerAccount * 3;
     repo.patchAccount(account.id, {
       recoveryAttempts: attempts,
       nextRecoveryAfter: new Date(Date.now() + backoffMs).toISOString(),
@@ -1130,7 +1131,7 @@ function applyRecoveryFailure(
       lastRecoveryPath: path,
       lastRecoveryFailureCategory: "network_or_proxy",
       egressNodeHash: null,
-      intent: attempts >= cap ? "retired" : "recovering"
+      intent: "recovering"
     });
     return;
   }
