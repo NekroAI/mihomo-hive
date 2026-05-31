@@ -445,7 +445,8 @@ async function runCodexRegister(
     isFreshRegistration: !oldAccount,
     egressNodeHash: egress?.hash ?? null,
     smsCountry: country,
-    smsCostCents: costCents
+    smsCostCents: costCents,
+    herosmsActivationId: outcome.account.activationId
   });
 }
 
@@ -753,6 +754,8 @@ interface LandOnSub2apiInput {
   smsCountry?: string | null | undefined;
   /** P5-AI: codex-tool 注册返回的 sms_cost_usd * 100；非注册路径为 null */
   smsCostCents?: number | null | undefined;
+  /** hero-sms 激活 ID（登录 step-up 重激活二次接码用）；仅新注册路径有。 */
+  herosmsActivationId?: string | null | undefined;
 }
 
 /**
@@ -846,7 +849,8 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
       lastRecoveryPath: "codex_register",
       egressNodeHash: input.egressNodeHash ?? null,
       smsCountry: input.smsCountry ?? null,
-      smsCostCents: input.smsCostCents ?? null
+      smsCostCents: input.smsCostCents ?? null,
+      herosmsActivationId: input.herosmsActivationId ?? null
     });
     repo.upsertAccount(fresh);
   }

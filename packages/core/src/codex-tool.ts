@@ -237,6 +237,8 @@ export type CodexToolRegisterOutcome =
         tokens: CodexToolTokens;
         /** 本次注册的短信地区数据（用于观测 + 回灌 + 账单）。 */
         sms: CodexSmsRegionResult;
+        /** hero-sms 激活 ID —— 登录被要求手机 OTP(step-up) 时用它重激活原号二次接码。 */
+        activationId: string | null;
       };
     }
   | {
@@ -590,7 +592,8 @@ function parseRegisterEnvelope(env: CodexToolEnvelope): CodexToolRegisterOutcome
           refreshToken: stringOrThrow(tokens.refresh_token, "tokens.refresh_token"),
           accountId: typeof tokens.account_id === "string" ? tokens.account_id : null
         },
-        sms: extractSmsResult(acc)
+        sms: extractSmsResult(acc),
+        activationId: typeof acc.activation_id === "string" ? acc.activation_id : null
       }
     };
   }
