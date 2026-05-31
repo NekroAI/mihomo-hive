@@ -294,9 +294,25 @@ function diagnoseAccounts(
   const nowIso = input.now.toISOString();
   const out = accounts.map((a) => ({ ...a }));
 
+  // Sub2API 实时账号 external_id 集合（仅当 sense 提供了 remoteAccounts 时才用于对账）。
+  const liveExternal = input.remoteAccounts ? new Set(input.remoteAccounts.map((r) => r.id)) : null;
+
   for (const acc of out) {
     // skip 已退役 / pending（pending 还没有远端记录）
     if (acc.intent === "retired" || acc.intent === "pending") continue;
+
+    // 对账：sense 给了 Sub2API 实时列表，而本账号在远端找不到（external_id=null 的孤儿
+    // ——落地未完成；或 external_id 已被远端删除）→ 判 broken。否则这类账号没有任何
+    // 错误/配额信号会一路落到 healthy，永久挂着陈旧"健康"、虚高计数、和 Sub2API 对不上。
+    if (liveExternal && (acc.externalId === null || !liveExternal.has(acc.externalId))) {
+      acc.health = "broken";
+      acc.lastRecoveryError =
+        acc.externalId === null ? "Sub2API 无对应记录（落地未完成/孤儿）" : "Sub2API 远端已无该账号";
+      if (!acc.brokenSinceTick) acc.brokenSinceTick = nowIso;
+      acc.brokenConsecutiveTicks = (acc.brokenConsecutiveTicks ?? 0) + 1;
+      acc.updatedAt = nowIso;
+      continue;
+    }
 
     const errors = acc.externalId !== null ? errorsBy.get(acc.externalId) ?? 0 : 0;
     acc.errorsInWindow = errors;
