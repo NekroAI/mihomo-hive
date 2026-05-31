@@ -21,7 +21,7 @@ import type {
   AccountOrigin,
   AccountRecordView
 } from "@mihomo-hive/schemas";
-import { Badge, Button, EmptyState, InfoTip, Pager, Panel } from "../../components/ui.js";
+import { Badge, Button, EmptyState, InfoTip, Pager, Panel, Switch } from "../../components/ui.js";
 import { trpc } from "../../lib/trpc.js";
 
 /**
@@ -413,7 +413,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                 <th className="num">存活/重登</th>
                 <th>最近变动</th>
                 <th>出口节点</th>
-                <th>运维</th>
+                <th>自动运维</th>
               </tr>
             </thead>
             <tbody>
@@ -560,15 +560,13 @@ function OpsToggle(props: { acc: AccountRecordView }) {
   });
   const on = props.acc.opsEnabled;
   return (
-    <Button
-      size="sm"
-      variant={on ? "ghost" : "danger"}
-      loading={m.isPending}
+    <Switch
+      checked={on}
+      disabled={m.isPending}
       title={on ? "运维开:点此暂停该账号的自动化(恢复/重绑)分配" : "运维已暂停:点此恢复该账号的自动化分配"}
-      onClick={() => m.mutate({ accountId: props.acc.id, enabled: !on })}
-    >
-      {on ? "运维开" : "已暂停"}
-    </Button>
+      onChange={(v) => m.mutate({ accountId: props.acc.id, enabled: v })}
+      label={on ? "运维" : "暂停"}
+    />
   );
 }
 
@@ -586,7 +584,7 @@ function TestLoginButton(props: { acc: AccountRecordView }) {
       title="立刻给该账号入队一次 codex_login(测试登录闭环/抓取 step-up 结构;要求账号有手机号+密码)。"
       onClick={() => m.mutate({ accountId: props.acc.id })}
     >
-      测试登录
+      登录
     </Button>
   );
 }

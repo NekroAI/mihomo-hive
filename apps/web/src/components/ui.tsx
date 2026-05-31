@@ -200,6 +200,29 @@ export function Checkbox(props: {
   );
 }
 
+export function Switch(props: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  title?: string;
+  label?: string;
+}) {
+  return (
+    <label className={`switch ${props.disabled ? "is-disabled" : ""}`} title={props.title}>
+      <input
+        type="checkbox"
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.target.checked)}
+      />
+      <span className="switch-track">
+        <span className="switch-knob" />
+      </span>
+      {props.label ? <span className="switch-label">{props.label}</span> : null}
+    </label>
+  );
+}
+
 export function Badge(props: { children: React.ReactNode; tone?: Tone }) {
   return <span className={`badge badge-${props.tone ?? "neutral"}`}>{props.children}</span>;
 }
