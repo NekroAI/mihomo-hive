@@ -128,6 +128,43 @@ candidate → standby → serving ↔ quarantined → evicted → retired
 
 ---
 
+## 能力 3：账号编排（账号生命周期自动维护，可选）
+
+完整设计见 [ADR 0004](decisions/0004-account-fleet-orchestrator.md)。叠加在能力 2 之上：在"账号 ↔ 代理绑定"已确定的基础上，进一步**自动注册新账号、自动给 token 失效的账号重新登录续命、自动退役确定死号**，让账号池长期自维持。这一层依赖外部 **codex-tool**（独立闭源组件，本仓库不含源码，**整体可选**）。
+
+```text
+AccountFleetScheduler（默认 5min tick）
+  sense（合并本地 + Sub2API 实时账号，diagnoseAccounts 对账）
+    → diagnose → plan（修复路径决策树）→ gate（预算/灰度）→ 入队 account_jobs
+AccountJobsWorker（异步消费）
+    → spawn codex-tool（register / login）/ 调 Sub2API 落地 token
+```
+
+### 失败归因与退役语义（今日重做）
+
+之前账号登录大面积失败的**根因不是节点/consent 机制，而是出口 IP 质量 + 登录频率**：机房 IP 注册 + 高频反复登录会被 OpenAI 风控**标记**，登录时要求手机 OTP 二次验证（而临时接码号已释放收不到码），严重的直接被删除/停用；干净/住宅出口注册、温和频率的账号则邮箱 OTP 即可登录、不要求手机验证、token 被吊销后能**免费重新登录续命**。
+
+据此把失败归因重做（`router.aggregateFailureReasons` + UI 失败分布）：
+
+- `deactivated`（OpenAI 删除/停用=真死）→ 退役
+- `consent`（活账号但出口过不了 OAuth consent）/ `sentinel`（浏览器相位）/ `ratelimit`（Too many tries）/ `region` / `otp` / `network` 等环境类 → **不退役、退避重试**
+
+worker 端（`apps/server/src/account-fleet-worker.ts` 的 `classifyCodexFailure`）：`network_or_proxy`（出口/网络/consent/Sentinel 类环境失败）永不自动退役，保持 `recovering`、退避封顶 6h；只有 OpenAI 确认的 `account_unusable`（deleted/deactivated）才退役。`retired` = 确定死号终态。
+
+### 账号运维开关（隔离实验基础设施）
+
+每个账号有 `opsEnabled` 开关：关掉则暂停其一切自动运维并清掉其已排队的 job。配套批量 `setAllOpsEnabled`（可只停非 active），用于"停掉全部账号，只让一小批新号跑实验"。
+
+### 代理感知 egress 选择
+
+`codexTool.egress.mode = managed-node` 时，注册/登录都用分层 ε-greedy 在合格节点里选出口（`packages/core/src/account-fleet-egress.ts`）：多数 exploit（精选 ∪ 已证明能成功的节点，按成功率/负载加权），少数 explore（试还没证明的节点）；注册战绩与登录战绩分开统计。选完回填 `accounts.egress_node_hash` 形成软粘性。`egress.dynamic` 开启时 Mihomo 额外渲染一个唯一鉴权口（hive-codex）+ codex-egress select 组，支持单口动态切换出口。
+
+### 诊断对账
+
+`diagnoseAccounts` 用 Sub2API 实时账号列表对账：本地账号在远端找不到（孤儿 / 已删）即判 broken，修复 healthy 计数虚高与 Sub2API 对不上的问题。
+
+---
+
 ## Web UI 工作区
 
 顶部 segmented control 切换：
@@ -136,7 +173,7 @@ candidate → standby → serving ↔ quarantined → evicted → retired
 |---|---|---|
 | **节点池** | 能力 1 主要操作 | NodeToolbar 工具栏 + NodeTable（含 L1/L2 延迟 + Sub2API 状态 + 账号数列） |
 | **代理编排** | 能力 2 主要操作（账号 ↔ 代理绑定调度） | OrchestrationSpecPanel（Spec 编辑） + OrchestrationStatusPanel（KPI / 节点矩阵 / 最近调和） |
-| **账号编排** | 能力 3（账号生命周期自动维护，详见 notes/account-fleet-design.md） | AccountFleetRoute（分阶段交付） |
+| **账号编排** | 能力 3（账号生命周期自动维护，详见 [ADR 0004](decisions/0004-account-fleet-orchestrator.md)） | AccountFleetRoute（SpecPanel + StatusPanel） |
 | **导出** | 把当前选中节点打包给上游 | ExportPanel |
 
 ---
@@ -150,6 +187,6 @@ candidate → standby → serving ↔ quarantined → evicted → retired
 | `packages/db` | SQLite 仓储层（HiveRepository）+ 迁移 |
 | `packages/mihomo` | Mihomo 进程控制（pid + signal） |
 | `packages/exporters` | Sub2API 等导出格式 |
-| `apps/cli` | 命令行工具 |
-| `apps/server` | Hono API + tRPC 路由 + ReconcileScheduler + 静态 UI 托管 |
+| `apps/cli` | 命令行工具，含 `hive fleet` 账号编排命令组（供 AI/自动化无需网页登录态直接驱动 DB/repo） |
+| `apps/server` | Hono API + tRPC 路由 + ReconcileScheduler + AccountFleetScheduler + AccountJobsWorker + 静态 UI 托管 |
 | `apps/web` | React Web UI（3 个 workspace tab） |

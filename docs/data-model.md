@@ -101,10 +101,52 @@ statusSnapshot 端点采用 summary 列表 + 单条 detail 按需拉，原因：
 
 ---
 
+## 账号编排（ADR 0004，能力 3）
+
+账号编排的类型集中在 `packages/schemas/src/account-fleet.ts`。
+
+### Account（本地账号镜像）
+
+`AccountRecord` —— Hive 本地对每个账号的镜像，敏感字段加密存储（`enc_*`，AES-256-GCM）。
+
+| 维度 | 字段 | 取值 |
+|---|---|---|
+| origin | `origin` | `hive_registered / adopted_active / adopted_recovered / adopted_observing / retired_legacy` |
+| intent | `intent` | `pending / active / recovering / retired` |
+| health | `health` | `healthy / broken / unknown` |
+| 恢复 | `recoveryAttempts / nextRecoveryAfter / lastRecoveryPath / lastRecoveryError` | 恢复退避计时 + 上次走的路径（`codex_login` / `codex_register`） |
+| 失败分类 | `lastRecoveryFailureCategory` | `account_unusable`（OpenAI 确认死号，退役）/ `network_or_proxy`（出口·网络·consent·Sentinel 类环境失败，**永不退役**）/ `oauth_failed` |
+| 运维开关 | `opsEnabled` | `true`=接受自动运维；`false`=暂停该账号一切自动化（恢复/重绑）并清掉其已排队的 job，用于隔离实验/批量停机 |
+| 软粘性 | `egressNodeHash` | 上次登录/注册绑定的出口节点 hash，下次同账号优先复用 |
+| 接码 | `herosmsActivationId` | 注册时接码平台返回的激活 ID。为"登录被要求手机 OTP(step-up) 时对原号重新接码"预留（已落库，重激活登录流程尚未实装） |
+| 观测/审计 | `smsCountry / smsCostCents / firstSeenAt / reloginCount / lastRecoveredAt / changeHistory` | 国家码 / 接码花费 / 首见时间 / 续登成功次数 / 最近修复时间 / 最近变更历史 JSON |
+
+> **退役语义（今日收紧）**：`retired` 现在只表示"OpenAI 确认死号（`account_unusable`，删除/停用）"这一确定终态。
+> `network_or_proxy` 类失败不是账号的错，**永不自动退役**——保持 `recovering`、退避按 `backoffSequenceMs` 升到封顶（默认 6h），账号留着低频重试，换到干净出口即可续命。
+> 一次性 guarded 迁移 `migrations.revive_network_retired_v1` 把历史误退役（`network_or_proxy`）的账号捞回 `recovering`。
+
+### Spec / Status / 失败归因
+
+| 类型 | 说明 |
+|---|---|
+| `AccountFleetSpec` | 用户编辑的账号编排"期望"：`enabled`（启停开关）/ 目标产能 / 健康 / 修复 / 出生预算 / 退役 / `codexTool` 连接（含 `egress.mode` 与 `egress.dynamic`） |
+| `AccountFleetTick` / 摘要 | scheduler 审计记录 |
+| `AccountFleetStatusSnapshot` | UI 数据源：KPI / 桶分布 / runningJobs / queuedJobCount / recentFinishedJobs / `recentFailureReasons` |
+| `recentFailureReasons` | 最近失败原因按归类计数（router `aggregateFailureReasons` 从最近 150 条失败消息聚合）。枚举：`deactivated`（真死）/ `consent`（活账号但出口过不了 OAuth consent）/ `sentinel`（浏览器相位）/ `ratelimit`（Too many tries）/ `region` / `otp` / `network` / `retired` / `oauth` / `other` |
+
+### 诊断对账（diagnoseAccounts）
+
+`packages/core/src/account-fleet.ts` 的 `diagnoseAccounts` 用 Sub2API 实时账号列表（`input.remoteAccounts`）对账：本地账号若在远端找不到（`externalId=null` 孤儿=落地未完成，或 `externalId` 已被远端删除）→ 判 `broken`。修复了"陈旧 `healthy` 残留导致 Hive 计数与 Sub2API 对不上"的 bug。
+
+---
+
 ## 持久化
 
 SQLite WAL 模式，schema 与上述类型对应。
 
 - `nodes` 表 P5-R 加 `last_test_targets TEXT` 列，存 JSON 数组
 - `reconcile_ticks` 表通过 orchestrator 每日一次自动清理保留 7 天
+- 账号编排相关表：`accounts` / `account_jobs` / `account_fleet_ticks` / `account_budgets`（详见 ADR 0004）
+- `accounts` 表近期增量列：`ops_enabled INTEGER DEFAULT 1`、`herosms_activation_id TEXT`、`egress_node_hash TEXT`、`change_history TEXT` 等
 - 所有 schema 变更走 `addColumnIfMissing` 增量迁移，保证已部署的 SQLite 平滑升级
+- 一次性数据修复走 guarded 迁移（在 `settings` 表记标记键避免重复执行），如 `migrations.revive_network_retired_v1`（捞回误退役活账号）

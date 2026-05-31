@@ -1,11 +1,14 @@
 # Mihomo Hive AI 开发指南
 
-Mihomo Hive 是一个 AI-first TypeScript monorepo，**提供两条并列能力**：
+Mihomo Hive 是一个 AI-first TypeScript monorepo，**提供三条递进能力**：
 
 1. **订阅转换工具**：基于 Mihomo 把订阅节点固定到本地端口，独立可用
-2. **Sub2API 接入自动调度**：在能力 1 之上，让编排器自动接管账号到节点的绑定
+2. **Sub2API 接入自动调度**（代理编排）：在能力 1 之上，让编排器自动接管账号到节点的绑定
+3. **账号编排**（可选，需外部闭源 codex-tool）：在能力 2 之上，自动注册新账号、token 失效自动重新登录续命、自动退役死号
 
 不要把项目当成"节点导入 + Mihomo 操作面板"。也不要把项目当成"仅服务于 Sub2API"——能力 1 的用户可能根本没 Sub2API。
+
+**codex-tool 是独立闭源组件，本仓库不含源码、整体可选**：没有它时能力 1、能力 2、账号查看全部正常；它只用于能力 3 的自动注册 / 自动登录续登。不要在公开文档暴露其内部接口/私有规格。
 
 ## 产品定位
 
@@ -13,8 +16,9 @@ Mihomo Hive 是一个 AI-first TypeScript monorepo，**提供两条并列能力*
 
 | 维度 | 必备性 | 用户编辑对象 |
 |---|---|---|
-| 节点池 | 必需（能力 1 + 2 都用） | 订阅源、节点选择、生命周期、端口分配、测试 |
+| 节点池 | 必需（能力 1 + 2 + 3 都用） | 订阅源、节点选择、生命周期、端口分配、测试 |
 | Sub2API 自动化 | 可选（能力 2 才用） | 连接配置、`OrchestrationSpec`（4 类策略 + intake + protectedRule） |
+| 账号编排 | 可选（能力 3 才用，需 codex-tool） | `AccountFleetSpec`（目标产能 / 健康 / 修复 / 出生预算 / 退役 / codex-tool 连接）、每账号运维开关 |
 
 任务暴露要表达"业务意图"，不要把"分配端口 / 渲染配置 / reload / 导出 JSON / 手动绑定账号"作为面对用户的主流程。
 
@@ -58,6 +62,8 @@ Mihomo Hive 是一个 AI-first TypeScript monorepo，**提供两条并列能力*
 - **启用调度 = lifecycle 改变 + 推 Sub2API**：用户点这个按钮等于承诺"这些节点开始接活"
 - **重建 Mihomo（dropdown 诊断）**：只 render + reload，不动端口、不改 lifecycle、不推 Sub2API。yaml 损坏 / 进程异常时的兜底
 - **reconcile loop 完全后台**：服务启动即跑，不依赖用户打开 UI
+- **账号退役 = 确定死号终态**：只有 OpenAI 确认的 `account_unusable`（删除/停用）才退役；出口/网络/consent/Sentinel 类（`network_or_proxy`）永不自动退役，保持 recovering 退避重试（封顶 6h）。改这块逻辑务必守住这条不变量
+- **`hive fleet` CLI 是 AI 自动维护的入口**：AI/自动化无需网页登录态即可 status / accounts / stop-all / start-all / ops / register / login / import；只入队改状态，真正执行由 server worker 消费
 
 ## 部署假设
 

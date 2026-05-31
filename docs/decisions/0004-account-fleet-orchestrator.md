@@ -1,8 +1,8 @@
 # ADR 0004 —— 账号编排器（Account Fleet Orchestrator）
 
-**Status**: Accepted · 2026-05-28
+**Status**: Accepted · 2026-05-28（2026-05-31 增补失败归因/退役语义/运维开关/fleet CLI）
 **Supersedes**: 0003 部分——本 ADR 把 0003 的"账号 ↔ 代理绑定调度"明确改名为"代理编排"，并在它之上叠加全新一级能力"账号编排"。
-**Detail design**: `notes/account-fleet-design.md`（gitignored，含完整 16 节方案，含状态机、Spec、决策树、UI 草图、分期）
+**Detail design**: 完整方案（状态机、Spec、决策树、UI 草图、分期）保存在本地开发参考资料中，未入公开仓库。
 
 ---
 
@@ -18,7 +18,7 @@
 2. **只有两条恢复路径**：
    - PATH_A: `codex-tool login --phone --password` —— 走邮箱 OTP（skymail），**免费**，~30s
    - PATH_B: `codex-tool all --count 1` —— 接码 SMS，**收费**，~2–5min
-3. **codex-tool 是私有闭源**：Hive 通过 spawn 二进制 + stdin JSON config + stdout envelope 调用，不 vendor 源码。详见 `../codex-create/docs/external-integration.md`。
+3. **codex-tool 是独立闭源组件、本仓库不含源码、整体可选**：Hive 通过 spawn 二进制 + stdin JSON config + stdout envelope 调用，不 vendor 源码，也不在公开文档暴露其内部接口/私有规格。
 4. **三维状态（origin × intent × health）**是消化"新老账号能力差异"的核心抽象。详见设计文档 §4。
 
 ## 决策
@@ -64,7 +64,7 @@ AccountJobsWorker (异步消费)
 - stdout 解析后即刻 GC（永不入日志）
 - stderr 走 redact 中间件（去手机号 / JWT / refresh_token 原文）
 - 退出码映射到错误类型（0=ok, 2=arg, 3=external, 4=verification, 5=fs）
-- 完整契约见 `../codex-create/docs/external-integration.md` 和 `cli-contract.md`
+- codex-tool 的私有调用契约不在公开文档展开
 
 ### 5. 修复路径决策树（packages/core/src/account-fleet.ts §plan）
 
@@ -87,11 +87,11 @@ broken account
 - 任一耗尽 → gate 阶段截断 + `tick.skippedReason='budget_exhausted'`
 - 紧急补给模式（healthy/target < minHealthyRatio）：默认提升 perTickCap 但仍受日预算
 
-### 7. 模式切换
+### 7. 启停控制
 
-- `HIVE_ACCOUNT_FLEET_MODE=dry_run`（默认）：scheduler 跑 sense + diagnose + plan + gate，**不入队 jobs**，写 `skippedReason='dry_run'` tick
-- `HIVE_ACCOUNT_FLEET_MODE=apply`：gated actions 转 jobs 入队，worker 真调外部
-- `HIVE_DISABLE_ACCOUNT_FLEET=true`：完全关闭
+- 启停由 `spec.enabled` 控制（UI"自动维护"开关）：`enabled=false`（默认）时 scheduler 跑 sense + diagnose + plan + gate 但**不入队 jobs**，写 dry-run tick；`enabled=true` 时 gated actions 转 jobs 入队，worker 真调外部。
+- codex-tool 路径由 `spec.codexTool.binPath` 控制。
+- 历史 env `HIVE_ACCOUNT_FLEET_MODE` / `CODEX_TOOL_BIN` 已弃用，改由上述 spec 字段控制。
 
 ### 8. UI
 
@@ -117,7 +117,7 @@ broken account
 |---|---|
 | Sub2API 不可达 | scheduler.tick 写 `skippedReason='error'`；worker job 标 failed |
 | codex-tool 二进制不存在 | job 标 failed with `kind=bin_not_found`；scheduler 下个 tick 再排（受 backoff） |
-| HIVE_ACCOUNT_KEY 未设 | dry_run 模式仍能跑（不需要解密）；apply 模式下涉及 codex_login / codex_register 的 jobs 全部失败并提示用户配置 |
+| HIVE_ACCOUNT_KEY 未设 | `enabled=false` 仍能跑（不需要解密）；`enabled=true` 下涉及 codex_login / codex_register 的 jobs 全部失败并提示用户配置 |
 | codex-tool oauth_failed | 不丢账号——以 `oauth-failed-*` email 落地本地 `accounts`，原始 phone+password 仍可走 PATH_A 后续恢复 |
 | daily budget 耗尽 | gate 截断；UI 显眼红色横幅 |
 
@@ -125,7 +125,7 @@ broken account
 
 满足所有以下条件后 server 可以**无人值守运营 Sub2API 账号池**：
 
-1. `HIVE_ACCOUNT_KEY` 已设 + `HIVE_ACCOUNT_FLEET_MODE=apply`
+1. `HIVE_ACCOUNT_KEY` 已设 + `spec.enabled=true`
 2. Sub2API 连接已配
 3. AccountFleetSpec 已配（codex-tool 路径 / skymail / chatgpt OAuth client_id / SMS provider 余额充足）
 4. 至少一个 schedulable + active 节点供 codex-tool 走出口代理
@@ -167,6 +167,36 @@ broken account
 - 主镜像不内嵌 codex-tool（OSS / 闭源边界）
 - 提供 `examples/Dockerfile.codex-tool.example` + `examples/docker-compose.override.example.yml` 演示"私有衍生镜像"路径
 - 详细形态对比见 `docs/runbook.md` §"启用账号编排 / 0. 部署形态选择"
+
+## 增补（2026-05-31）：登录失败根因 + 退役语义收紧 + 运维开关 + fleet CLI
+
+### 登录失败根因（重大修正）
+
+之前账号登录大面积失败，**根因不是节点/consent 机制，而是出口 IP 质量 + 登录频率**：机房 IP 注册 + 高频反复登录被 OpenAI 风控**标记** → 登录时要求手机 OTP 二次验证（phone-otp / select-channel），而临时接码号已释放收不到码 → 无法完成；严重的直接被删除/停用。**干净/住宅出口注册、温和频率**的账号则邮箱 OTP 即可登录、不要求手机验证、token 被吊销后能**免费重新登录续命**（已用新注册账号在真实调度验证通过）。
+
+### 失败归因重做
+
+`recentFailureReasons`（`packages/schemas`）+ `router.aggregateFailureReasons` + web 失败分布 UI 改为新分类：`deactivated`（OpenAI 删除/停用=真死）/ `consent`（活账号但出口过不了 OAuth consent）/ `sentinel`（浏览器相位）/ `ratelimit`（Too many tries）/ `region` / `otp` / `network` / `retired` / `oauth` / `other`。
+
+### 退役语义收紧
+
+`account-fleet-worker.ts`：`network_or_proxy`（出口/网络/consent/Sentinel 类环境失败）**永不自动退役**，保持 `recovering`、退避封顶 6h；只有 OpenAI 确认的 `account_unusable`（deleted/deactivated）才退役。`retired` = 确定死号终态。一次性 guarded 迁移（`migrations.revive_network_retired_v1`，`packages/db/client.ts`）把历史误退役（`network_or_proxy`）的账号捞回 `recovering`。
+
+### 账号运维开关（`opsEnabled`）
+
+`accounts` 新增 `ops_enabled` 列（迁移 + repository 读写 + 批量 `setAllOpsEnabled` / `setAccountOpsEnabled`）；core 恢复规划据此 gate；router `actions.setOpsEnabled / setAllOpsEnabled`；web 每行 Switch + "自动运维"列 + 工具栏"停掉全部账号"。关掉账号则暂停其一切自动运维并**清掉其已排队的 job**，用于隔离实验。
+
+### hero-sms 激活 ID 持久化
+
+`accounts` 新增 `herosms_activation_id`：注册时从 codex-tool 结果透出存库，为"登录被要求手机验证时对原号二次接码重激活"预留。重激活登录流程已研究但**尚未实装**（干净账号根本不触发手机验证，优先级低）。
+
+### 诊断对账修复
+
+`core.diagnoseAccounts` 用 Sub2API 实时账号列表（`input.remoteAccounts`）对账：本地账号在远端找不到（`externalId=null` 孤儿 / 已删）→ 判 broken，修复"陈旧 healthy 永久残留导致 Hive 计数与 Sub2API 对不上"的 bug。
+
+### fleet CLI
+
+`apps/cli` 新增 `hive fleet` 命令组（status / accounts / stop-all / start-all / ops / register / login / import），供 AI/自动化无需网页登录态直接驱动：直接写 repo/DB，运行中的 server worker 通过 poll 消费入队 job。详见 `docs/runbook.md` §"账号编排（`hive fleet`）"。这是"项目由 AI 自动维护"的关键基础设施。
 
 ## 后续
 

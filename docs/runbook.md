@@ -70,77 +70,40 @@ Web UI 顶部 4 个 tab：节点池 / 代理编排 / 账号编排 / 导出。
 
 完成后 ReconcileScheduler 每 30s 一个 tick 自动调节绑定。右栏实时展示 KPI / 节点矩阵 / 最近调和日志。
 
-### 启用账号编排（账号全自动维护）
+### 启用账号编排（账号全自动维护，需外部 codex-tool，可选）
 
-详细设计见 ADR 0004 / `notes/account-fleet-design.md`。简要工作流：
+详细设计见 [ADR 0004](decisions/0004-account-fleet-orchestrator.md)。
+
+> **codex-tool 是独立的闭源组件，本仓库不含其源码、整体可选。** 没有它时节点池 / Sub2API 调度 /
+> 账号查看（账号列表、健康、意图，来自 Sub2API 观测）全部正常；它只用于**自动注册**与**自动登录续登**。
+> 账号编排默认关闭（`spec.enabled=false`），需在 UI 显式开启并配置 codex-tool 连接。
 
 #### 0. 部署形态选择
 
-codex-tool 是私有闭源 + Playwright/Chromium 重依赖（镜像 1.5 GB+），不能内嵌主镜像。四种接入：
+codex-tool 带 Playwright/Chromium 重依赖（镜像很大），不内嵌主镜像。常见接入方式：
 
 | 方式 | 适用 | 改动 |
 |---|---|---|
-| **A. 私有衍生镜像** | 多机部署 / 多环境镜像统一 | `examples/Dockerfile.codex-tool.example` 构建私有 image，compose 切 tag |
+| **A. 私有衍生镜像** | 多机部署 / 多环境镜像统一 | 基于主镜像构建一个把 codex-tool 装进去的私有 image，compose 切 tag |
 | **B. 宿主机直跑 mihomo-hive** | 单机 / 开发 | `node apps/server/dist/index.js`，codex-tool 跟 Hive 同主机 `PATH` 共享 |
-| **C. 暂不接入** | 仅用代理编排 / 只看面板 | 设 `HIVE_DISABLE_ACCOUNT_FLEET=true`，或保持 spec.enabled=false（spec 编辑可用，jobs 不入队） |
+| **C. 暂不接入** | 仅用节点池 / 代理编排 / 只看面板 | 保持 `spec.enabled=false`（spec 编辑可用，jobs 不入队） |
 | **D. 宿主机装 + 挂载进容器（推荐）** | 单机生产 / 想 Docker 隔离 mihomo-hive 同时复用主机 codex-tool 升级流 | 见下 |
 
-#### 0a. 路径 D：宿主机装 + 挂载（实操，对应 nexus-star 当前部署）
+#### 0a. 路径 D：宿主机装 + 挂载（要点）
 
-**首次部署**：
+宿主机用独立 Python 环境安装 codex-tool（连同其依赖与 Playwright Chromium），然后在 `docker-compose.yml` 里把这些目录**只读挂载**进容器，并让容器内的 `PATH` / Playwright 浏览器路径与主机一致：
 
-```bash
-# 主机装 uv + standalone Python 3.11
-uv python install 3.11
+- **容器内路径必须与主机一致**——codex-tool 启动脚本的 shebang 是绝对路径，容器内外不一致会找不到解释器
+- 挂载内容：codex-tool 启动脚本目录、Python venv 目录、（如果是 editable 安装）源码目录、Playwright Chromium 缓存目录，全部 `:ro`
+- 把 `PATH` 加上 codex-tool 启动脚本目录，并设 `PLAYWRIGHT_BROWSERS_PATH` 指向挂进来的 Chromium 缓存
 
-# 拉 codex-tool 源码（私有 repo，先 gh auth login 或 git credential 配好）
-gh auth setup-git
-git clone https://github.com/NekroAI/codex-create.git ~/Projects/codex-create
+> 上述真实主机路径 / 用户名 / 私有源码地址按你的部署环境填写，**不要写进公开仓库**。
 
-# editable 安装 codex-tool（自动建独立 venv，pip 拉所有 deps）
-# --with click：codex-tool 有 typer hard-import click 但没声明，必须显式补
-cd ~/Projects/codex-create
-uv tool install -e . --python 3.11 --with click
+**chromium 系统依赖**（libnss3、libatk 等）：注册流程在触发 Sentinel 验证码时才需要 chromium；`sms countries` / `login` 不需要。若用挂载形态且容器内缺这些库，可在容器内一次性 `apt install` 对应运行时依赖（重建容器会丢，长期方案是做最小衍生镜像只装 chromium runtime deps）。
 
-# Playwright Chromium（codex-tool Sentinel 验证码绕过用）
-uvx --from playwright playwright install chromium
+**升级**：在宿主机更新 codex-tool（editable 形态 `git pull` + 重装）/ 重新安装 Chromium 即可，容器内立即指向新版本，不需要 `docker restart`。
 
-# 验证
-~/.local/bin/codex-tool --help    # 应输出中文帮助
-```
-
-`docker-compose.yml` 加挂载 + PATH（**容器内路径必须与主机一致**，因为 codex-tool 启动脚本的 shebang 是绝对路径 `/home/miose/.local/share/uv/tools/codex-tool/bin/python`）：
-
-```yaml
-services:
-  mihomo-hive:
-    environment:
-      PATH: "/home/miose/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-      PLAYWRIGHT_BROWSERS_PATH: "/home/miose/.cache/ms-playwright"
-    volumes:
-      - ./runtime:/data
-      - /home/miose/.local/bin:/home/miose/.local/bin:ro             # codex-tool 启动脚本
-      - /home/miose/.local/share/uv:/home/miose/.local/share/uv:ro   # standalone Python + venv
-      - /home/miose/Projects/codex-create:/home/miose/Projects/codex-create:ro  # editable 源码
-      - /home/miose/.cache/ms-playwright:/home/miose/.cache/ms-playwright:ro    # Chromium
-```
-
-**chromium 系统依赖**（libnss3、libatk 等）目前**未装到容器内**：
-- `sms countries` / `login` 命令不需要 chromium → 不受影响
-- `all` 注册流程在触发 Sentinel 验证码时才需要 → 真触发时容器内 `apt install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 fonts-liberation` 一次（重建容器会丢，长期方案是做最小衍生镜像只装 chromium runtime deps）
-
-**升级 codex-tool**：
-
-```bash
-ssh nexus-star
-cd ~/Projects/codex-create && git pull
-uv tool install -e . --python 3.11 --force --with click
-# 容器内 codex-tool 立即指向新版本，不需要 docker restart
-```
-
-**升级 chromium**：`uvx --from playwright playwright install chromium`
-
-**Hive 端 spec.codexTool.binPath 设为绝对路径**：`/home/miose/.local/bin/codex-tool`（不要靠 PATH，避免某天 PATH 漂移）。
+**Hive 端 `spec.codexTool.binPath` 设为绝对路径**（不要靠 PATH，避免某天 PATH 漂移）。
 
 #### 1. 设置 env
 
@@ -148,26 +111,31 @@ uv tool install -e . --python 3.11 --force --with click
    HIVE_ACCOUNT_KEY=$(openssl rand -base64 32)   # AES-256-GCM 主密钥
    ```
 
-   > 历史 env `HIVE_ACCOUNT_FLEET_MODE` / `CODEX_TOOL_BIN` 已弃用：
-   > - 启停由 `spec.enabled` 控制（UI "自动维护" 按钮）
-   > - codex-tool 路径由 `spec.codexTool.binPath` 控制
-2. 切到**账号编排** tab → "⑥ codex-tool 连接" 卡填：
-   - codex-tool 路径（如果没用 env）
-   - SkyMail base_url / admin_email / admin_password
-   - ChatGPT mail_domain / chat_web_client_id / codex_client_id
-   - 接码 provider 与 service code
-   - 出口代理模式（默认 managed-node，自动选健康节点）
-3. "① 目标产能" 卡设 `healthyAccountsTarget` / `targetGroupId` / `defaultProxyId`
-4. "④ 出生策略" 卡设三级预算 `perTickCap / dailyBudget / monthlyBudget`
-5. 保存策略 → 点 **【立即调和】** 触发首次
+   > 启停由 `spec.enabled` 控制（UI "自动维护" 开关）；codex-tool 路径由 `spec.codexTool.binPath` 控制。
+2. 切到**账号编排** tab → codex-tool 连接卡填：codex-tool 路径、邮件服务连接、ChatGPT OAuth client_id、接码 provider、出口代理模式（默认 managed-node，自动选健康节点；可开 `egress.dynamic` 单口动态出口）。
+3. 目标产能卡设 `healthyAccountsTarget` / `targetGroupId` / `defaultProxyId`。
+4. 出生策略卡设三级预算 `perTickCap / dailyBudget / monthlyBudget`。
+5. 保存策略 → 点 **【立即调和】** 触发首次。
 
 之后 AccountFleetScheduler 每 5min 一个 tick：
-- 观察账号 health（refresh_token / rate_limit / quota / upstream-errors 四路信号）
-- 自动 `codex_login` 修复掉登录账号（phone+password 已知者）
-- 自动 `codex_register` 补充新账号（受预算）
-- 自动退役长期失败 / 死号
+- 观察账号 health（refresh_token / rate_limit / quota / upstream-errors 信号；并用 Sub2API 实时账号列表对账，远端找不到的本地账号判 broken）
+- 自动 `codex_login` 给 token 失效的账号经干净出口重新登录续命（phone+password 已知者）
+- 自动 `codex_register` 补充新账号（受三级预算）
+- 自动退役**确定死号**（`account_unusable`）；出口/网络/consent/Sentinel 类失败永不退役，退避重试（封顶 6h）
 
-用户唯一需要做：充 SMS 余额 + 偶尔看 KPI。
+#### 关键经验（决定续登成败）
+
+账号是否被风控标记，主要取决于**出口 IP 质量**（干净/住宅 vs 机房）与**登录频率**：
+
+- 干净/住宅出口注册、温和频率的账号：邮箱 OTP 即可登录、不要求手机验证、token 被吊销后能**免费重新登录续命**（已在真实调度用新注册账号验证通过）。
+- 机房 IP 注册 + 高频反复登录的账号：被 OpenAI 风控标记 → 登录时要求手机 OTP 二次验证，而临时接码号已释放收不到码 → 无法完成；严重的直接被删除/停用。
+
+用户日常只需要：保证出口干净、控制频率、充接码余额、偶尔看 KPI。
+
+#### 隔离实验 / 停机
+
+- 每个账号行有"自动运维"开关；关掉则暂停该账号一切自动化并清其已排队 job。
+- 工具栏"停掉全部账号"可批量关（可只停非 active），用于"停掉现有账号、只让一小批新号跑实验"。
 
 ### 节点池工具栏低频操作（`⋯` dropdown）
 
@@ -231,6 +199,26 @@ hive export sub2api --host 127.0.0.1 --output /data/generated/sub2api-proxies.js
 
 导出文件只包含 `status=active` 且已分配端口的节点。Web UI 中可先筛选/勾选目标节点再下载或写出。
 
+### 账号编排（`hive fleet`，供 AI/自动化驱动）
+
+`hive fleet` 命令组让 AI / 脚本**无需网页登录态**直接驱动账号编排：它直接读写本地 repo/DB，运行中的 server worker 通过 poll 消费入队的 job。这是"项目由 AI 自动维护"的关键基础设施。
+
+容器内用法：`docker exec mihomo-hive node apps/cli/dist/index.js fleet <cmd>`。
+
+```bash
+hive fleet status                       # 概览：意图/健康/运维开关分布 + 队列 + 当前可恢复数
+hive fleet accounts                     # 列出账号(脱敏)，显示完整账号 id 便于 pipe 到 ops/login
+hive fleet accounts --broken --ops on   # 可按 --intent / --ops on|off / --broken / --limit 过滤
+hive fleet stop-all                     # 停掉账号运维并清其队列(默认只停非 active；--include-active 全停)
+hive fleet start-all                    # 恢复所有账号运维开关
+hive fleet ops <accountId> on|off       # 单账号运维开关(off 同时清该账号队列任务)
+hive fleet register <n>                 # 入队 N 个 codex_register(立即注册新号，默认插队)
+hive fleet login <accountId>            # 入队一次 codex_login(要求账号有 phone+password)
+hive fleet import <refreshToken>        # 用外部 refresh_token 直接落地一个账号到 Sub2API
+```
+
+> 这些命令只入队/改状态，真正执行由 server 端 worker 完成（需 server 在跑且已配 codex-tool / Sub2API）。
+
 ---
 
 ## 开发模式
@@ -248,4 +236,5 @@ pnpm --filter @mihomo-hive/server dev
 - [架构总览](architecture.md)
 - [数据模型](data-model.md)
 - [ADR 0003 声明式编排](decisions/0003-declarative-orchestration.md)
+- [ADR 0004 账号编排](decisions/0004-account-fleet-orchestrator.md)
 - [CI/CD](cicd.md)
