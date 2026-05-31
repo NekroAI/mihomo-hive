@@ -770,6 +770,40 @@ interface LandOnSub2apiInput {
  * 若 spec.recovery.deleteOldAccountOnRecovery=true 且旧账号有 externalId →
  * 创建新 Sub2API record 成功后删除旧的。
  */
+/**
+ * 对 Sub2API 落地的**瞬时错误**(5xx / EOF / 网络抖动 / OpenAI 上游临时失败)有界重试。
+ * 背景:刚注册拿到的 token 是有效的,但 Sub2API 替我们验 token 时偶发 502
+ * (OPENAI_OAUTH_REQUEST_FAILED: EOF)——若不重试就把这个号连同接码费白白丢掉。
+ * 仅对瞬时错误重试;4xx/配置类等确定性错误立即抛出。
+ */
+async function withSub2apiRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      const transient =
+        msg.includes("500") ||
+        msg.includes("502") ||
+        msg.includes("503") ||
+        msg.includes("504") ||
+        msg.includes("eof") ||
+        msg.includes("timeout") ||
+        msg.includes("timed out") ||
+        msg.includes("econn") ||
+        msg.includes("socket") ||
+        msg.includes("network") ||
+        msg.includes("openai_oauth_request_failed") ||
+        msg.includes("upstream");
+      if (!transient || i >= attempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * 2 ** (i - 1), 8000)));
+    }
+  }
+  throw lastErr;
+}
+
 async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
   const { repo, crypto, spec, account, tokens, email } = input;
   const sub2api = requireSub2apiClient(repo);
@@ -781,23 +815,27 @@ async function landOnSub2api(input: LandOnSub2apiInput): Promise<void> {
   //    两者都没 → 抛错，让用户感知问题（而不是硬编码到某个不知名 proxy_id=1）。
   const proxyId = resolveCreationProxyId(repo, input.egressNodeHash ?? null);
   // 2. 灌 token 到 Sub2API → 拿标准化 token bundle（含 client_id / org_id / expires_at）
-  const refreshed = await sub2api.refreshOpenaiToken({
-    refreshToken: tokens.refreshToken,
-    proxyId
-  });
-  // 3. POST /admin/accounts
+  //    Sub2API 这步会替我们调 OpenAI /oauth/token 验 token，偶发 502/EOF（Sub2API↔OpenAI
+  //    瞬时网络抖动，OPENAI_OAUTH_REQUEST_FAILED）。**必须重试**——否则刚注册拿到的有效
+  //    token 因一次网络抖动就被丢、白白浪费一个注册号 + 接码费（实测复现）。
+  const refreshed = await withSub2apiRetry(() =>
+    sub2api.refreshOpenaiToken({ refreshToken: tokens.refreshToken, proxyId })
+  );
+  // 3. POST /admin/accounts（同样对瞬时错误重试）
   const name = synthesizeName(spec, email);
-  const created = await sub2api.createAccount(
-    makeCreatePayload({
-      spec,
-      proxyId,
-      tokens: { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token, idToken: refreshed.id_token },
-      email: refreshed.email,
-      organizationId: refreshed.organization_id,
-      clientId: refreshed.client_id,
-      expiresAt: refreshed.expires_at,
-      name
-    })
+  const created = await withSub2apiRetry(() =>
+    sub2api.createAccount(
+      makeCreatePayload({
+        spec,
+        proxyId,
+        tokens: { accessToken: refreshed.access_token, refreshToken: refreshed.refresh_token, idToken: refreshed.id_token },
+        email: refreshed.email,
+        organizationId: refreshed.organization_id,
+        clientId: refreshed.client_id,
+        expiresAt: refreshed.expires_at,
+        name
+      })
+    )
   );
   // 3. 删除旧 Sub2API 记录（可选）
   let deletedOld = false;
