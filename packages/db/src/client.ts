@@ -267,6 +267,28 @@ function ensureSchema(sqlite: HiveSqlite): void {
       console.log(`[migration] 捞回 ${res.changes} 个按 network_or_proxy 误退役的账号 → recovering(6h 后再试)。`);
     }
   }
+  // 一次性测试推动：让一小批"很可能还活着"(上次失败归 network_or_proxy = 过了 OpenAI
+  // OTP、只是出口过不了 consent)的 recovering 账号立刻可重试,用来观测"经干净出口
+  // (192.168.5.8) 登录成功率是否回升"。封顶 20 个,避免单 IP 被连续登录打到限流;其余
+  // 账号维持 6h 退避不动。settings flag 守卫,只跑一次。
+  const sampleFlag = sqlite
+    .prepare("SELECT 1 FROM settings WHERE key = ?")
+    .get("migrations.test_login_egress_sample_v1");
+  if (!sampleFlag) {
+    const res = sqlite
+      .prepare(
+        "UPDATE accounts SET next_recovery_after = ? WHERE id IN (" +
+          "SELECT id FROM accounts WHERE intent = 'recovering' AND last_recovery_failure_category = 'network_or_proxy' " +
+          "ORDER BY last_used_at DESC LIMIT 20)"
+      )
+      .run(new Date().toISOString());
+    sqlite
+      .prepare("INSERT INTO settings (key, value_json) VALUES (?, ?) ON CONFLICT(key) DO NOTHING")
+      .run("migrations.test_login_egress_sample_v1", JSON.stringify({ at: "migration", made_eligible: res.changes }));
+    if (res.changes > 0) {
+      console.log(`[migration] 放出 ${res.changes} 个活账号立即可重试(观测干净出口登录成功率)。`);
+    }
+  }
   // P5-AT: job 结束时持久化的日志末尾（redact 过），供"最近完成"回看
   addColumnIfMissing(sqlite, "account_jobs", "log_tail", "TEXT");
   // notes/account-fleet-design.md proxy-aware orchestration（增量 migration）：
