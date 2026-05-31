@@ -1023,7 +1023,16 @@ export function classifyCodexFailure(message: string): "account_unusable" | "net
   const m = message.toLowerCase();
   // 终态废账号标记 —— 只认"明确的账号级吊销/失效"信号（Sub2API 报 token revoked /
   // invalidated oauth token：授权已被吊销，反复重登/刷新都救不回，直接退役不空转）。
-  if (m.includes("account_unusable") || m.includes("revoked") || m.includes("invalidated oauth")) {
+  if (
+    m.includes("account_unusable") ||
+    m.includes("revoked") ||
+    m.includes("invalidated oauth") ||
+    // OpenAI 明确"账号已删除/停用"——实测大量 recovering 账号是被封停的(email-otp/validate
+    // 返回 403 + "deleted or deactivated")。这类账号反复重登也救不回,直接退役。
+    m.includes("deleted or deactivated") ||
+    m.includes("deactivated") ||
+    m.includes("do not have an account")
+  ) {
     return "account_unusable";
   }
   // P5-BA 根因修复：OAuth 跳转链"缺少目标 URL / 缺少 continue_url / 没有 code"过去被当
