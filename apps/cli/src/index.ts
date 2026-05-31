@@ -422,6 +422,180 @@ program.parseAsync().catch((error: unknown) => {
   process.exitCode = 1;
 });
 
+// ─────────── 账号编排(fleet)CLI —— 供 AI/自动化直接驱动,无需网页登录态 ───────────
+// 直接写 repo/DB;运行中的 server worker 通过 poll 循环消费入队的 job,无需 pump。
+const fleet = program.command("fleet").description("账号编排:状态/停起运维/注册/登录/导入(供自动维护)");
+
+function enqueueFleetJob(
+  repo: HiveRepository,
+  kind: "codex_login" | "codex_register" | "import_to_sub2api",
+  opts: { accountId?: string | null; priority?: number; payload?: unknown }
+): void {
+  const now = new Date().toISOString();
+  repo.enqueueAccountJob({
+    id: randomUUID(),
+    kind,
+    accountId: opts.accountId ?? null,
+    status: "queued",
+    attempt: 0,
+    maxAttempts: 1,
+    priority: opts.priority ?? 50,
+    scheduledAt: now,
+    startedAt: null,
+    finishedAt: null,
+    durationMs: null,
+    payloadJson: JSON.stringify(opts.payload ?? { reason: "cli" }),
+    resultJson: null,
+    errorMessage: null,
+    triggeredBy: "manual",
+    triggeredTickId: null,
+    createdAt: now,
+    updatedAt: now
+  });
+}
+
+fleet
+  .command("status")
+  .description("概览:意图/健康/运维开关分布 + 队列 + 可恢复数")
+  .action(async () => {
+    const { repo } = await openRepo();
+    const accs = repo.listAccounts();
+    const by = (f: (a: (typeof accs)[number]) => string) => {
+      const m: Record<string, number> = {};
+      for (const a of accs) m[f(a)] = (m[f(a)] ?? 0) + 1;
+      return m;
+    };
+    const now = Date.now();
+    const eligibleRecover = accs.filter(
+      (a) =>
+        a.health === "broken" &&
+        a.intent === "recovering" &&
+        a.opsEnabled !== false &&
+        (!a.nextRecoveryAfter || new Date(a.nextRecoveryAfter).getTime() <= now)
+    ).length;
+    console.log(
+      JSON.stringify(
+        {
+          total: accs.length,
+          intent: by((a) => a.intent),
+          health: by((a) => a.health),
+          opsEnabled: by((a) => (a.opsEnabled === false ? "off" : "on")),
+          queuedJobs: repo.countQueuedAccountJobs(),
+          eligibleRecoverNow: eligibleRecover
+        },
+        null,
+        2
+      )
+    );
+  });
+
+fleet
+  .command("accounts")
+  .description("列出账号(脱敏:id前缀/意图/健康/运维/失败类/激活ID/邮箱)")
+  .option("--intent <intent>", "按意图过滤")
+  .option("--ops <state>", "按运维开关过滤 on/off")
+  .option("--broken", "只看 broken")
+  .option("--limit <n>", "最多显示", "40")
+  .action(async (o) => {
+    const { repo } = await openRepo();
+    let accs = repo.listAccounts();
+    if (o.intent) accs = accs.filter((a) => a.intent === o.intent);
+    if (o.ops) accs = accs.filter((a) => (a.opsEnabled === false ? "off" : "on") === o.ops);
+    if (o.broken) accs = accs.filter((a) => a.health === "broken");
+    const limit = Number(o.limit) || 40;
+    for (const a of accs.slice(0, limit)) {
+      console.log(
+        [
+          a.id.slice(0, 8),
+          a.intent,
+          a.health,
+          a.opsEnabled === false ? "ops:off" : "ops:on",
+          a.lastRecoveryFailureCategory ?? "-",
+          a.herosmsActivationId ?? "-",
+          a.email
+        ].join("\t")
+      );
+    }
+    console.log(`# 显示 ${Math.min(accs.length, limit)} / 共 ${accs.length}`);
+  });
+
+fleet
+  .command("stop-all")
+  .description("停掉账号运维并清其队列任务。默认只停非 active;--include-active 全停")
+  .option("--include-active", "连 active 一起停", false)
+  .action(async (o) => {
+    const { repo } = await openRepo();
+    console.log(JSON.stringify(repo.setAllOpsEnabled(false, { onlyNonActive: !o.includeActive })));
+  });
+
+fleet
+  .command("start-all")
+  .description("恢复所有账号运维开关")
+  .action(async () => {
+    const { repo } = await openRepo();
+    console.log(JSON.stringify(repo.setAllOpsEnabled(true, { onlyNonActive: false })));
+  });
+
+fleet
+  .command("ops <accountId> <state>")
+  .description("单账号运维开关 on/off(off 同时清该账号队列任务)")
+  .action(async (accountId: string, state: string) => {
+    const { repo } = await openRepo();
+    const acc = repo.setAccountOpsEnabled(accountId, state === "on");
+    if (!acc) {
+      console.error("account not found");
+      process.exitCode = 1;
+      return;
+    }
+    console.log(JSON.stringify({ id: acc.id, opsEnabled: acc.opsEnabled }));
+  });
+
+fleet
+  .command("register <count>")
+  .description("入队 N 个 codex_register(立即注册新号),默认插队")
+  .option("--no-jump", "不插队(priority=80 而非 5)")
+  .action(async (count: string, o: { jump?: boolean }) => {
+    const { repo } = await openRepo();
+    const n = Math.max(1, Math.min(50, Number(count) || 1));
+    const priority = o.jump === false ? 80 : 5;
+    for (let i = 0; i < n; i++) enqueueFleetJob(repo, "codex_register", { priority, payload: { reason: "cli", batch: n } });
+    console.log(JSON.stringify({ enqueued: n, priority }));
+  });
+
+fleet
+  .command("login <accountId>")
+  .description("入队一次 codex_login(要求账号有 phone+password)")
+  .action(async (accountId: string) => {
+    const { repo } = await openRepo();
+    const acc = repo.getAccountById(accountId);
+    if (!acc) {
+      console.error("account not found");
+      process.exitCode = 1;
+      return;
+    }
+    if (!acc.encPhone || !acc.encPassword) {
+      console.error("account lacks phone/password; cannot run codex_login");
+      process.exitCode = 1;
+      return;
+    }
+    enqueueFleetJob(repo, "codex_login", { accountId: acc.id, priority: 50, payload: { reason: "cli" } });
+    console.log(JSON.stringify({ enqueued: true, accountId: acc.id }));
+  });
+
+fleet
+  .command("import <refreshToken>")
+  .description("入队 import_to_sub2api(用 refresh_token 把账号导入平台、进真实调度)")
+  .option("--existing <accountId>", "关联到已有账号 id(复活)")
+  .action(async (refreshToken: string, o: { existing?: string }) => {
+    const { repo } = await openRepo();
+    enqueueFleetJob(repo, "import_to_sub2api", {
+      accountId: o.existing ?? null,
+      priority: 60,
+      payload: { refreshToken, existingAccountId: o.existing }
+    });
+    console.log(JSON.stringify({ enqueued: true }));
+  });
+
 async function openRepo() {
   const config = await loadRuntimeConfig();
   const sqlite = openSqlite(config.databasePath);
