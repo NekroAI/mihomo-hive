@@ -501,7 +501,7 @@ fleet
     for (const a of accs.slice(0, limit)) {
       console.log(
         [
-          a.id.slice(0, 8),
+          a.id,
           a.intent,
           a.health,
           a.opsEnabled === false ? "ops:off" : "ops:on",
