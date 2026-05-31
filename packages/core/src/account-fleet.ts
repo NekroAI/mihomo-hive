@@ -185,6 +185,8 @@ function senseAccounts(input: AccountFleetInput): AccountRecordInternal[] {
       lastRecoveryError: null,
       lastRecoveryPath: null,
       lastRecoveryFailureCategory: null,
+      opsEnabled: true,
+      herosmsActivationId: null,
       batchId: null,
       registeredAt: null,
       // adopted_* 不是本地注册，没有 sms_country / sms_cost 经验
@@ -470,6 +472,8 @@ function planActions(
   if (policy.recovery.enabled) {
     for (const acc of accounts) {
       if (acc.health !== "broken") continue;
+      // 运维开关关闭 → 该账号暂停一切自动恢复(用于隔离实验:停掉现有账号、只跑新账号)。
+      if (acc.opsEnabled === false) continue;
       // P6-14 关键修复：已退役账号 health 仍为 broken，但绝不能再排恢复 —— 否则每个 tick
       // 都给死号重新入队 recover_via_login，被执行前拦截删除后又入队，无限空转。
       if (acc.intent === "retired") continue;

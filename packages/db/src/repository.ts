@@ -156,6 +156,8 @@ interface AccountRow {
   last_recovery_error: string | null;
   last_recovery_path: AccountRecordInternal["lastRecoveryPath"];
   last_recovery_failure_category: AccountRecordInternal["lastRecoveryFailureCategory"];
+  ops_enabled: number;
+  herosms_activation_id: string | null;
   batch_id: string | null;
   registered_at: string | null;
   sms_country: string | null;
@@ -920,7 +922,7 @@ export class HiveRepository {
           quota_5h_percent, quota_7d_percent, errors_in_window,
           broken_since_tick, broken_consecutive_ticks,
           recovery_attempts, next_recovery_after, last_recovery_error, last_recovery_path,
-          last_recovery_failure_category,
+          last_recovery_failure_category, ops_enabled, herosms_activation_id,
           batch_id, registered_at, sms_country, sms_cost_cents, egress_node_hash,
           first_seen_at, relogin_count, last_recovered_at, change_history,
           created_at, updated_at
@@ -933,7 +935,7 @@ export class HiveRepository {
           @quota5hPercent, @quota7dPercent, @errorsInWindow,
           @brokenSinceTick, @brokenConsecutiveTicks,
           @recoveryAttempts, @nextRecoveryAfter, @lastRecoveryError, @lastRecoveryPath,
-          @lastRecoveryFailureCategory,
+          @lastRecoveryFailureCategory, @opsEnabled, @herosmsActivationId,
           @batchId, @registeredAt, @smsCountry, @smsCostCents, @egressNodeHash,
           @firstSeenAt, @reloginCount, @lastRecoveredAt, @changeHistory,
           @createdAt, @updatedAt
@@ -968,6 +970,8 @@ export class HiveRepository {
           last_recovery_error = excluded.last_recovery_error,
           last_recovery_path = excluded.last_recovery_path,
           last_recovery_failure_category = excluded.last_recovery_failure_category,
+          ops_enabled = excluded.ops_enabled,
+          herosms_activation_id = excluded.herosms_activation_id,
           batch_id = excluded.batch_id,
           registered_at = excluded.registered_at,
           sms_country = excluded.sms_country,
@@ -1046,6 +1050,8 @@ export class HiveRepository {
       smsCountry: string | null;
       smsCostCents: number | null;
       lastRecoveryFailureCategory: AccountRecordInternal["lastRecoveryFailureCategory"];
+      opsEnabled: boolean;
+      herosmsActivationId: string | null;
       // P5-AQ: 质量指标
       firstSeenAt: string | null;
       reloginCount: number;
@@ -1073,6 +1079,8 @@ export class HiveRepository {
       lastRecoveryError: "last_recovery_error",
       lastRecoveryPath: "last_recovery_path",
       lastRecoveryFailureCategory: "last_recovery_failure_category",
+      opsEnabled: "ops_enabled",
+      herosmsActivationId: "herosms_activation_id",
       encPhone: "enc_phone",
       encPassword: "enc_password",
       encRefreshToken: "enc_refresh_token",
@@ -1096,7 +1104,8 @@ export class HiveRepository {
       const column = fieldMap[key];
       if (!column) continue;
       sets.push(`${column} = @${key}`);
-      values[key] = patch[key] ?? null;
+      const v = patch[key];
+      values[key] = typeof v === "boolean" ? (v ? 1 : 0) : (v ?? null);
     }
     if (sets.length === 0) {
       return this.getAccountById(id);
@@ -1130,6 +1139,23 @@ export class HiveRepository {
       .prepare(`UPDATE accounts SET ${sets.join(", ")} WHERE id = @id`)
       .run(values);
     return this.getAccountById(id);
+  }
+
+  /** 单账号设置运维开关。返回更新后的记录。 */
+  setAccountOpsEnabled(id: string, enabled: boolean): AccountRecordInternal | undefined {
+    return this.patchAccount(id, { opsEnabled: enabled });
+  }
+
+  /**
+   * 批量设置运维开关。onlyRetiredOrRecovering=true 时只动"非 active"账号(典型用法:
+   * 停掉所有现有死号/恢复中账号、保留正常服务的 active),否则动全部。返回受影响行数。
+   */
+  setAllOpsEnabled(enabled: boolean, opts?: { onlyNonActive?: boolean }): number {
+    const now = new Date().toISOString();
+    const where = opts?.onlyNonActive ? "WHERE intent != 'active'" : "";
+    return this.sqlite
+      .prepare(`UPDATE accounts SET ops_enabled = ?, updated_at = ? ${where}`)
+      .run(enabled ? 1 : 0, now).changes;
   }
 
   // —— Account Jobs ——
@@ -1663,6 +1689,8 @@ function toAccountRow(record: AccountRecordInternal): Record<string, unknown> {
     lastRecoveryError: record.lastRecoveryError,
     lastRecoveryPath: record.lastRecoveryPath,
     lastRecoveryFailureCategory: record.lastRecoveryFailureCategory,
+    opsEnabled: record.opsEnabled ? 1 : 0,
+    herosmsActivationId: record.herosmsActivationId ?? null,
     batchId: record.batchId,
     registeredAt: record.registeredAt,
     smsCountry: record.smsCountry,
@@ -1731,6 +1759,8 @@ function accountFromRow(row: AccountRow): AccountRecordInternal {
     lastRecoveryError: row.last_recovery_error,
     lastRecoveryPath: row.last_recovery_path,
     lastRecoveryFailureCategory: row.last_recovery_failure_category,
+    opsEnabled: (row.ops_enabled ?? 1) === 1,
+    herosmsActivationId: row.herosms_activation_id ?? null,
     batchId: row.batch_id,
     registeredAt: row.registered_at,
     smsCountry: row.sms_country,

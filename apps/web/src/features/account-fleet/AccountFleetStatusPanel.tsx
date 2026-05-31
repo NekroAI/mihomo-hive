@@ -413,6 +413,7 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                 <th className="num">存活/重登</th>
                 <th>最近变动</th>
                 <th>出口节点</th>
+                <th>运维</th>
               </tr>
             </thead>
             <tbody>
@@ -519,6 +520,9 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                     <span className="muted">—</span>
                   )}
                 </td>
+                <td>
+                  <OpsToggle acc={acc} />
+                </td>
               </tr>
               );
             })}
@@ -542,6 +546,26 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
         </div>
       ) : null}
     </Panel>
+  );
+}
+
+/** 单账号运维开关：开=接受自动化任务分配,关=暂停该账号一切自动恢复/重绑。 */
+function OpsToggle(props: { acc: AccountRecordView }) {
+  const utils = trpc.useUtils();
+  const m = trpc.accountFleet.actions.setOpsEnabled.useMutation({
+    onSuccess: () => void utils.accountFleet.status.invalidate()
+  });
+  const on = props.acc.opsEnabled;
+  return (
+    <Button
+      size="sm"
+      variant={on ? "ghost" : "danger"}
+      loading={m.isPending}
+      title={on ? "运维开:点此暂停该账号的自动化(恢复/重绑)分配" : "运维已暂停:点此恢复该账号的自动化分配"}
+      onClick={() => m.mutate({ accountId: props.acc.id, enabled: !on })}
+    >
+      {on ? "运维开" : "已暂停"}
+    </Button>
   );
 }
 
@@ -808,6 +832,8 @@ function RegisterControl(props: { unitCostUsd: number }) {
     }
   });
   const regen = trpc.accountFleet.actions.regenerateQueue.useMutation({ onSuccess: refresh });
+  const stopAll = trpc.accountFleet.actions.setAllOpsEnabled.useMutation({ onSuccess: refresh });
+  const [confirmStop, setConfirmStop] = React.useState(false);
   const estCost = (count * props.unitCostUsd).toFixed(2);
 
   // 二次确认态：花真金白银取号，必须让用户确认数量与预计花费
@@ -861,6 +887,26 @@ function RegisterControl(props: { unitCostUsd: number }) {
       >
         重新编排
       </Button>
+      {confirmStop ? (
+        <Button
+          size="sm"
+          variant="danger"
+          loading={stopAll.isPending}
+          title="把所有非 active 账号(死号/恢复中)的运维开关关掉,不再分配任何自动任务。用于隔离实验:停掉现有账号、只让新注册账号跑。active 正常账号不动。"
+          onClick={() => stopAll.mutate({ enabled: false, onlyNonActive: true }, { onSettled: () => setConfirmStop(false) })}
+        >
+          确认停掉现有账号?
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          title="停掉所有非 active 账号(死号/恢复中)的自动化运维,隔离实验用。"
+          onClick={() => setConfirmStop(true)}
+        >
+          停掉现有账号
+        </Button>
+      )}
     </span>
   );
 }

@@ -129,6 +129,13 @@ export const accountRecordInternalSchema = z.object({
     .enum(["account_unusable", "network_or_proxy", "oauth_failed"])
     .nullable(),
 
+  /** 是否接受自动化运维任务分配（恢复/重绑等）。false=暂停该账号一切自动化，用于隔离实验
+   * （把现有账号全停、只让新账号跑实验，避免死号干扰）。 */
+  opsEnabled: z.boolean().default(true),
+  /** 注册时 hero-sms 的激活 ID（getNumber 返回 ACCESS_NUMBER:<id>:<号>）。登录被要求手机
+   * OTP(step-up) 时用它对原号"重新激活"二次接码。null=未知/老账号。 */
+  herosmsActivationId: z.string().nullable().default(null),
+
   // 溯源
   batchId: z.string().nullable(),
   registeredAt: z.string().nullable(),
@@ -214,6 +221,10 @@ export const accountRecordViewSchema = z.object({
   lastRecoveryFailureCategory: z
     .enum(["account_unusable", "network_or_proxy", "oauth_failed"])
     .nullable(),
+  /** 是否接受自动化运维(false=已暂停,不分配任何自动任务)。 */
+  opsEnabled: z.boolean().default(true),
+  /** hero-sms 激活 ID（登录 step-up 二次接码用）。 */
+  herosmsActivationId: z.string().nullable().default(null),
 
   batchId: z.string().nullable(),
   registeredAt: z.string().nullable(),

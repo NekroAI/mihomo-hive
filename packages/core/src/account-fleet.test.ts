@@ -48,6 +48,8 @@ function makeAcc(overrides: Partial<AccountRecordInternal> = {}): AccountRecordI
     lastRecoveryError: null,
     lastRecoveryPath: null,
     lastRecoveryFailureCategory: null,
+    opsEnabled: true,
+    herosmsActivationId: null,
     batchId: null,
     registeredAt: null,
     smsCountry: null,

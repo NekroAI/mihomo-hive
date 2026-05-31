@@ -307,6 +307,10 @@ function ensureSchema(sqlite: HiveSqlite): void {
   sqlite.exec("UPDATE accounts SET first_seen_at = created_at WHERE first_seen_at IS NULL;");
   // 变更历史（JSON 数组，最近 N 条 health/intent/额度变动；附加列，不回填存量）
   addColumnIfMissing(sqlite, "accounts", "change_history", "TEXT");
+  // 运维开关：false=该账号暂停一切自动化(恢复/重绑)分配,用于隔离实验。默认 1(开)。
+  addColumnIfMissing(sqlite, "accounts", "ops_enabled", "INTEGER NOT NULL DEFAULT 1");
+  // hero-sms 激活 ID：登录被要求手机 OTP(step-up) 时用它对原号"重新激活"二次接码。
+  addColumnIfMissing(sqlite, "accounts", "herosms_activation_id", "TEXT");
   // P5-AK/3: account_jobs.kind 加 import_codex_tool_account。SQLite 不能 ALTER CHECK，
   // 老 DB 必须 rebuild 表（rename → create → copy → drop → 重建 indexes）。
   rebuildAccountJobsCheckIfNeeded(sqlite);

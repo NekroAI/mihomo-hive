@@ -1526,6 +1526,22 @@ export const appRouter = t.router({
         if (ctx.accountJobsWorker) void ctx.accountJobsWorker.pump().catch(() => undefined);
         return { cancelled, replanned: tick !== null };
       }),
+      /** 单账号运维开关。false=暂停该账号一切自动化(恢复/重绑等任务分配)。 */
+      setOpsEnabled: protectedProcedure
+        .input(z.object({ accountId: z.string().min(1), enabled: z.boolean() }))
+        .mutation(({ ctx, input }) => {
+          const acc = ctx.repo.setAccountOpsEnabled(input.accountId, input.enabled);
+          if (!acc) throw new TRPCError({ code: "NOT_FOUND", message: "account not found" });
+          return { id: acc.id, opsEnabled: acc.opsEnabled };
+        }),
+      /** 批量运维开关。onlyNonActive=true 只动非 active 账号(典型:停掉所有死号/恢复中、留正常 active);
+       *  典型用法:一键停掉所有现有账号,只让新注册账号跑实验,避免死号干扰。 */
+      setAllOpsEnabled: protectedProcedure
+        .input(z.object({ enabled: z.boolean(), onlyNonActive: z.boolean().default(false) }))
+        .mutation(({ ctx, input }) => {
+          const changed = ctx.repo.setAllOpsEnabled(input.enabled, { onlyNonActive: input.onlyNonActive });
+          return { changed };
+        }),
       /** 手动入队 codex_login 修复 job。要求账号已有 phone+password。 */
       enqueueRecoverLogin: protectedProcedure
         .input(z.object({ accountId: z.string().min(1) }))
@@ -1844,6 +1860,8 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
     lastRecoveryError: a.lastRecoveryError,
     lastRecoveryPath: a.lastRecoveryPath,
     lastRecoveryFailureCategory: a.lastRecoveryFailureCategory,
+    opsEnabled: a.opsEnabled,
+    herosmsActivationId: a.herosmsActivationId,
     batchId: a.batchId,
     registeredAt: a.registeredAt,
     smsCountry: a.smsCountry,

@@ -948,6 +948,8 @@ function makeFreshAccount(overrides: Partial<AccountRecordInternal>): AccountRec
     lastRecoveryError: null,
     lastRecoveryPath: null,
     lastRecoveryFailureCategory: null,
+    opsEnabled: true,
+    herosmsActivationId: null,
     batchId: null,
     registeredAt: null,
     smsCountry: null,
