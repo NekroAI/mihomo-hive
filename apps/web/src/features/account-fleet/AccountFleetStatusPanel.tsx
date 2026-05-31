@@ -988,12 +988,16 @@ const FAILURE_REASON_META: Record<
   AccountFleetStatusSnapshot["recentFailureReasons"][number]["key"],
   { label: string; hint: string; tone: "danger" | "warning" | "neutral" }
 > = {
-  region: { label: "地区不可用", tone: "warning", hint: "接码地区取不到号/收不到码。地区经验会逐步累积避开坏区，或检查接码平台余额。" },
-  proxy: { label: "代理 / 网络", tone: "warning", hint: "出口代理过不了 Cloudflare/超时。考虑导入并标记高质量「保留节点」专供注册登录。" },
-  account_dead: { label: "账号失效", tone: "danger", hint: "OAuth 授权链终态缺失，账号已失效无法恢复，已自动退役、不再消耗重试。" },
-  retired: { label: "已退役跳过", tone: "neutral", hint: "死账号的残留任务被执行前拦下跳过，属正常清理，不消耗资源。" },
-  oauth: { label: "OAuth 失败", tone: "warning", hint: "授权环节失败，按退避自动重试，达上限退役。" },
-  other: { label: "其它", tone: "neutral", hint: "未归类的失败，可展开「最近完成」看具体日志。" }
+  deactivated: { label: "账号已停用", tone: "danger", hint: "OpenAI 在邮箱验证码校验时返回 403「账号已删除/停用」(deleted or deactivated)——这是确定的死号信号,已退役、不再重试。这是唯一会触发退役的失败类。" },
+  consent: { label: "出口过不了 consent", tone: "warning", hint: "账号是活的(已过 OpenAI 的 OTP 校验),但我方出口在 OAuth consent 那步拿不到跳转 URL(缺少目标 URL)。实测对出口 IP 敏感——干净/住宅 IP 能过、机房 IP 多被挡。不退役,换干净出口可救。" },
+  sentinel: { label: "Sentinel/浏览器", tone: "warning", hint: "桌面浏览器在过 Cloudflare Sentinel 那步失败,或到 OpenAI 的连接被重置。多为出口问题,不退役、可重试。" },
+  ratelimit: { label: "OpenAI 限流", tone: "warning", hint: "OpenAI 返回「Too many tries / 请稍后再试」——多为短时间内对同一账号反复校验 OTP/频繁登录触发。账号没坏,等待较久后再试。" },
+  region: { label: "接码地区不可用", tone: "warning", hint: "接码地区取不到号/收不到码。地区经验会逐步累积避开坏区,或检查接码平台余额。" },
+  otp: { label: "邮箱验证码", tone: "warning", hint: "邮箱验证码超时或校验失败(非停用)。检查 SkyMail 投递;注意不要对同一 OTP 反复校验(会被 OpenAI 限流)。" },
+  network: { label: "代理 / 网络", tone: "warning", hint: "纯代理/网络/超时类。检查出口代理连通性。" },
+  retired: { label: "已退役跳过", tone: "neutral", hint: "死号的残留任务被执行前拦下跳过,属正常清理,不消耗资源。" },
+  oauth: { label: "OAuth 失败", tone: "warning", hint: "授权环节其它失败,按退避自动重试。" },
+  other: { label: "其它", tone: "neutral", hint: "未归类的失败,可展开「最近完成」看具体日志。" }
 };
 
 /**
@@ -1317,11 +1321,11 @@ function recoveryTooltip(acc: AccountRecordView): string {
 function formatFailureCategory(c: NonNullable<AccountRecordView["lastRecoveryFailureCategory"]>): string {
   switch (c) {
     case "account_unusable":
-      return "账号无救（OAuth 授权链终态缺失）";
+      return "账号已停用（OpenAI 确认删除/停用，已退役）";
     case "network_or_proxy":
-      return "网络/代理类（建议检查出口）";
+      return "出口/网络/consent 类（账号活着，不退役，换干净出口可救）";
     case "oauth_failed":
-      return "普通 OAuth 失败";
+      return "普通 OAuth 失败（重试中）";
   }
 }
 

@@ -1862,23 +1862,49 @@ function toAccountView(a: import("@mihomo-hive/schemas").AccountRecordInternal):
  * P6-05 失败原因聚合：把最近失败 job 的(已归因)错误消息归类计数，降序返回。
  * 让用户一眼看到"主要卡在哪"，不必逐条展开日志。
  */
-function aggregateFailureReasons(
-  messages: string[]
-): Array<{ key: "region" | "proxy" | "account_dead" | "oauth" | "retired" | "other"; count: number }> {
+type FailureReasonKey =
+  | "deactivated"
+  | "consent"
+  | "sentinel"
+  | "ratelimit"
+  | "region"
+  | "otp"
+  | "network"
+  | "retired"
+  | "oauth"
+  | "other";
+
+function aggregateFailureReasons(messages: string[]): Array<{ key: FailureReasonKey; count: number }> {
   const counts: Record<string, number> = {};
   for (const raw of messages) {
     const m = raw.toLowerCase();
-    let key: string;
-    if (m.includes("地区不可用") || m.includes("no_numbers") || m.includes("没有可用号码") || m.includes("接码")) {
+    let key: FailureReasonKey;
+    // 顺序：最确定/最具体在前。归因依据实测真实失败信号（2026-05-31）。
+    if (
+      // OpenAI 明确"账号已删除/停用"= 真死（email-otp/validate 403）。
+      m.includes("deleted or deactivated") || m.includes("deactivated") || m.includes("do not have an account") ||
+      m.includes("account_unusable") || m.includes("revoked") || m.includes("invalidated oauth")
+    ) {
+      key = "deactivated";
+    } else if (m.includes("too many") || m.includes("稍后再试") || m.includes("rate limit")) {
+      // OpenAI 限流（反复校验 OTP / 频繁登录触发），账号没坏，等待后可再试。
+      key = "ratelimit";
+    } else if (m.includes("地区不可用") || m.includes("no_numbers") || m.includes("没有可用号码") || m.includes("取不到号")) {
       key = "region";
+    } else if (m.includes("缺少目标") || m.includes("没有 code") || m.includes("consent")) {
+      // 活账号（过了 OpenAI OTP）但我方出口过不了 OAuth consent —— 非账号死，换干净出口可救。
+      key = "consent";
+    } else if (m.includes("sentinel") || m.includes("环境校验") || m.includes("提取失败") || m.includes("err_connection")) {
+      // 浏览器相位过 Cloudflare Sentinel 失败 / 浏览器到 OpenAI 连接被重置（多为出口问题）。
+      key = "sentinel";
+    } else if (m.includes("邮箱验证码") || m.includes("email-otp") || m.includes("email otp")) {
+      key = "otp";
     } else if (
       m.includes("代理") || m.includes("proxy") || m.includes("tls") || m.includes("curl") ||
-      m.includes("timed out") || m.includes("timeout") || m.includes("connection") || m.includes("sentinel") ||
-      m.includes("network") || m.includes("网络")
+      m.includes("timed out") || m.includes("timeout") || m.includes("connection") || m.includes("network") ||
+      m.includes("网络") || m.includes("fetch failed")
     ) {
-      key = "proxy";
-    } else if (m.includes("缺少目标") || m.includes("account_unusable") || m.includes("不可用")) {
-      key = "account_dead";
+      key = "network";
     } else if (m.includes("已退役") || m.includes("retired") || m.includes("跳过")) {
       key = "retired";
     } else if (m.includes("oauth")) {
@@ -1889,7 +1915,7 @@ function aggregateFailureReasons(
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return Object.entries(counts)
-    .map(([key, count]) => ({ key: key as "region" | "proxy" | "account_dead" | "oauth" | "retired" | "other", count }))
+    .map(([key, count]) => ({ key: key as FailureReasonKey, count }))
     .sort((a, b) => b.count - a.count);
 }
 

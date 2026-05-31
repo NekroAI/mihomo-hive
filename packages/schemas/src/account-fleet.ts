@@ -645,7 +645,18 @@ export const accountFleetStatusSnapshotSchema = z.object({
   recentFailureReasons: z
     .array(
       z.object({
-        key: z.enum(["region", "proxy", "account_dead", "oauth", "retired", "other"]),
+        key: z.enum([
+          "deactivated", // OpenAI 确认账号已删除/停用（真死）
+          "consent", // 活账号但出口过不了 OAuth consent（缺少目标 URL）
+          "sentinel", // 浏览器相位过 Sentinel 失败
+          "ratelimit", // OpenAI 限流（Too many tries）
+          "region", // 接码地区不可用
+          "otp", // 邮箱验证码超时/校验失败（非停用）
+          "network", // 纯代理/网络/超时
+          "retired", // 已退役死号的残留任务被跳过
+          "oauth", // 其它 OAuth 失败
+          "other"
+        ]),
         count: z.number().int().nonnegative()
       })
     )
