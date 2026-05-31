@@ -1539,8 +1539,7 @@ export const appRouter = t.router({
       setAllOpsEnabled: protectedProcedure
         .input(z.object({ enabled: z.boolean(), onlyNonActive: z.boolean().default(false) }))
         .mutation(({ ctx, input }) => {
-          const changed = ctx.repo.setAllOpsEnabled(input.enabled, { onlyNonActive: input.onlyNonActive });
-          return { changed };
+          return ctx.repo.setAllOpsEnabled(input.enabled, { onlyNonActive: input.onlyNonActive });
         }),
       /** 手动入队 codex_login 修复 job。要求账号已有 phone+password。 */
       enqueueRecoverLogin: protectedProcedure

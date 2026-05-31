@@ -115,6 +115,11 @@ export function startAccountJobsWorker(options: AccountJobsWorkerOptions): Accou
         console.log(`AccountJobsWorker: 删除已退役账号 ${job.accountId} 的 stale ${job.kind} 任务（执行前拦截）。`);
         return true;
       }
+      // 运维已暂停的账号：执行前拦截删除残留任务(防 disable 与入队竞态)，不占串行槽位。
+      if (acc && acc.opsEnabled === false) {
+        repo.deleteAccountJob(job.id);
+        return true;
+      }
     }
     // 抢占式：再次检查后才标 running，避免重复消费
     running++;

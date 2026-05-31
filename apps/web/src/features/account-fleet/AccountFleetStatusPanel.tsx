@@ -892,19 +892,19 @@ function RegisterControl(props: { unitCostUsd: number }) {
           size="sm"
           variant="danger"
           loading={stopAll.isPending}
-          title="把所有非 active 账号(死号/恢复中)的运维开关关掉,不再分配任何自动任务。用于隔离实验:停掉现有账号、只让新注册账号跑。active 正常账号不动。"
-          onClick={() => stopAll.mutate({ enabled: false, onlyNonActive: true }, { onSettled: () => setConfirmStop(false) })}
+          title="把所有现有账号的运维关掉并清掉它们已排队的任务,彻底隔离。之后用每行的'已暂停→运维开'按钮把少量测试账号开回来,或注册新号(新号默认开)。"
+          onClick={() => stopAll.mutate({ enabled: false, onlyNonActive: false }, { onSettled: () => setConfirmStop(false) })}
         >
-          确认停掉现有账号?
+          确认停掉全部?
         </Button>
       ) : (
         <Button
           size="sm"
           variant="ghost"
-          title="停掉所有非 active 账号(死号/恢复中)的自动化运维,隔离实验用。"
+          title="停掉所有现有账号的自动化运维并清掉已排队任务(隔离实验用)。之后手动开回少量做测试。"
           onClick={() => setConfirmStop(true)}
         >
-          停掉现有账号
+          停掉全部账号
         </Button>
       )}
     </span>

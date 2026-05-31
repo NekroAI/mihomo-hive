@@ -1141,21 +1141,34 @@ export class HiveRepository {
     return this.getAccountById(id);
   }
 
-  /** 单账号设置运维开关。返回更新后的记录。 */
+  /** 单账号设置运维开关。关闭时同时清掉该账号已排队的任务(不只是停新分配)。 */
   setAccountOpsEnabled(id: string, enabled: boolean): AccountRecordInternal | undefined {
-    return this.patchAccount(id, { opsEnabled: enabled });
+    const updated = this.patchAccount(id, { opsEnabled: enabled });
+    if (updated && !enabled) this.cancelQueuedJobsForAccount(id, "运维已暂停");
+    return updated;
   }
 
   /**
-   * 批量设置运维开关。onlyRetiredOrRecovering=true 时只动"非 active"账号(典型用法:
-   * 停掉所有现有死号/恢复中账号、保留正常服务的 active),否则动全部。返回受影响行数。
+   * 批量设置运维开关。onlyNonActive=true 只动非 active 账号,否则动全部。
+   * 关闭时**同时删除这些账号已排队的 job**(清掉已分配任务,彻底隔离)。返回 {accounts, cancelledJobs}。
    */
-  setAllOpsEnabled(enabled: boolean, opts?: { onlyNonActive?: boolean }): number {
+  setAllOpsEnabled(enabled: boolean, opts?: { onlyNonActive?: boolean }): { accounts: number; cancelledJobs: number } {
     const now = new Date().toISOString();
     const where = opts?.onlyNonActive ? "WHERE intent != 'active'" : "";
-    return this.sqlite
+    const accounts = this.sqlite
       .prepare(`UPDATE accounts SET ops_enabled = ?, updated_at = ? ${where}`)
       .run(enabled ? 1 : 0, now).changes;
+    let cancelledJobs = 0;
+    if (!enabled) {
+      // 删除所有"运维已关闭"账号的 queued job（已分配但还没跑的任务一并清掉）。
+      cancelledJobs = this.sqlite
+        .prepare(
+          "DELETE FROM account_jobs WHERE status = 'queued' AND account_id IN " +
+            "(SELECT id FROM accounts WHERE ops_enabled = 0)"
+        )
+        .run().changes;
+    }
+    return { accounts, cancelledJobs };
   }
 
   // —— Account Jobs ——
