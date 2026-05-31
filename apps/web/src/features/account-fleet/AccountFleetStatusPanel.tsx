@@ -521,7 +521,10 @@ function AccountMatrix(props: { accounts: AccountRecordView[]; lastTick: Account
                   )}
                 </td>
                 <td>
-                  <OpsToggle acc={acc} />
+                  <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+                    <OpsToggle acc={acc} />
+                    <TestLoginButton acc={acc} />
+                  </span>
                 </td>
               </tr>
               );
@@ -565,6 +568,25 @@ function OpsToggle(props: { acc: AccountRecordView }) {
       onClick={() => m.mutate({ accountId: props.acc.id, enabled: !on })}
     >
       {on ? "运维开" : "已暂停"}
+    </Button>
+  );
+}
+
+/** 手动触发一次 codex_login(测试/实验用,要求账号有 phone+password)。 */
+function TestLoginButton(props: { acc: AccountRecordView }) {
+  const utils = trpc.useUtils();
+  const m = trpc.accountFleet.actions.enqueueRecoverLogin.useMutation({
+    onSuccess: () => void utils.accountFleet.status.invalidate()
+  });
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      loading={m.isPending}
+      title="立刻给该账号入队一次 codex_login(测试登录闭环/抓取 step-up 结构;要求账号有手机号+密码)。"
+      onClick={() => m.mutate({ accountId: props.acc.id })}
+    >
+      测试登录
     </Button>
   );
 }
